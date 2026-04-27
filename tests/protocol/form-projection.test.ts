@@ -2,10 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { FormProjection } from '../../src/protocol/form-state.js';
 import type { FormState } from '../../src/protocol/form-state.js';
 import type { BCEvent } from '../../src/protocol/types.js';
+import { buildFormTree } from '../../src/protocol/form-tree-builder.js';
 
 function makeForm(overrides: Partial<FormState> = {}): FormState {
+  const root = buildFormTree({ t: 'lf', ServerId: 'f1', PageType: 0, Children: [] });
   return {
     formId: 'f1',
+    root,
+    rows: new Map(),
     controlTree: [],
     repeaters: new Map(),
     actions: [],

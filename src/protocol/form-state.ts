@@ -3,10 +3,20 @@ import type {
   ControlField, RepeaterState, RepeaterRow, ActionInfo, ControlContainerType,
   BCEvent, DataLoadedEvent, PropertyChangedEvent, BookmarkChangedEvent, TabGroup,
 } from './types.js';
+import type { FormNode } from './form-node.js';
+import { buildFormTree } from './form-tree-builder.js';
 
 export interface FormState {
   readonly formId: string;
   readonly parentFormId?: string;
+  /** Reactive control tree — mutated by FormProjection.apply via tree mutator.
+   * Source of truth for fields/actions/tabs/repeaters/groupVisibility (computed
+   * via form-views.ts). */
+  readonly root: FormNode;
+  /** Repeater rows keyed by repeater controlPath. Rows arrive via DataLoaded
+   * events and don't fit the publish-then-mutate tree model. */
+  readonly rows: ReadonlyMap<string, readonly RepeaterRow[]>;
+  // Legacy flat fields — coexist during migration. Removed in Phase 7.
   readonly controlTree: ControlField[];
   readonly tabs?: TabGroup[];
   readonly repeaters: ReadonlyMap<string, RepeaterState>;
@@ -36,9 +46,12 @@ export function resolveRepeater(form: FormState, controlPath?: string): Repeater
 export class FormProjection {
   /** Creates an empty FormState for the given formId. */
   createInitial(formId: string, parentFormId?: string): FormState {
+    const root = buildFormTree({ t: 'lf', ServerId: formId, Children: [], PageType: -1 });
     return {
       formId,
       parentFormId,
+      root,
+      rows: new Map(),
       controlTree: [],
       repeaters: new Map(),
       actions: [],

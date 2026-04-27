@@ -6,6 +6,20 @@ import type { PageContext } from '../../src/protocol/page-context.js';
 import type { FormState } from '../../src/protocol/form-state.js';
 import { PageContextRepository } from '../../src/protocol/page-context-repo.js';
 import type { BCEvent } from '../../src/protocol/types.js';
+import { buildFormTree } from '../../src/protocol/form-tree-builder.js';
+
+function makeFormState(formId: string): FormState {
+  return {
+    formId,
+    root: buildFormTree({ t: 'lf', ServerId: formId, PageType: 0, Children: [] }),
+    rows: new Map(),
+    controlTree: [],
+    repeaters: new Map(),
+    actions: [],
+    filterControlPath: null,
+    groupVisibility: new Map(),
+  };
+}
 
 function makePageContext(
   sections: Map<string, SectionDescriptor> = new Map(),
@@ -70,9 +84,7 @@ describe('SectionResolver', () => {
 describe('resolveSection', () => {
   it('resolves section by id', () => {
     const headerSection: SectionDescriptor = { sectionId: 'header', kind: 'header', caption: 'Header', formId: 'root', valid: true };
-    const rootForm: FormState = {
-      formId: 'root', controlTree: [], repeaters: new Map(), actions: [], filterControlPath: null,
-    };
+    const rootForm = makeFormState('root');
     const ctx = makePageContext(
       new Map([['header', headerSection]]),
       new Map([['root', rootForm]]),
@@ -96,9 +108,7 @@ describe('resolveSection', () => {
 
   it('defaults to header when no sectionId given', () => {
     const headerSection: SectionDescriptor = { sectionId: 'header', kind: 'header', caption: 'Header', formId: 'root', valid: true };
-    const rootForm: FormState = {
-      formId: 'root', controlTree: [], repeaters: new Map(), actions: [], filterControlPath: null,
-    };
+    const rootForm = makeFormState('root');
     const ctx = makePageContext(
       new Map([['header', headerSection]]),
       new Map([['root', rootForm]]),
@@ -110,12 +120,8 @@ describe('resolveSection', () => {
   it('returns error for stale (invalid) section', () => {
     const headerSection: SectionDescriptor = { sectionId: 'header', kind: 'header', caption: 'Header', formId: 'root', valid: true };
     const linesSection: SectionDescriptor = { sectionId: 'lines', kind: 'lines', caption: 'Lines', formId: 'child1', valid: false };
-    const rootForm: FormState = {
-      formId: 'root', controlTree: [], repeaters: new Map(), actions: [], filterControlPath: null,
-    };
-    const childForm: FormState = {
-      formId: 'child1', controlTree: [], repeaters: new Map(), actions: [], filterControlPath: null,
-    };
+    const rootForm = makeFormState('root');
+    const childForm = makeFormState('child1');
     const ctx = makePageContext(
       new Map([['header', headerSection], ['lines', linesSection]]),
       new Map([['root', rootForm], ['child1', childForm]]),
@@ -134,9 +140,7 @@ describe('resolveSection', () => {
   it('valid sections still resolve normally', () => {
     const headerSection: SectionDescriptor = { sectionId: 'header', kind: 'header', caption: 'Header', formId: 'root', valid: true };
     const linesSection: SectionDescriptor = { sectionId: 'lines', kind: 'lines', caption: 'Lines', formId: 'child1', valid: false };
-    const rootForm: FormState = {
-      formId: 'root', controlTree: [], repeaters: new Map(), actions: [], filterControlPath: null,
-    };
+    const rootForm = makeFormState('root');
     const ctx = makePageContext(
       new Map([['header', headerSection], ['lines', linesSection]]),
       new Map([['root', rootForm]]),
