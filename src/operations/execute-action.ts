@@ -6,6 +6,7 @@ import type { ControlField } from '../protocol/types.js';
 import { resolveSection } from '../protocol/section-resolver.js';
 import { detectChangedSections, detectDialogs } from '../protocol/mutation-result.js';
 import { isEffectivelyVisible } from '../protocol/visibility.js';
+import { fields as treeFields, groupVisibility as treeGroupVisibility } from '../protocol/form-views.js';
 
 export interface ExecuteActionInput {
   pageContextId: string;
@@ -38,11 +39,11 @@ export class ExecuteActionOperation {
       if (ar.updatedState) {
         const resolved = resolveSection(ar.updatedState, 'header');
         if (!('error' in resolved)) {
-          const formRoot = resolved.form.root;
-          const groupVis = resolved.form.groupVisibility;
-          updatedFields = resolved.form.controlTree
-            .filter(f => f.caption && isEffectivelyVisible(formRoot, f.controlPath, groupVis, ar.updatedState!.wizardState))
-            .map(f => ({ name: f.caption, value: f.stringValue }));
+          const root = resolved.form.root;
+          const groupVis = treeGroupVisibility(root);
+          updatedFields = treeFields(root)
+            .filter(f => f.properties.caption && isEffectivelyVisible(root, f.controlPath, groupVis, ar.updatedState!.wizardState))
+            .map(f => ({ name: f.properties.caption!, value: f.properties.stringValue }));
         }
       }
 
