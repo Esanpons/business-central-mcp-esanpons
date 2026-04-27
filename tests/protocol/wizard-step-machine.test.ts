@@ -4,6 +4,9 @@ import { parseControlTree } from '../../src/protocol/control-tree-parser.js';
 import { PageContextRepository } from '../../src/protocol/page-context-repo.js';
 import { isEffectivelyVisible } from '../../src/protocol/visibility.js';
 import type { BCEvent } from '../../src/protocol/types.js';
+import {
+  fields as treeFields, groupVisibility as treeGroupVisibility,
+} from '../../src/protocol/form-views.js';
 
 function loadWizardTree(): unknown {
   return JSON.parse(readFileSync('tests/recordings/cdo-wizard-page6175295-tree.json', 'utf8'));
@@ -80,32 +83,32 @@ describe('PageContextRepository.advanceWizardStep', () => {
   it('advances groupVisibility so only the new step is visible', () => {
     const { repo, pcId } = buildWizardPage();
     let ctx = repo.get(pcId)!;
-    let root = ctx.forms.get('F1')!;
+    let rootForm = ctx.forms.get('F1')!;
 
     // Initially: c[3] visible, c[4]/c[5] hidden
-    const welcomeField = root.controlTree.find(f => f.caption === 'WelcomeField')!;
-    const step0Field = root.controlTree.find(f => f.caption === 'Step0Field')!;
-    const step1Field = root.controlTree.find(f => f.caption === 'Step1Field')!;
-    expect(isEffectivelyVisible(root.root, welcomeField.controlPath, root.groupVisibility)).toBe(true);
-    expect(isEffectivelyVisible(root.root, step0Field.controlPath, root.groupVisibility)).toBe(false);
-    expect(isEffectivelyVisible(root.root, step1Field.controlPath, root.groupVisibility)).toBe(false);
+    const welcomeField = treeFields(rootForm.root).find(f => f.properties.caption === 'WelcomeField')!;
+    const step0Field = treeFields(rootForm.root).find(f => f.properties.caption === 'Step0Field')!;
+    const step1Field = treeFields(rootForm.root).find(f => f.properties.caption === 'Step1Field')!;
+    expect(isEffectivelyVisible(rootForm.root, welcomeField.controlPath, treeGroupVisibility(rootForm.root))).toBe(true);
+    expect(isEffectivelyVisible(rootForm.root, step0Field.controlPath, treeGroupVisibility(rootForm.root))).toBe(false);
+    expect(isEffectivelyVisible(rootForm.root, step1Field.controlPath, treeGroupVisibility(rootForm.root))).toBe(false);
 
     // Advance to step 1 (Step0 group)
     repo.advanceWizardStep(pcId, 1);
     ctx = repo.get(pcId)!;
-    root = ctx.forms.get('F1')!;
-    expect(isEffectivelyVisible(root.root, welcomeField.controlPath, root.groupVisibility)).toBe(false);
-    expect(isEffectivelyVisible(root.root, step0Field.controlPath, root.groupVisibility)).toBe(true);
-    expect(isEffectivelyVisible(root.root, step1Field.controlPath, root.groupVisibility)).toBe(false);
+    rootForm = ctx.forms.get('F1')!;
+    expect(isEffectivelyVisible(rootForm.root, welcomeField.controlPath, treeGroupVisibility(rootForm.root))).toBe(false);
+    expect(isEffectivelyVisible(rootForm.root, step0Field.controlPath, treeGroupVisibility(rootForm.root))).toBe(true);
+    expect(isEffectivelyVisible(rootForm.root, step1Field.controlPath, treeGroupVisibility(rootForm.root))).toBe(false);
     expect(ctx.wizardState!.currentStepIndex).toBe(1);
 
     // Advance to step 2 (Step1 group)
     repo.advanceWizardStep(pcId, 2);
     ctx = repo.get(pcId)!;
-    root = ctx.forms.get('F1')!;
-    expect(isEffectivelyVisible(root.root, welcomeField.controlPath, root.groupVisibility)).toBe(false);
-    expect(isEffectivelyVisible(root.root, step0Field.controlPath, root.groupVisibility)).toBe(false);
-    expect(isEffectivelyVisible(root.root, step1Field.controlPath, root.groupVisibility)).toBe(true);
+    rootForm = ctx.forms.get('F1')!;
+    expect(isEffectivelyVisible(rootForm.root, welcomeField.controlPath, treeGroupVisibility(rootForm.root))).toBe(false);
+    expect(isEffectivelyVisible(rootForm.root, step0Field.controlPath, treeGroupVisibility(rootForm.root))).toBe(false);
+    expect(isEffectivelyVisible(rootForm.root, step1Field.controlPath, treeGroupVisibility(rootForm.root))).toBe(true);
     expect(ctx.wizardState!.currentStepIndex).toBe(2);
 
     // Step backwards
@@ -136,6 +139,7 @@ describe('FormProjection — gc PropertyChanged routing', () => {
     // track it. The gc is the first child → server:c[0].
     const { FormProjection } = await import('../../src/protocol/form-state.js');
     const { buildFormTree } = await import('../../src/protocol/form-tree-builder.js');
+    const { groupVisibility } = await import('../../src/protocol/form-views.js');
     const p = new FormProjection();
     const root = buildFormTree({
       t: 'lf', ServerId: 'F1', PageType: 0,
@@ -151,7 +155,7 @@ describe('FormProjection — gc PropertyChanged routing', () => {
       changes: { Visible: false },
     } as BCEvent);
 
-    expect(updated.groupVisibility.get('server:c[0]')).toBe(false);
+    expect(groupVisibility(updated.root).get('server:c[0]')).toBe(false);
   });
 
   it('leaves groupVisibility untouched when controlPath is not tracked', async () => {
@@ -159,6 +163,7 @@ describe('FormProjection — gc PropertyChanged routing', () => {
     // the tree) is silently dropped — the gc at c[0] retains its initial value.
     const { FormProjection } = await import('../../src/protocol/form-state.js');
     const { buildFormTree } = await import('../../src/protocol/form-tree-builder.js');
+    const { groupVisibility } = await import('../../src/protocol/form-views.js');
     const p = new FormProjection();
     const root = buildFormTree({
       t: 'lf', ServerId: 'F1', PageType: 0,
@@ -175,8 +180,8 @@ describe('FormProjection — gc PropertyChanged routing', () => {
     } as BCEvent);
 
     // gc at c[0] retains its initial visible:true value
-    expect(updated.groupVisibility.get('server:c[0]')).toBe(true);
+    expect(groupVisibility(updated.root).get('server:c[0]')).toBe(true);
     // the unknown path is not added to groupVisibility
-    expect(updated.groupVisibility.has('server:c[42]')).toBe(false);
+    expect(groupVisibility(updated.root).has('server:c[42]')).toBe(false);
   });
 });

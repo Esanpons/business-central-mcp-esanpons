@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { PageContextRepository } from '../../src/protocol/page-context-repo.js';
 import type { BCEvent } from '../../src/protocol/types.js';
+import {
+  actions as treeActions,
+} from '../../src/protocol/form-views.js';
 
 describe('PageContextRepository — modal-rooted pages', () => {
   const wizardTree = {
@@ -37,8 +40,19 @@ describe('PageContextRepository — modal-rooted pages', () => {
     expect(ctx.pageType).toBe('NavigatePage');
     expect(ctx.caption).toBe('Sample Wizard');
 
-    const root = ctx.forms.get('F1')!;
-    const navs = root.actions.map(a => a.wizardNav).filter(Boolean);
+    const rootForm = ctx.forms.get('F1')!;
+    const actionNodes = treeActions(rootForm.root);
+    // classifyWizardNav logic mirrors form-state.ts actionNodeToActionInfo
+    const navs = actionNodes.map(a => {
+      const id = a.iconIdentifier;
+      if (id) {
+        if (/PreviousRecord/i.test(id)) return 'back';
+        if (/NextRecord|Action_Start/i.test(id)) return 'next';
+        if (/Approve/i.test(id)) return 'finish';
+      }
+      if (a.systemAction === 310 || a.systemAction === 320 || a.systemAction === 350) return 'cancel';
+      return undefined;
+    }).filter(Boolean);
     expect(navs).toEqual(expect.arrayContaining(['back', 'next', 'finish', 'cancel']));
   });
 
@@ -66,8 +80,8 @@ describe('PageContextRepository — modal-rooted pages', () => {
     expect(ctx.pageType).toBe('Card');
     expect(ctx.dialogs.length).toBe(1);
     expect(ctx.dialogs[0]!.formId).toBe('dialogForm');
-    // Root form is unchanged
-    expect(ctx.forms.get('rootForm')!.actions.length).toBe(0);
+    // Root form is unchanged — no actions
+    expect(treeActions(ctx.forms.get('rootForm')!.root)).toHaveLength(0);
   });
 
   it('isModal defaults to false when create() is called without options', () => {

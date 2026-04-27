@@ -13,11 +13,6 @@ function makeFormState(formId: string): FormState {
     formId,
     root: buildFormTree({ t: 'lf', ServerId: formId, PageType: 0, Children: [] }),
     rows: new Map(),
-    controlTree: [],
-    repeaters: new Map(),
-    actions: [],
-    filterControlPath: null,
-    groupVisibility: new Map(),
   };
 }
 

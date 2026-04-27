@@ -326,6 +326,10 @@ export interface DialogInfo {
 
 import type { PageContext } from './page-context.js';
 import type { FormState } from './form-state.js';
+import {
+  fields as treeFields, actions as treeActions,
+  repeaters as treeRepeaters, filterControlPath as treeFilter,
+} from './form-views.js';
 
 /**
  * DEPRECATED: Use PageContext for new code.
@@ -338,10 +342,29 @@ export function derivePageState(ctx: PageContext): PageState {
     pageContextId: ctx.pageContextId,
     formId: ctx.rootFormId,
     pageType: ctx.pageType,
-    controlTree: rootForm?.controlTree ?? [],
+    controlTree: rootForm ? treeFields(rootForm.root).map(f => ({
+      controlPath: f.controlPath,
+      caption: f.properties.caption ?? '',
+      type: f.type,
+      editable: f.properties.editable ?? false,
+      visible: f.properties.visible ?? true,
+      stringValue: f.properties.stringValue,
+      value: f.properties.objectValue ?? f.properties.stringValue,
+      columnBinderName: f.columnBinder?.name,
+      ancestorGroupPaths: [],
+    })) : [],
     repeater: rep,
-    filterControlPath: rootForm?.filterControlPath ?? null,
-    actions: rootForm?.actions ?? [],
+    filterControlPath: rootForm ? treeFilter(rootForm.root) : null,
+    actions: rootForm ? treeActions(rootForm.root).map(a => ({
+      controlPath: a.controlPath,
+      caption: a.properties.caption ?? '',
+      systemAction: a.systemAction,
+      enabled: a.properties.enabled ?? true,
+      visible: a.properties.visible ?? true,
+      isLineScoped: a.isLineScoped,
+      iconIdentifier: a.iconIdentifier,
+      ancestorGroupPaths: [],
+    })) : [],
     childForms: Array.from(ctx.forms.entries())
       .filter(([fId]) => fId !== ctx.rootFormId)
       .map(([fId]) => ({ formId: fId, caption: '' })),
@@ -351,6 +374,21 @@ export function derivePageState(ctx: PageContext): PageState {
 }
 
 function primaryRepeaterFromCtx(form: FormState): RepeaterState | null {
-  const first = form.repeaters.values().next();
-  return first.done ? null : first.value;
+  const first = treeRepeaters(form.root).values().next();
+  if (first.done) return null;
+  const node = first.value;
+  const rows = form.rows.get(node.controlPath) ?? [];
+  return {
+    controlPath: node.controlPath,
+    columns: node.columns.map(c => ({
+      controlPath: c.controlPath,
+      caption: c.properties.caption ?? '',
+      type: 'rcc',
+      columnBinderName: c.columnBinder?.name,
+      columnBinderPath: c.columnBinder?.path,
+    })),
+    rows: [...rows],
+    totalRowCount: node.properties.totalRowCount ?? null,
+    currentBookmark: node.properties.bookmark ?? null,
+  };
 }

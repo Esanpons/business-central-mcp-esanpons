@@ -4,10 +4,13 @@ import type { PageContext } from './page-context.js';
 import type { FormState } from './form-state.js';
 import { FormProjection } from './form-state.js';
 import { SectionResolver } from './section-resolver.js';
-import { parseControlTree } from './control-tree-parser.js';
 import type { DiscoveredChildForm } from './control-tree-parser.js';
 import { buildFormTree } from './form-tree-builder.js';
-import type { FormNode } from './form-node.js';
+import { isLogicalFormNode, type FormNode } from './form-node.js';
+import {
+  fields as treeFields, repeaters as treeRepeaters,
+} from './form-views.js';
+import { applyPropertyChange } from './form-tree-mutator.js';
 
 /** Build a FormNode tree from a raw control tree, returning null if the input is absent or lacks the lf wrapper. */
 function tryBuildFormTree(raw: unknown): FormNode | null {
@@ -73,15 +76,17 @@ export class PageContextRepository {
     if (newIndex < 0 || newIndex >= ws.stepPaths.length) return;
     if (newIndex === ws.currentStepIndex) return;
 
-    const root = page.forms.get(page.rootFormId);
-    if (!root) return;
+    const rootForm = page.forms.get(page.rootFormId);
+    if (!rootForm) return;
 
-    const newGroupVisibility = new Map(root.groupVisibility);
+    // Apply wizard step visibility directly to the tree: set visible=true on the
+    // active step group and visible=false on all others.
+    let newTreeRoot = rootForm.root;
     for (let i = 0; i < ws.stepPaths.length; i++) {
-      newGroupVisibility.set(ws.stepPaths[i]!, i === newIndex);
+      newTreeRoot = applyPropertyChange(newTreeRoot, ws.stepPaths[i]!, { visible: i === newIndex });
     }
 
-    const updatedRoot: FormState = { ...root, groupVisibility: newGroupVisibility };
+    const updatedRoot: FormState = { ...rootForm, root: newTreeRoot };
     const forms = new Map(page.forms);
     forms.set(page.rootFormId, updatedRoot);
 
@@ -215,18 +220,10 @@ export class PageContextRepository {
 
     // Create FormState for child
     const childForm = this.formProjection.createInitial(event.formId, event.parentFormId);
-    // Parse control tree to populate fields/repeaters/actions
-    const parsed = parseControlTree(event.controlTree);
     const tree = tryBuildFormTree(event.controlTree) ?? childForm.root;
     const withData: FormState = {
       ...childForm,
       root: tree,
-      controlTree: parsed.fields,
-      tabs: parsed.tabs,
-      repeaters: parsed.repeaters,
-      actions: parsed.actions,
-      filterControlPath: parsed.filterControlPath,
-      groupVisibility: new Map(parsed.groupVisibility),
     };
 
     // Derive section
@@ -270,27 +267,14 @@ export class PageContextRepository {
     const page = this.pages.get(pcId);
     if (!page) return;
 
-    const parsed = parseControlTree(controlTree);
     const existingForm = page.forms.get(formId);
     const base = existingForm ?? this.formProjection.createInitial(formId);
     const tree = tryBuildFormTree(controlTree) ?? base.root;
-    const updated: FormState = {
-      ...base,
-      root: tree,
-      controlTree: parsed.fields.length > 0 ? parsed.fields : (existingForm?.controlTree ?? []),
-      tabs: parsed.tabs ?? existingForm?.tabs,
-      repeaters: parsed.repeaters.size > 0 ? parsed.repeaters : (existingForm?.repeaters ?? new Map()),
-      actions: parsed.actions.length > 0 ? parsed.actions : (existingForm?.actions ?? []),
-      filterControlPath: parsed.filterControlPath ?? existingForm?.filterControlPath ?? null,
-      // Replace groupVisibility wholesale on a re-parse — the new tree is the
-      // authoritative source. Existing per-step overrides from
-      // advanceWizardStep are intentionally NOT preserved here because a
-      // root-tree replay only happens on FormCreated/DialogOpened, which
-      // implies BC has rebuilt the form from scratch.
-      groupVisibility: parsed.groupVisibility.size > 0
-        ? new Map(parsed.groupVisibility)
-        : (existingForm?.groupVisibility ?? new Map()),
-    };
+    const updated: FormState = { ...base, root: tree };
+
+    // Update pageType + caption from the new tree's root.
+    const updatedPageType = isLogicalFormNode(tree) && tree.pageType !== 'Unknown' ? tree.pageType : page.pageType;
+    const updatedCaption = isLogicalFormNode(tree) ? (tree.properties.caption || page.caption) : page.caption;
 
     const forms = new Map(page.forms);
     forms.set(formId, updated);
@@ -298,8 +282,8 @@ export class PageContextRepository {
     this.pages.set(pcId, {
       ...page,
       forms,
-      pageType: parsed.pageType !== 'Unknown' ? parsed.pageType : page.pageType,
-      caption: parsed.caption || page.caption,
+      pageType: updatedPageType,
+      caption: updatedCaption,
     });
   }
 
@@ -338,7 +322,7 @@ export class PageContextRepository {
   private findChildFormByRepeaterPath(page: PageContext, excludeFormId: string, controlPath: string): FormState | undefined {
     for (const [fId, form] of page.forms) {
       if (fId === excludeFormId) continue;
-      if (form.repeaters.has(controlPath)) return form;
+      if (treeRepeaters(form.root).has(controlPath)) return form;
     }
     return undefined;
   }
@@ -349,7 +333,7 @@ export class PageContextRepository {
       if (section.kind !== 'factbox') continue;
       const form = page.forms.get(section.formId);
       if (!form) continue;
-      if (form.controlTree.some(f => f.controlPath === controlPath)) return form;
+      if (treeFields(form.root).some(f => f.controlPath === controlPath)) return form;
     }
     return undefined;
   }
@@ -362,15 +346,11 @@ export class PageContextRepository {
     // Don't re-register if already known
     if (page.forms.has(child.serverId)) return;
 
-    // Parse the child form's control tree
-    const parsed = parseControlTree(child.controlTree);
+    // Build the child form's state from the tree
+    const tree = tryBuildFormTree(child.controlTree);
     const childForm: FormState = {
       ...this.formProjection.createInitial(child.serverId, page.rootFormId),
-      controlTree: parsed.fields,
-      tabs: parsed.tabs,
-      repeaters: parsed.repeaters,
-      actions: parsed.actions,
-      filterControlPath: parsed.filterControlPath,
+      ...(tree ? { root: tree } : {}),
     };
 
     // Derive section: use IsSubForm to distinguish lines from factboxes

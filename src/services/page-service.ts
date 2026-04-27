@@ -8,6 +8,7 @@ import type {
   BCEvent, OpenFormInteraction, LoadFormInteraction, CloseFormInteraction, InvokeActionInteraction, SetCurrentRowInteraction,
 } from '../protocol/types.js';
 import { parseControlTree, type ParsedControlTree } from '../protocol/control-tree-parser.js';
+import { repeaters as treeRepeaters } from '../protocol/form-views.js';
 // DiscoveredChildForm is used by repo.registerDiscoveredChildForm, not directly here
 import type { Logger } from '../core/logger.js';
 import type { SectionKind } from '../protocol/section-resolver.js';
@@ -217,14 +218,15 @@ export class PageService {
     const rootForm = ctx.forms.get(ctx.rootFormId);
     if (!rootForm) return;
 
-    for (const repeater of rootForm.repeaters.values()) {
-      const firstRow = repeater.rows[0];
+    for (const [repPath] of treeRepeaters(rootForm.root)) {
+      const repRows = rootForm.rows.get(repPath) ?? [];
+      const firstRow = repRows[0];
       if (!firstRow?.bookmark) continue;
 
       // Step 1: Select the first row to trigger factbox Query property change on the server.
       // The server-side WebLogicalFormObserver registers a "Query" change on child forms.
       const selectResult = await this.session.invoke(
-        { type: 'SetCurrentRow', formId: ctx.rootFormId, controlPath: repeater.controlPath, key: firstRow.bookmark } as SetCurrentRowInteraction,
+        { type: 'SetCurrentRow', formId: ctx.rootFormId, controlPath: repPath, key: firstRow.bookmark } as SetCurrentRowInteraction,
         (event) => event.type === 'InvokeCompleted',
       );
       if (isOk(selectResult)) {
