@@ -24,8 +24,16 @@ describe('decompressPayload', () => {
 });
 
 describe('decompressIfNeeded', () => {
-  it('passes through non-compressed messages', () => {
-    const msg = { id: 1, result: [{ handlerType: 'test' }] };
+  it('unwraps uncompressed result array (Continia DemoPortal proxies BC without gzip)', () => {
+    const handlers = [{ handlerType: 'test' }];
+    const msg = { id: 1, result: handlers };
+    const result = decompressIfNeeded(msg);
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) expect(result.value).toBe(handlers);
+  });
+
+  it('passes through messages without a result field', () => {
+    const msg = { method: 'Message', params: [] };
     const result = decompressIfNeeded(msg);
     expect(isOk(result)).toBe(true);
     if (isOk(result)) expect(result.value).toBe(msg);

@@ -29,5 +29,10 @@ export function decompressIfNeeded(message: unknown): Result<unknown, ProtocolEr
   if (typeof msg.compressedResult === 'string') return decompressPayload(msg.compressedResult);
   if (typeof msg.compressedData === 'string') return decompressPayload(msg.compressedData);
 
+  // Uncompressed JSON-RPC response: unwrap the result array so callers see the
+  // same handler-array shape they get from compressed responses. Continia
+  // DemoPortal's reverse proxy strips BC's gzip+base64 wrapping.
+  if (Array.isArray(msg.result)) return ok(msg.result);
+
   return ok(message);
 }
