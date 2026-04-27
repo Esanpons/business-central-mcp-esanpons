@@ -1,7 +1,10 @@
 // src/protocol/mutation-result.ts
 import type { BCEvent, DialogOpenedEvent, ControlField } from './types.js';
 import type { PageContext } from './page-context.js';
-import { parseControlTree } from './control-tree-parser.js';
+import { buildFormTree } from './form-tree-builder.js';
+import { fields as treeFields } from './form-views.js';
+import { ancestorGroupPaths } from './form-tree-walk.js';
+import type { FieldNode, FormNode } from './form-node.js';
 
 /**
  * Shared envelope returned by all mutating operations (write-data, execute-action,
@@ -51,6 +54,23 @@ export function detectChangedSections(
   return changedSections;
 }
 
+/** Map a FieldNode to the ControlField DTO expected by dialog callers. */
+function fieldNodeToControlField(root: FormNode, f: FieldNode): ControlField {
+  return {
+    controlPath: f.controlPath,
+    caption: f.properties.caption ?? '',
+    type: f.type,
+    editable: f.properties.editable ?? false,
+    visible: f.properties.visible ?? true,
+    stringValue: f.properties.stringValue,
+    value: f.properties.objectValue ?? f.properties.stringValue,
+    columnBinderName: f.columnBinder?.name,
+    ...(f.hasLookup ? { isLookup: true } : {}),
+    ...(f.properties.showMandatory ? { showMandatory: true } : {}),
+    ancestorGroupPaths: ancestorGroupPaths(root, f.controlPath),
+  };
+}
+
 /**
  * Extract dialog information from events. Tries to pull a human-readable
  * message from the dialog control tree (Caption or Message property).
@@ -59,15 +79,24 @@ export function detectDialogs(events: BCEvent[]): Array<{ formId: string; messag
   return events
     .filter((e): e is DialogOpenedEvent => e.type === 'DialogOpened')
     .map(e => {
-      const tree = e.controlTree as Record<string, unknown> | undefined;
-      const message = (tree?.Caption as string) || (tree?.Message as string) || undefined;
+      const raw = e.controlTree as Record<string, unknown> | undefined;
+      const message = (raw?.Caption as string) || (raw?.Message as string) || undefined;
 
-      // Parse the dialog's control tree to extract structured fields
+      // Build the dialog's FormNode tree to extract structured fields.
+      // Dialog controlTree nodes may arrive as a bare object (no `t` field) or
+      // as a proper `lf` LogicalForm node. Normalise to `lf` when absent so
+      // buildFormTree can process children in either case.
       let fields: ControlField[] | undefined;
-      if (tree) {
-        const parsed = parseControlTree(tree);
-        if (parsed.fields.length > 0) {
-          fields = parsed.fields;
+      if (raw && typeof raw.Children !== 'undefined') {
+        const lfNode = raw.t === 'lf' ? raw : { ...raw, t: 'lf' };
+        try {
+          const root = buildFormTree(lfNode);
+          const nodeFields = treeFields(root);
+          if (nodeFields.length > 0) {
+            fields = nodeFields.map(f => fieldNodeToControlField(root, f));
+          }
+        } catch {
+          // Non-fatal: dialog field extraction failure should not abort the operation
         }
       }
 

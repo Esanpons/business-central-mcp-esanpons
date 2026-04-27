@@ -227,5 +227,10 @@ function readProperties(obj: Record<string, unknown>): NodeProperties {
   if (typeof obj.TotalRowCount === 'number') p.totalRowCount = obj.TotalRowCount;
   if (typeof obj.Bookmark === 'string') p.bookmark = obj.Bookmark;
   if (typeof obj.HasFiltersApplied === 'boolean') p.hasFiltersApplied = obj.HasFiltersApplied;
+  // Record whether ExpressionProperties.Visible exists (wizard step detection).
+  const expr = obj.ExpressionProperties;
+  if (expr && typeof expr === 'object' && 'Visible' in (expr as Record<string, unknown>)) {
+    p.hasVisibleExpression = true;
+  }
   return p as NodeProperties;
 }

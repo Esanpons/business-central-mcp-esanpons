@@ -4,13 +4,25 @@ import type { PageContext } from './page-context.js';
 import type { FormState } from './form-state.js';
 import { FormProjection } from './form-state.js';
 import { SectionResolver } from './section-resolver.js';
-import type { DiscoveredChildForm } from './control-tree-parser.js';
 import { buildFormTree } from './form-tree-builder.js';
 import { isLogicalFormNode, type FormNode } from './form-node.js';
 import {
   fields as treeFields, repeaters as treeRepeaters,
 } from './form-views.js';
 import { applyPropertyChange } from './form-tree-mutator.js';
+
+/**
+ * Descriptor for a child form discovered inside a parent form's control tree
+ * (via fhc -> lf nodes). Used by `PageContextRepository.registerDiscoveredChildForm`
+ * to create a separate FormState for the child form.
+ */
+export interface DiscoveredChildForm {
+  readonly serverId: string;       // lf node's ServerId (used as formId)
+  readonly caption: string;
+  readonly controlTree: unknown;   // raw lf node, built into a FormState separately
+  readonly isSubForm: boolean;     // true for lines subpages
+  readonly isPart: boolean;        // true for factboxes and parts
+}
 
 /** Build a FormNode tree from a raw control tree, returning null if the input is absent or lacks the lf wrapper. */
 function tryBuildFormTree(raw: unknown): FormNode | null {

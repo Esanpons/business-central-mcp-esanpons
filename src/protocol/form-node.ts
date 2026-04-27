@@ -35,6 +35,15 @@ export interface NodeProperties {
   readonly totalRowCount?: number;
   readonly bookmark?: string;
   readonly hasFiltersApplied?: boolean;
+  /**
+   * True when the control's `ExpressionProperties` set includes `Visible`.
+   * BC emits this marker on group containers (gc) that have a computed Visible
+   * binding — typically wizard step gcs. Used to detect dynamic-step groups
+   * in NavigatePage / StandardDialog wizard flows.
+   *
+   * Reference: `LogicalControlSerializer.WriteExpressionProperty` (decompiled)
+   */
+  readonly hasVisibleExpression?: boolean;
 }
 
 interface NodeBase<T extends string> {

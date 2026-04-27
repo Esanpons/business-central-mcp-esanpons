@@ -1,44 +1,54 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { parseControlTree } from '../../src/protocol/control-tree-parser.js';
+import { buildFormTree } from '../../src/protocol/form-tree-builder.js';
 import { PageContextRepository } from '../../src/protocol/page-context-repo.js';
 import { isEffectivelyVisible } from '../../src/protocol/visibility.js';
 import type { BCEvent } from '../../src/protocol/types.js';
 import {
   fields as treeFields, groupVisibility as treeGroupVisibility,
 } from '../../src/protocol/form-views.js';
+import { ancestorGroupPaths } from '../../src/protocol/form-tree-walk.js';
+import { isGroupNode, isLogicalFormNode } from '../../src/protocol/form-node.js';
 
 function loadWizardTree(): unknown {
   return JSON.parse(readFileSync('tests/recordings/cdo-wizard-page6175295-tree.json', 'utf8'));
 }
 
-describe('parseControlTree — dynamic step detection', () => {
-  const parsed = parseControlTree(loadWizardTree());
+describe('buildFormTree — dynamic step detection', () => {
+  const tree = buildFormTree(loadWizardTree());
 
   it('records groupVisibility for every gc encountered', () => {
     // The Continia wizard has 11 top-level gcs (toolbar, banners, steps, action bar)
-    expect(parsed.groupVisibility.size).toBeGreaterThanOrEqual(7);
+    const gv = treeGroupVisibility(tree);
+    expect(gv.size).toBeGreaterThanOrEqual(7);
   });
 
-  it('flags top-level gcs with ExpressionProperties.Visible as dynamic steps', () => {
-    expect(parsed.dynamicSteps.length).toBeGreaterThanOrEqual(7);
+  it('flags top-level gcs with ExpressionProperties.Visible as dynamic steps (hasVisibleExpression)', () => {
+    if (!isLogicalFormNode(tree)) throw new Error('expected lf');
+    const dynamicSteps = tree.children.filter(
+      n => isGroupNode(n) && n.properties.hasVisibleExpression && /^Step/i.test(n.properties.designName ?? ''),
+    );
+    expect(dynamicSteps.length).toBeGreaterThanOrEqual(7);
     // Welcome step is initially visible; Step0..StepFinish hidden
-    const initiallyVisible = parsed.dynamicSteps.filter(s => s.initiallyVisible);
+    const initiallyVisible = dynamicSteps.filter(n => (n.properties.visible ?? true) === true);
     expect(initiallyVisible.length).toBe(1);
   });
 
   it('attaches ancestorGroupPaths to fields nested in step gcs', () => {
-    const fieldInsideStep = parsed.fields.find(f =>
-      f.ancestorGroupPaths.some(p => p.startsWith('server:c[')),
+    const fieldInsideStep = treeFields(tree).find(f =>
+      ancestorGroupPaths(tree, f.controlPath).some(p => p.startsWith('server:c[')),
     );
     expect(fieldInsideStep).toBeDefined();
-    expect(fieldInsideStep!.ancestorGroupPaths.length).toBeGreaterThan(0);
+    expect(ancestorGroupPaths(tree, fieldInsideStep!.controlPath).length).toBeGreaterThan(0);
   });
 
   it('does not flag toolbar/actionbar gcs as dynamic steps', () => {
     // Top-level children include MappingHint=TOOLBAR (idx 0) and ACTIONBAR (idx 10).
     // Neither has ExpressionProperties.Visible → must NOT appear in dynamicSteps.
-    const stepPaths = parsed.dynamicSteps.map(s => s.controlPath);
+    if (!isLogicalFormNode(tree)) throw new Error('expected lf');
+    const stepPaths = tree.children
+      .filter(n => isGroupNode(n) && n.properties.hasVisibleExpression && /^Step/i.test(n.properties.designName ?? ''))
+      .map(n => n.controlPath);
     expect(stepPaths).not.toContain('server:c[0]');  // TOOLBAR
     expect(stepPaths).not.toContain('server:c[10]'); // ACTIONBAR
   });

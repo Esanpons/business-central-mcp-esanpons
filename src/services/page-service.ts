@@ -7,9 +7,10 @@ import type { PageContext } from '../protocol/page-context.js';
 import type {
   BCEvent, OpenFormInteraction, LoadFormInteraction, CloseFormInteraction, InvokeActionInteraction, SetCurrentRowInteraction,
 } from '../protocol/types.js';
-import { parseControlTree, type ParsedControlTree } from '../protocol/control-tree-parser.js';
+import { buildFormTree } from '../protocol/form-tree-builder.js';
 import { repeaters as treeRepeaters } from '../protocol/form-views.js';
-// DiscoveredChildForm is used by repo.registerDiscoveredChildForm, not directly here
+import { walkTree } from '../protocol/form-tree-walk.js';
+import { isFormHostNode, isGroupNode, isLogicalFormNode } from '../protocol/form-node.js';
 import type { Logger } from '../core/logger.js';
 import type { SectionKind } from '../protocol/section-resolver.js';
 import type { WizardState } from '../protocol/types.js';
@@ -17,21 +18,41 @@ import type { WizardState } from '../protocol/types.js';
 /**
  * Recognise the NavigatePage / multi-step wizard pattern. Returns null for
  * pages that don't qualify — non-wizard PageType, fewer than two participating
- * step gcs, or no initially-visible step (parser malformation).
+ * step gcs, or no initially-visible step.
  *
- * The detection is anchored on the wire-published `ExpressionProperties.Visible`
- * membership flag, not on caption naming, so localisation and custom step names
- * don't break it.
+ * Detection is anchored on `ExpressionProperties.Visible` (stored as
+ * `node.properties.hasVisibleExpression` in the FormNode tree) AND
+ * `DesignName` starting with "Step" (stored as `node.properties.designName`).
+ * This mirrors the legacy `parseControlTree` wizard-step detection and the
+ * BC web client's own classification from
+ * `NavigatePageActionControlHelper.cs` (decompiled).
  */
-function buildWizardState(parsed: ParsedControlTree): WizardState | null {
-  if (parsed.dynamicSteps.length < 2) return null;
-  if (parsed.pageType !== 'NavigatePage' && parsed.pageType !== 'StandardDialog') return null;
+function buildWizardState(controlTree: unknown): WizardState | null {
+  if (!controlTree || typeof controlTree !== 'object') return null;
+  const raw = controlTree as Record<string, unknown>;
+  if (raw.t !== 'lf') return null;
 
-  const stepPaths = parsed.dynamicSteps.map(s => s.controlPath);
-  const initialIndex = parsed.dynamicSteps.findIndex(s => s.initiallyVisible);
+  const tree = buildFormTree(controlTree);
+  if (!isLogicalFormNode(tree)) return null;
+  if (tree.pageType !== 'NavigatePage' && tree.pageType !== 'StandardDialog') return null;
+
+  const dynamicSteps: Array<{ controlPath: string; initiallyVisible: boolean }> = [];
+  for (const child of tree.children) {
+    if (!isGroupNode(child)) continue;
+    if (!child.properties.hasVisibleExpression) continue;
+    const designName = child.properties.designName ?? '';
+    if (!/^Step/i.test(designName)) continue;
+    dynamicSteps.push({
+      controlPath: child.controlPath,
+      initiallyVisible: child.properties.visible ?? true,
+    });
+  }
+
+  if (dynamicSteps.length < 2) return null;
+  const initialIndex = dynamicSteps.findIndex(s => s.initiallyVisible);
   if (initialIndex < 0) return null;
 
-  return { stepPaths, currentStepIndex: initialIndex };
+  return { stepPaths: dynamicSteps.map(s => s.controlPath), currentStepIndex: initialIndex };
 }
 
 export interface ClosePageResult {
@@ -98,8 +119,7 @@ export class PageService {
     // (NavigatePage with ≥2 dynamic-visibility step gcs). The repo's
     // applyRootControlTree will re-parse the same tree internally; that's
     // fine — parsing is cheap and stateless.
-    const parsedRoot = parseControlTree(root.controlTree);
-    const wizardState = buildWizardState(parsedRoot);
+    const wizardState = buildWizardState(root.controlTree);
 
     // Create page context and apply all events. The repo recognises a
     // DialogOpened whose formId equals rootFormId and treats it as the root
@@ -135,12 +155,23 @@ export class PageService {
 
     // Source 2: Child forms embedded in root form's control tree as fhc -> lf nodes
     const rootFormCreated = openEvents.find(e => e.type === 'FormCreated' && e.formId === ctx.rootFormId);
-    if (rootFormCreated?.type === 'FormCreated') {
-      const parsed = parseControlTree(rootFormCreated.controlTree);
-      for (const child of parsed.childForms) {
-        this.repo.registerDiscoveredChildForm(pageContextId, child);
-        childFormIds.push(child.serverId);
-        this.logger.debug('page', `Discovered child form: ${child.serverId} (${child.caption}, subform=${child.isSubForm}, part=${child.isPart})`);
+    if (rootFormCreated?.type === 'FormCreated' && rootFormCreated.controlTree) {
+      try {
+        const rootTree = buildFormTree(rootFormCreated.controlTree);
+        for (const node of walkTree(rootTree)) {
+          if (!isFormHostNode(node) || !node.hostedFormServerId) continue;
+          this.repo.registerDiscoveredChildForm(pageContextId, {
+            serverId: node.hostedFormServerId,
+            caption: node.hostedFormCaption,
+            controlTree: node.hostedFormControlTree,
+            isSubForm: node.hostedFormIsSubForm,
+            isPart: node.hostedFormIsPart,
+          });
+          childFormIds.push(node.hostedFormServerId);
+          this.logger.debug('page', `Discovered child form: ${node.hostedFormServerId} (${node.hostedFormCaption}, subform=${node.hostedFormIsSubForm}, part=${node.hostedFormIsPart})`);
+        }
+      } catch {
+        // Non-fatal: child form discovery failure shouldn't abort the page open
       }
     }
 

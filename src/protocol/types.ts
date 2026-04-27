@@ -172,7 +172,7 @@ export type EventPredicate = (event: BCEvent, context: {
 // -- PageState: derived from BCEvent[] projections --
 
 /**
- * AL PageType names. Wire ordinal -> name mapping lives in control-tree-parser.ts
+ * AL PageType names. Wire ordinal -> name mapping lives in form-tree-builder.ts
  * `PAGE_TYPE_MAP` and is sourced from decompiled `Microsoft.Dynamics.Nav.Types.Metadata.PageType.cs`.
  */
 export type PageType =

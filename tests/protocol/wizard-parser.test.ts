@@ -1,12 +1,25 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { parseControlTree } from '../../src/protocol/control-tree-parser.js';
+import { buildFormTree } from '../../src/protocol/form-tree-builder.js';
+import { actions as treeActions, groupVisibility as treeGroupVisibility } from '../../src/protocol/form-views.js';
+import { isLogicalFormNode, isGroupNode } from '../../src/protocol/form-node.js';
 
 function loadTree(filename: string): unknown {
   return JSON.parse(readFileSync(`tests/recordings/${filename}`, 'utf8'));
 }
 
-describe('parseControlTree — PageType enum', () => {
+/** Wizard nav classification — mirrors the logic in page-service.ts buildWizardState. */
+function classifyWizardNav(action: { iconIdentifier?: string; systemAction: number }): 'back' | 'next' | 'finish' | 'cancel' | undefined {
+  const id = action.iconIdentifier ?? '';
+  if (/PreviousRecord/i.test(id)) return 'back';
+  if (/NextRecord|Action_Start/i.test(id)) return 'next';
+  if (/Approve/i.test(id)) return 'finish';
+  const sys = action.systemAction;
+  if (sys === 310 || sys === 320 || sys === 350) return 'cancel';
+  return undefined;
+}
+
+describe('buildFormTree — PageType enum', () => {
   it.each([
     [0, 'Card'],
     [1, 'List'],
@@ -23,19 +36,21 @@ describe('parseControlTree — PageType enum', () => {
     [12, 'HeadlinePart'],
     [22, 'UserControlHost'],
   ])('maps wire PageType %d to %s', (wire, name) => {
-    const parsed = parseControlTree({ t: 'lf', PageType: wire, Children: [] });
-    expect(parsed.pageType).toBe(name);
+    const tree = buildFormTree({ t: 'lf', PageType: wire, Children: [] });
+    expect(isLogicalFormNode(tree) && tree.pageType).toBe(name);
   });
 
   it('returns Unknown for missing or out-of-range PageType', () => {
-    expect(parseControlTree({ t: 'lf', Children: [] }).pageType).toBe('Unknown');
-    expect(parseControlTree({ t: 'lf', PageType: 999, Children: [] }).pageType).toBe('Unknown');
+    const t1 = buildFormTree({ t: 'lf', Children: [] });
+    const t2 = buildFormTree({ t: 'lf', PageType: 999, Children: [] });
+    expect(isLogicalFormNode(t1) && t1.pageType).toBe('Unknown');
+    expect(isLogicalFormNode(t2) && t2.pageType).toBe('Unknown');
   });
 });
 
-describe('parseControlTree — wizard nav detection', () => {
+describe('buildFormTree — wizard nav detection', () => {
   it('classifies icon paths into back/next/finish', () => {
-    const tree = {
+    const tree = buildFormTree({
       t: 'lf',
       PageType: 9,
       Children: [
@@ -44,16 +59,20 @@ describe('parseControlTree — wizard nav detection', () => {
         { t: 'ac', Caption: 'Finish', Icon: { Identifier: 'Actions/Approve/16.png' } },
         { t: 'ac', Caption: 'Cancel', SystemAction: 320 },
       ],
-    };
-    const parsed = parseControlTree(tree);
-    expect(parsed.actions.find(a => a.caption === 'Back')!.wizardNav).toBe('back');
-    expect(parsed.actions.find(a => a.caption === 'Next')!.wizardNav).toBe('next');
-    expect(parsed.actions.find(a => a.caption === 'Finish')!.wizardNav).toBe('finish');
-    expect(parsed.actions.find(a => a.caption === 'Cancel')!.wizardNav).toBe('cancel');
+    });
+    const acts = treeActions(tree);
+    const nav = (caption: string) => classifyWizardNav({
+      iconIdentifier: acts.find(a => a.properties.caption === caption)?.iconIdentifier,
+      systemAction: acts.find(a => a.properties.caption === caption)?.systemAction ?? 0,
+    });
+    expect(nav('Back')).toBe('back');
+    expect(nav('Next')).toBe('next');
+    expect(nav('Finish')).toBe('finish');
+    expect(nav('Cancel')).toBe('cancel');
   });
 
   it('classifies legacy Action_*_16x16.png icon paths', () => {
-    const tree = {
+    const tree = buildFormTree({
       t: 'lf',
       PageType: 9,
       Children: [
@@ -61,15 +80,19 @@ describe('parseControlTree — wizard nav detection', () => {
         { t: 'ac', Caption: 'Next', Icon: { Identifier: 'Action_NextRecord_16x16.png' } },
         { t: 'ac', Caption: 'Finish', Icon: { Identifier: 'Action_Approve_16x16.png' } },
       ],
-    };
-    const parsed = parseControlTree(tree);
-    expect(parsed.actions.find(a => a.caption === 'Back')!.wizardNav).toBe('back');
-    expect(parsed.actions.find(a => a.caption === 'Next')!.wizardNav).toBe('next');
-    expect(parsed.actions.find(a => a.caption === 'Finish')!.wizardNav).toBe('finish');
+    });
+    const acts = treeActions(tree);
+    const nav = (caption: string) => classifyWizardNav({
+      iconIdentifier: acts.find(a => a.properties.caption === caption)?.iconIdentifier,
+      systemAction: acts.find(a => a.properties.caption === caption)?.systemAction ?? 0,
+    });
+    expect(nav('Back')).toBe('back');
+    expect(nav('Next')).toBe('next');
+    expect(nav('Finish')).toBe('finish');
   });
 
   it('treats SystemAction Cancel(310) / Abort(320) / Close(350) as cancel', () => {
-    const tree = {
+    const tree = buildFormTree({
       t: 'lf',
       PageType: 10,
       Children: [
@@ -77,42 +100,69 @@ describe('parseControlTree — wizard nav detection', () => {
         { t: 'ac', Caption: 'Abort', SystemAction: 320 },
         { t: 'ac', Caption: 'Close', SystemAction: 350 },
       ],
-    };
-    const parsed = parseControlTree(tree);
-    expect(parsed.actions.every(a => a.wizardNav === 'cancel')).toBe(true);
+    });
+    const acts = treeActions(tree);
+    expect(acts.every(a => classifyWizardNav({ iconIdentifier: a.iconIdentifier, systemAction: a.systemAction }) === 'cancel')).toBe(true);
   });
 
   it('exposes the raw icon identifier for non-nav icons too', () => {
-    const tree = {
+    const tree = buildFormTree({
       t: 'lf',
       PageType: 9,
       Children: [
         { t: 'ac', Caption: 'Refresh', Icon: { Identifier: 'Actions/Refresh/16.png' } },
       ],
-    };
-    const parsed = parseControlTree(tree);
-    const a = parsed.actions[0]!;
+    });
+    const acts = treeActions(tree);
+    const a = acts[0]!;
     expect(a.iconIdentifier).toBe('Actions/Refresh/16.png');
-    expect(a.wizardNav).toBeUndefined();
+    expect(classifyWizardNav({ iconIdentifier: a.iconIdentifier, systemAction: a.systemAction })).toBeUndefined();
   });
 });
 
-describe('parseControlTree — Continia activation wizard (page 6175295)', () => {
-  const tree = loadTree('cdo-wizard-page6175295-tree.json');
-  const parsed = parseControlTree(tree);
+describe('buildFormTree — Continia activation wizard (page 6175295)', () => {
+  const rawTree = loadTree('cdo-wizard-page6175295-tree.json');
+  const tree = buildFormTree(rawTree);
 
   it('reports caption and NavigatePage type', () => {
-    expect(parsed.caption).toBe('Set Up Document Output');
-    expect(parsed.pageType).toBe('NavigatePage');
+    expect(isLogicalFormNode(tree) && tree.properties.caption).toBe('Set Up Document Output');
+    expect(isLogicalFormNode(tree) && tree.pageType).toBe('NavigatePage');
   });
 
   it('extracts Back, Next, Finish wizardNav actions from the actionbar', () => {
-    const navs = parsed.actions
-      .map(a => a.wizardNav)
+    const acts = treeActions(tree);
+    const navTypes = acts
+      .map(a => classifyWizardNav({ iconIdentifier: a.iconIdentifier, systemAction: a.systemAction }))
       .filter((v): v is NonNullable<typeof v> => v !== undefined);
-    expect(navs).toContain('back');
-    expect(navs).toContain('next');
-    expect(navs).toContain('finish');
-    expect(navs).toContain('cancel');
+    expect(navTypes).toContain('back');
+    expect(navTypes).toContain('next');
+    expect(navTypes).toContain('finish');
+    expect(navTypes).toContain('cancel');
+  });
+
+  it('records groupVisibility for every gc encountered', () => {
+    const gv = treeGroupVisibility(tree);
+    // The Continia wizard has 11 top-level gcs (toolbar, banners, steps, action bar)
+    expect(gv.size).toBeGreaterThanOrEqual(7);
+  });
+
+  it('flags top-level gcs with ExpressionProperties.Visible as dynamic steps (hasVisibleExpression)', () => {
+    if (!isLogicalFormNode(tree)) throw new Error('expected lf');
+    const dynamicStepGcs = tree.children.filter(
+      n => isGroupNode(n) && n.properties.hasVisibleExpression && /^Step/i.test(n.properties.designName ?? ''),
+    );
+    expect(dynamicStepGcs.length).toBeGreaterThanOrEqual(7);
+    // Welcome step is initially visible; Step0..StepFinish hidden
+    const initiallyVisible = dynamicStepGcs.filter(n => (n.properties.visible ?? true) === true);
+    expect(initiallyVisible.length).toBe(1);
+  });
+
+  it('does not flag toolbar/actionbar gcs as dynamic steps', () => {
+    if (!isLogicalFormNode(tree)) throw new Error('expected lf');
+    const dynamicStepPaths = tree.children
+      .filter(n => isGroupNode(n) && n.properties.hasVisibleExpression && /^Step/i.test(n.properties.designName ?? ''))
+      .map(n => n.controlPath);
+    expect(dynamicStepPaths).not.toContain('server:c[0]');  // TOOLBAR
+    expect(dynamicStepPaths).not.toContain('server:c[10]'); // ACTIONBAR
   });
 });
