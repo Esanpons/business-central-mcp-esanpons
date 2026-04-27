@@ -3,6 +3,7 @@ import type { ProtocolError } from '../core/errors.js';
 import type { NavigationService } from '../services/navigation-service.js';
 import { resolveSection } from '../protocol/section-resolver.js';
 import { isEffectivelyVisible } from '../protocol/visibility.js';
+import { fields as treeFields, groupVisibility as treeGroupVisibility } from '../protocol/form-views.js';
 
 export interface NavigateInput {
   pageContextId: string;
@@ -44,9 +45,14 @@ export class NavigateOperation {
           targetPageContextId: r.targetPageContext.pageContextId,
           pageType: r.targetPageContext.pageType,
           sections,
-          fields: (form?.controlTree ?? [])
-            .filter(f => f.caption && form && isEffectivelyVisible(form.root, f.controlPath, form.groupVisibility, r.targetPageContext.wizardState))
-            .map(f => ({ name: f.caption, value: f.stringValue, editable: f.editable })),
+          fields: (() => {
+            const root = form?.root;
+            if (!root) return [];
+            const groupVis = treeGroupVisibility(root);
+            return treeFields(root)
+              .filter(f => f.properties.caption && isEffectivelyVisible(root, f.controlPath, groupVis, r.targetPageContext.wizardState))
+              .map(f => ({ name: f.properties.caption!, value: f.properties.stringValue, editable: f.properties.editable ?? false }));
+          })(),
           changedSections: [],
           dialogsOpened: [],
           requiresDialogResponse: false,
