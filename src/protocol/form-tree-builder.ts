@@ -7,8 +7,9 @@
 // (sc/dc/bc/...) are emitted by Microsoft.Dynamics.Framework.UI.Client.LogicalControlSerializer.
 
 import type {
-  FormNode, LogicalFormNode, GroupNode, UnknownNode, NodeProperties,
+  FormNode, LogicalFormNode, GroupNode, FieldNode, UnknownNode, NodeProperties, FieldType,
 } from './form-node.js';
+import { FIELD_TYPES } from './form-node.js';
 import type { PageType } from './types.js';
 
 const PAGE_TYPE_MAP: Record<number, PageType> = {
@@ -70,7 +71,9 @@ function buildChildren(rawChildren: unknown, parentPath: string, insideRepeater:
     if (!child || typeof child !== 'object') continue;
     const sep = parentPath === 'server:' ? '' : '/';
     const path = `${parentPath}${sep}c[${i}]`;
-    result.push(buildNode(child as Record<string, unknown>, path, insideRepeater));
+    const built = buildNode(child as Record<string, unknown>, path, insideRepeater);
+    if (built.type === '__placeholder__' || built.type === '__spacer__') continue;
+    result.push(built);
   }
   return result;
 }
@@ -80,7 +83,7 @@ function buildNode(obj: Record<string, unknown>, controlPath: string, insideRepe
   if (!t) return makeUnknown(controlPath, '', readProperties(obj));
 
   if (t === 'gc') return buildGroup(obj, controlPath, insideRepeater);
-  // Other types implemented in later tasks.
+  if (FIELD_TYPES.has(t as FieldType)) return buildField(obj, t as FieldType, controlPath);
   return makeUnknown(controlPath, t, readProperties(obj), buildChildren(obj.Children, controlPath, insideRepeater));
 }
 
@@ -90,6 +93,33 @@ function buildGroup(obj: Record<string, unknown>, controlPath: string, insideRep
     controlPath,
     properties: readProperties(obj),
     children: buildChildren(obj.Children, controlPath, insideRepeater),
+  };
+}
+
+function buildField(obj: Record<string, unknown>, t: FieldType, controlPath: string): FieldNode | UnknownNode {
+  if (obj.MappingHint === 'PlaceholderField') {
+    // Sentinel: buildChildren skips nodes with these synthetic types.
+    return makeUnknown(controlPath, '__placeholder__', {});
+  }
+  if (t === 'ssc' && !obj.Caption && !obj.ColumnBinder) {
+    return makeUnknown(controlPath, '__spacer__', {});
+  }
+
+  const props = readProperties(obj);
+  // ExpressionProperties.Visible fallback when top-level Visible is absent.
+  if (props.visible === undefined && obj.ExpressionProperties && typeof obj.ExpressionProperties === 'object') {
+    const expr = obj.ExpressionProperties as Record<string, unknown>;
+    if (typeof expr.Visible === 'boolean') (props as Record<string, unknown>).visible = expr.Visible;
+  }
+  const binder = obj.ColumnBinder as { Name?: string; Path?: string } | undefined;
+  const hasLookup = !!(obj.AssistEditAction || obj.LookupAction);
+
+  return {
+    type: t,
+    controlPath,
+    properties: props,
+    ...(binder?.Name ? { columnBinder: { name: binder.Name, ...(binder.Path ? { path: binder.Path } : {}) } } : {}),
+    ...(hasLookup ? { hasLookup: true } : {}),
   };
 }
 
