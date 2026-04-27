@@ -161,10 +161,7 @@ describe('PageContextRepository FormClosed handling', () => {
       type: 'FormCreated',
       formId: 'child1',
       parentFormId: 'root',
-      controlTree: {
-        Caption: 'Lines Subform',
-        Children: [{ t: 'rc', Columns: [{ t: 'rcc', Caption: 'Col1' }] }],
-      },
+      controlTree: { t: 'lf', ServerId: 'child1', PageType: 0, Caption: 'Lines Subform', Children: [{ t: 'rc', Columns: [{ t: 'rcc', Caption: 'Col1' }] }] },
     };
     repo.applyEvents([formCreated]);
 
@@ -203,13 +200,13 @@ describe('PageContextRepository FormClosed handling', () => {
         type: 'FormCreated',
         formId: 'child1',
         parentFormId: 'root',
-        controlTree: { Caption: 'Lines', Children: [{ t: 'rc', Columns: [{ t: 'rcc', Caption: 'A' }] }] },
+        controlTree: { t: 'lf', ServerId: 'child1', PageType: 0, Caption: 'Lines', Children: [{ t: 'rc', Columns: [{ t: 'rcc', Caption: 'A' }] }] },
       } as BCEvent,
       {
         type: 'FormCreated',
         formId: 'child2',
         parentFormId: 'root',
-        controlTree: { Caption: 'Details', Children: [] },
+        controlTree: { t: 'lf', ServerId: 'child2', PageType: 0, Caption: 'Details', Children: [] },
       } as BCEvent,
     ]);
 

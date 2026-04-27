@@ -6,6 +6,15 @@ import { FormProjection } from './form-state.js';
 import { SectionResolver } from './section-resolver.js';
 import { parseControlTree } from './control-tree-parser.js';
 import type { DiscoveredChildForm } from './control-tree-parser.js';
+import { buildFormTree } from './form-tree-builder.js';
+import type { FormNode } from './form-node.js';
+
+/** Build a FormNode tree from a raw control tree, returning null if the input is absent or lacks the lf wrapper. */
+function tryBuildFormTree(raw: unknown): FormNode | null {
+  if (!raw || typeof raw !== 'object') return null;
+  if ((raw as Record<string, unknown>).t !== 'lf') return null;
+  return buildFormTree(raw); // any throw here = real bug, surface it
+}
 
 export class PageContextRepository {
   private readonly pages = new Map<string, PageContext>();
@@ -208,8 +217,10 @@ export class PageContextRepository {
     const childForm = this.formProjection.createInitial(event.formId, event.parentFormId);
     // Parse control tree to populate fields/repeaters/actions
     const parsed = parseControlTree(event.controlTree);
+    const tree = tryBuildFormTree(event.controlTree) ?? childForm.root;
     const withData: FormState = {
       ...childForm,
+      root: tree,
       controlTree: parsed.fields,
       tabs: parsed.tabs,
       repeaters: parsed.repeaters,
@@ -261,8 +272,11 @@ export class PageContextRepository {
 
     const parsed = parseControlTree(controlTree);
     const existingForm = page.forms.get(formId);
+    const base = existingForm ?? this.formProjection.createInitial(formId);
+    const tree = tryBuildFormTree(controlTree) ?? base.root;
     const updated: FormState = {
-      ...(existingForm ?? this.formProjection.createInitial(formId)),
+      ...base,
+      root: tree,
       controlTree: parsed.fields.length > 0 ? parsed.fields : (existingForm?.controlTree ?? []),
       tabs: parsed.tabs ?? existingForm?.tabs,
       repeaters: parsed.repeaters.size > 0 ? parsed.repeaters : (existingForm?.repeaters ?? new Map()),
