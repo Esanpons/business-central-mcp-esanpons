@@ -3,8 +3,15 @@ import type {
   ControlField, RepeaterState, RepeaterRow, ActionInfo, ControlContainerType,
   BCEvent, DataLoadedEvent, PropertyChangedEvent, BookmarkChangedEvent, TabGroup,
 } from './types.js';
-import type { FormNode } from './form-node.js';
+import { isGroupNode, type ActionNode, type FieldNode, type FormNode } from './form-node.js';
+import type { NodeProperties } from './form-node.js';
 import { buildFormTree } from './form-tree-builder.js';
+import { applyPropertyChange } from './form-tree-mutator.js';
+import {
+  fields as treeFields, actions as treeActions, repeaters as treeRepeaters,
+  tabs as treeTabs, groupVisibility as treeGroupVisibility, filterControlPath as treeFilter,
+} from './form-views.js';
+import { ancestorsOf } from './form-tree-walk.js';
 
 export interface FormState {
   readonly formId: string;
@@ -103,87 +110,34 @@ export class FormProjection {
   }
 
   private applyPropertyChanged(form: FormState, event: PropertyChangedEvent): FormState {
-    const repeater = form.repeaters.get(event.controlPath);
+    const changes = event.changes as Record<string, unknown>;
 
-    if (repeater && 'TotalRowCount' in event.changes) {
-      const totalRowCount = event.changes['TotalRowCount'] as number;
-      const updatedRepeater: RepeaterState = { ...repeater, totalRowCount };
-      const newRepeaters = new Map(form.repeaters);
-      newRepeaters.set(event.controlPath, updatedRepeater);
-      return { ...form, repeaters: newRepeaters };
-    }
+    // Translate BC's wire property names (PascalCase) → NodeProperties (camelCase)
+    const nodeChanges: NodeProperties = {};
+    if ('Visible' in changes && typeof changes.Visible === 'boolean') (nodeChanges as Record<string, unknown>).visible = changes.Visible;
+    if ('Editable' in changes && typeof changes.Editable === 'boolean') (nodeChanges as Record<string, unknown>).editable = changes.Editable;
+    if ('Enabled' in changes && typeof changes.Enabled === 'boolean') (nodeChanges as Record<string, unknown>).enabled = changes.Enabled;
+    if ('Caption' in changes && typeof changes.Caption === 'string') (nodeChanges as Record<string, unknown>).caption = changes.Caption;
+    if ('StringValue' in changes) (nodeChanges as Record<string, unknown>).stringValue = changes.StringValue == null ? undefined : String(changes.StringValue);
+    if ('ObjectValue' in changes) (nodeChanges as Record<string, unknown>).objectValue = changes.ObjectValue;
+    if ('TotalRowCount' in changes && typeof changes.TotalRowCount === 'number') (nodeChanges as Record<string, unknown>).totalRowCount = changes.TotalRowCount;
+    if ('Bookmark' in changes && typeof changes.Bookmark === 'string') (nodeChanges as Record<string, unknown>).bookmark = changes.Bookmark;
+    if ('HasFiltersApplied' in changes && typeof changes.HasFiltersApplied === 'boolean') (nodeChanges as Record<string, unknown>).hasFiltersApplied = changes.HasFiltersApplied;
 
-    // If the controlPath targets a tracked group container, update its
-    // visibility — descendants' effective visibility is derived from this map
-    // via isEffectivelyVisible(). Group updates land *before* the action /
-    // field branches so a gc that happens to share a path with an action
-    // doesn't get mis-routed.
-    if (form.groupVisibility.has(event.controlPath)) {
-      const { Visible: GroupVisible } = event.changes as Record<string, unknown>;
-      if (typeof GroupVisible === 'boolean') {
-        const newGroupVisibility = new Map(form.groupVisibility);
-        newGroupVisibility.set(event.controlPath, GroupVisible);
-        return { ...form, groupVisibility: newGroupVisibility };
-      }
-    }
+    const newRoot = applyPropertyChange(form.root, event.controlPath, nodeChanges);
 
-    // Update action Enabled/Visible state if the controlPath matches an action.
-    // BC sends PropertyChanged events for action controls after page load.
-    const { Enabled, Visible: VisibleProp } = event.changes as Record<string, unknown>;
-    if (Enabled !== undefined || VisibleProp !== undefined) {
-      const actionIndex = form.actions.findIndex(a => a.controlPath === event.controlPath);
-      if (actionIndex >= 0) {
-        const existing = form.actions[actionIndex]!;
-        const updatedAction: ActionInfo = {
-          ...existing,
-          ...(Enabled !== undefined ? { enabled: Enabled as boolean } : {}),
-          ...(VisibleProp !== undefined ? { visible: VisibleProp as boolean } : {}),
-        };
-        const updatedActions = [
-          ...form.actions.slice(0, actionIndex),
-          updatedAction,
-          ...form.actions.slice(actionIndex + 1),
-        ];
-        return { ...form, actions: updatedActions };
-      }
-    }
-
-    // Otherwise update the controlTree field
-    const { StringValue, Caption, Editable, Visible } = event.changes as Record<string, unknown>;
-
-    const existingIndex = form.controlTree.findIndex(f => f.controlPath === event.controlPath);
-    let updatedTree: ControlField[];
-
-    if (existingIndex >= 0) {
-      const existing = form.controlTree[existingIndex]!;
-      const updated: ControlField = {
-        ...existing,
-        ...(StringValue !== undefined ? { stringValue: StringValue as string } : {}),
-        ...(Caption !== undefined ? { caption: Caption as string } : {}),
-        ...(Editable !== undefined ? { editable: Editable as boolean } : {}),
-        ...(Visible !== undefined ? { visible: Visible as boolean } : {}),
-      };
-      updatedTree = [
-        ...form.controlTree.slice(0, existingIndex),
-        updated,
-        ...form.controlTree.slice(existingIndex + 1),
-      ];
-    } else {
-      // Synthesised from a PropertyChanged whose controlPath the parser never
-      // saw — leave ancestorGroupPaths empty so it inherits no group filter.
-      const newField: ControlField = {
-        controlPath: event.controlPath,
-        caption: (Caption as string | undefined) ?? '',
-        type: '',
-        editable: (Editable as boolean | undefined) ?? false,
-        visible: (Visible as boolean | undefined) ?? true,
-        ancestorGroupPaths: [],
-        ...(StringValue !== undefined ? { stringValue: StringValue as string } : {}),
-      };
-      updatedTree = [...form.controlTree, newField];
-    }
-
-    return { ...form, controlTree: updatedTree };
+    // Re-derive flat arrays from the (possibly new) root. Memoised in form-views,
+    // so this is free when newRoot === form.root.
+    return {
+      ...form,
+      root: newRoot,
+      controlTree: deriveControlFields(newRoot),
+      actions: deriveActionInfos(newRoot),
+      tabs: deriveTabGroups(newRoot),
+      repeaters: deriveRepeaterStates(newRoot, form.rows),
+      filterControlPath: treeFilter(newRoot),
+      groupVisibility: treeGroupVisibility(newRoot),
+    };
   }
 
   private applyBookmarkChanged(form: FormState, event: BookmarkChangedEvent): FormState {
@@ -212,4 +166,90 @@ export class FormProjection {
     }
     return rows;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Adapter functions: translate tree nodes → legacy flat shapes consumed by
+// the rest of the codebase during the migration period (removed in Phase 7).
+// ---------------------------------------------------------------------------
+
+function ancestorGroupPathsFor(root: FormNode, controlPath: string): readonly string[] {
+  return ancestorsOf(root, controlPath).filter(n => isGroupNode(n)).map(n => n.controlPath);
+}
+
+function fieldNodeToControlField(root: FormNode, f: FieldNode): ControlField {
+  return {
+    controlPath: f.controlPath,
+    caption: f.properties.caption ?? '',
+    type: f.type,
+    editable: f.properties.editable ?? false,
+    visible: f.properties.visible ?? true,
+    stringValue: f.properties.stringValue,
+    value: f.properties.objectValue ?? f.properties.stringValue,
+    columnBinderName: f.columnBinder?.name,
+    ...(f.hasLookup ? { isLookup: true } : {}),
+    ...(f.properties.showMandatory ? { showMandatory: true } : {}),
+    ancestorGroupPaths: ancestorGroupPathsFor(root, f.controlPath),
+  };
+}
+
+function actionNodeToActionInfo(root: FormNode, a: ActionNode): ActionInfo {
+  const wizardNav = classifyWizardNav(a);
+  return {
+    controlPath: a.controlPath,
+    caption: a.properties.caption ?? '',
+    systemAction: a.systemAction,
+    enabled: a.properties.enabled ?? true,
+    visible: a.properties.visible ?? true,
+    isLineScoped: a.isLineScoped,
+    ...(a.iconIdentifier ? { iconIdentifier: a.iconIdentifier } : {}),
+    ...(wizardNav ? { wizardNav } : {}),
+    ancestorGroupPaths: ancestorGroupPathsFor(root, a.controlPath),
+  };
+}
+
+function classifyWizardNav(a: ActionNode): 'back' | 'next' | 'finish' | 'cancel' | undefined {
+  const id = a.iconIdentifier;
+  if (id) {
+    if (/PreviousRecord/i.test(id)) return 'back';
+    if (/NextRecord|Action_Start/i.test(id)) return 'next';
+    if (/Approve/i.test(id)) return 'finish';
+  }
+  if (a.systemAction === 310 || a.systemAction === 320 || a.systemAction === 350) return 'cancel';
+  return undefined;
+}
+
+function deriveControlFields(root: FormNode): ControlField[] {
+  return treeFields(root).map(f => fieldNodeToControlField(root, f));
+}
+
+function deriveActionInfos(root: FormNode): ActionInfo[] {
+  return treeActions(root).map(a => actionNodeToActionInfo(root, a));
+}
+
+function deriveTabGroups(root: FormNode): TabGroup[] {
+  return treeTabs(root).map(t => ({
+    caption: t.caption,
+    fields: t.fields.map(f => fieldNodeToControlField(root, f)),
+  }));
+}
+
+function deriveRepeaterStates(root: FormNode, rows: ReadonlyMap<string, readonly RepeaterRow[]>): ReadonlyMap<string, RepeaterState> {
+  const out = new Map<string, RepeaterState>();
+  for (const [path, node] of treeRepeaters(root)) {
+    out.set(path, {
+      controlPath: path,
+      columns: node.columns.map(c => ({
+        controlPath: c.controlPath,
+        caption: c.properties.caption ?? '',
+        type: 'rcc',
+        columnBinderName: c.columnBinder?.name,
+        columnBinderPath: c.columnBinder?.path,
+      })),
+      rows: [...(rows.get(path) ?? [])],
+      totalRowCount: node.properties.totalRowCount ?? null,
+      currentBookmark: node.properties.bookmark ?? null,
+    });
+  }
+  return out;
 }

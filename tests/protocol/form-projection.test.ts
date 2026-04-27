@@ -19,8 +19,27 @@ function makeForm(overrides: Partial<FormState> = {}): FormState {
   };
 }
 
+/** Creates a form whose tree contains a repeater at server:c[1] with one column.
+ * A dummy group at c[0] pushes the repeater to index 1, matching the original
+ * test controlPath `server:c[1]`. Also pre-seeds form.repeaters so that the
+ * DataLoaded and BookmarkChanged tests (which read from form.repeaters directly,
+ * since applyDataLoaded/applyBookmarkChanged are not yet tree-migrated) work. */
 function makeRepeaterForm(): FormState {
-  return makeForm({
+  const root = buildFormTree({
+    t: 'lf', ServerId: 'f1', PageType: 1,
+    Children: [
+      { t: 'gc', Children: [] },  // c[0] — dummy group
+      { t: 'rc', Children: [], Columns: [{ t: 'rcc', Caption: 'No.' }] },  // c[1] — repeater
+    ],
+  });
+  return {
+    formId: 'f1',
+    root,
+    rows: new Map(),
+    controlTree: [],
+    actions: [],
+    filterControlPath: null,
+    groupVisibility: new Map(),
     repeaters: new Map([
       ['server:c[1]', {
         controlPath: 'server:c[1]',
@@ -30,7 +49,7 @@ function makeRepeaterForm(): FormState {
         currentBookmark: null,
       }],
     ]),
-  });
+  };
 }
 
 describe('FormProjection', () => {
@@ -93,13 +112,19 @@ describe('FormProjection', () => {
   });
 
   it('applies PropertyChanged to controlTree fields', () => {
-    const form = makeForm();
+    // Build a form with a real field in the tree. The field lands at server:c[0]
+    // (first child of the lf root).
+    const root = buildFormTree({
+      t: 'lf', ServerId: 'f1', PageType: 0,
+      Children: [{ t: 'sc', Caption: 'Name', Editable: true, Visible: true }],
+    });
+    const form: FormState = { ...makeForm(), root };
     const event: BCEvent = {
-      type: 'PropertyChanged', formId: 'f1', controlPath: 'server:c[0]/c[1]',
+      type: 'PropertyChanged', formId: 'f1', controlPath: 'server:c[0]',
       changes: { StringValue: 'Hello', Caption: 'Name', Editable: true, Visible: true },
     };
     const updated = projection.apply(form, event);
-    const field = updated.controlTree.find(f => f.controlPath === 'server:c[0]/c[1]');
+    const field = updated.controlTree.find(f => f.controlPath === 'server:c[0]');
     expect(field).toBeDefined();
     expect(field!.stringValue).toBe('Hello');
     expect(field!.caption).toBe('Name');
@@ -125,18 +150,26 @@ describe('FormProjection', () => {
   });
 
   it('updates existing field on repeated PropertyChanged', () => {
-    let form = makeForm();
+    // Build a form with a real field at server:c[0] so that PropertyChanged
+    // events can mutate it via the tree. Unknown paths are silently dropped
+    // (the old synthesis behaviour was a workaround; the tree model does not
+    // synthesise nodes).
+    const root = buildFormTree({
+      t: 'lf', ServerId: 'f1', PageType: 0,
+      Children: [{ t: 'sc', Caption: 'Field1', Editable: false, Visible: true }],
+    });
+    let form: FormState = { ...makeForm(), root };
     form = projection.apply(form, {
-      type: 'PropertyChanged', formId: 'f1', controlPath: 'c[0]',
+      type: 'PropertyChanged', formId: 'f1', controlPath: 'server:c[0]',
       changes: { StringValue: 'first', Caption: 'Field1' },
     } as BCEvent);
     expect(form.controlTree.length).toBe(1);
     form = projection.apply(form, {
-      type: 'PropertyChanged', formId: 'f1', controlPath: 'c[0]',
+      type: 'PropertyChanged', formId: 'f1', controlPath: 'server:c[0]',
       changes: { StringValue: 'second' },
     } as BCEvent);
     expect(form.controlTree.length).toBe(1);
     expect(form.controlTree[0]!.stringValue).toBe('second');
-    expect(form.controlTree[0]!.caption).toBe('Field1'); // preserved from first
+    expect(form.controlTree[0]!.caption).toBe('Field1'); // preserved from first apply
   });
 });

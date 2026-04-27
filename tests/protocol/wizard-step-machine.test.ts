@@ -132,36 +132,51 @@ describe('PageContextRepository.advanceWizardStep', () => {
 
 describe('FormProjection — gc PropertyChanged routing', () => {
   it('updates groupVisibility when PropertyChanged targets a tracked gc', async () => {
-    // Direct construction of FormProjection state with a known gc path
+    // Build a form with a real gc in the tree so that treeGroupVisibility can
+    // track it. The gc is the first child → server:c[0].
     const { FormProjection } = await import('../../src/protocol/form-state.js');
+    const { buildFormTree } = await import('../../src/protocol/form-tree-builder.js');
     const p = new FormProjection();
-    let form = p.createInitial('F1');
-    form = { ...form, groupVisibility: new Map([['server:c[3]', true]]) };
+    const root = buildFormTree({
+      t: 'lf', ServerId: 'F1', PageType: 0,
+      Children: [{ t: 'gc', Caption: 'General', Visible: true, Children: [] }],
+    });
+    const base = p.createInitial('F1');
+    const form = { ...base, root };
 
     const updated = p.apply(form, {
       type: 'PropertyChanged',
       formId: 'F1',
-      controlPath: 'server:c[3]',
+      controlPath: 'server:c[0]',  // gc is at index 0
       changes: { Visible: false },
     } as BCEvent);
 
-    expect(updated.groupVisibility.get('server:c[3]')).toBe(false);
+    expect(updated.groupVisibility.get('server:c[0]')).toBe(false);
   });
 
   it('leaves groupVisibility untouched when controlPath is not tracked', async () => {
+    // A gc at server:c[0] is tracked. An event targeting server:c[42] (not in
+    // the tree) is silently dropped — the gc at c[0] retains its initial value.
     const { FormProjection } = await import('../../src/protocol/form-state.js');
+    const { buildFormTree } = await import('../../src/protocol/form-tree-builder.js');
     const p = new FormProjection();
-    let form = p.createInitial('F1');
-    form = { ...form, groupVisibility: new Map([['server:c[3]', true]]) };
+    const root = buildFormTree({
+      t: 'lf', ServerId: 'F1', PageType: 0,
+      Children: [{ t: 'gc', Caption: 'General', Visible: true, Children: [] }],
+    });
+    const base = p.createInitial('F1');
+    const form = { ...base, root };
 
     const updated = p.apply(form, {
       type: 'PropertyChanged',
       formId: 'F1',
-      controlPath: 'server:c[42]',  // not in groupVisibility
+      controlPath: 'server:c[42]',  // not in tree
       changes: { Visible: false },
     } as BCEvent);
 
-    expect(updated.groupVisibility.get('server:c[3]')).toBe(true);
+    // gc at c[0] retains its initial visible:true value
+    expect(updated.groupVisibility.get('server:c[0]')).toBe(true);
+    // the unknown path is not added to groupVisibility
     expect(updated.groupVisibility.has('server:c[42]')).toBe(false);
   });
 });
