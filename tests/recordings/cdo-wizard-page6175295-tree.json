@@ -1,0 +1,2137 @@
+{
+  "ServerId": "1DC",
+  "ServerFormHandle": "f66e7178-8268-429c-85db-89e8cf5b5263",
+  "t": "lf",
+  "Caption": "Set Up Document Output",
+  "ControlIdentifier": "005e3a3f-0000-0001-0c00-0000836bd2d2",
+  "DesignName": "CDO Setup Wizard",
+  "MappingHint": "NAVIGATEPAGE",
+  "Importance": 1,
+  "SourceAppId": "f4b69b55-c90d-4937-8f53-2742898fa948",
+  "InitialActiveControlPath": "server:c[4]/c[3]",
+  "ViewMode": 2,
+  "PageMode": 1,
+  "IsTaskDialog": true,
+  "IsModal": true,
+  "QueryClose": true,
+  "DesignerLevels": 15,
+  "Bookmark": "10_eHFu9miCnEKF24noz1tSYw",
+  "SystemId": null,
+  "AppId": "f4b69b55-c90d-4937-8f53-2742898fa948",
+  "AppName": "Continia Document Output",
+  "AppPublisher": "Continia Software",
+  "AppVersion": "29.0.0.0",
+  "PageHelpInfo": [
+    {
+      "HelpLink": "https://docs.continia.com/en-us/continia-document-output",
+      "ExtensionName": "Continia Document Output",
+      "ExtensionPublisher": "Continia Software",
+      "ApplicationId": "f4b69b55-c90d-4937-8f53-2742898fa948"
+    }
+  ],
+  "HasFiltersApplied": true,
+  "HelpUrl": "https://docs.continia.com/en-us/continia-document-output",
+  "PersonalizationHelpUrl": "https://learn.microsoft.com/en-GB/dynamics365/business-central/ui-personalization-locked",
+  "IsBoundToSourceTable": false,
+  "SharedLayout": false,
+  "ShowTitle": false,
+  "PageDataSourceType": 0,
+  "Children": [
+    {
+      "t": "gc",
+      "Visible": false,
+      "LocalVisible": false,
+      "ControlIdentifier": "fb8cccf3-54ac-4d77-9ad8-136cec25583a",
+      "Name": "CommandBar",
+      "MappingHint": "TOOLBAR",
+      "Importance": 1,
+      "Children": [
+        {
+          "t": "gc",
+          "Caption": "&Actions",
+          "Visible": false,
+          "ControlIdentifier": "3154b58c-788e-4461-ac00-25333516e3b7",
+          "Name": "Control_Actions",
+          "Importance": 1,
+          "ActionContainerType": 1,
+          "Children": [
+            {
+              "t": "gc",
+              "Caption": "New Do&cument",
+              "Visible": false,
+              "ControlIdentifier": "1af878f7-1eb4-4b40-a6d5-55e87f26029b",
+              "DesignName": "Control_New_Document",
+              "Importance": 1,
+              "Icon": {
+                "Identifier": "Actions/NewDocument/16.png"
+              },
+              "LargeIcon": {
+                "Identifier": "Actions/NewDocument/32.png"
+              },
+              "ActionContainerType": 3
+            },
+            {
+              "t": "gc",
+              "Caption": "Page",
+              "Visible": false,
+              "ControlIdentifier": "cdba910d-e283-4a38-ad03-c9d42763c3ce",
+              "DesignName": "Page",
+              "Importance": 1,
+              "Children": [
+                {
+                  "t": "ac",
+                  "Caption": "&Back",
+                  "Enabled": false,
+                  "Visible": false,
+                  "ExpressionProperties": {
+                    "Enabled": true
+                  },
+                  "ControlIdentifier": "005e3a3f-8c33-0000-0c6d-1700836bd2d2",
+                  "DesignName": "BackAction",
+                  "Synopsis": "Return to the previous step in the assisted setup guide.",
+                  "Importance": 2,
+                  "Icon": {
+                    "Identifier": "Actions/PreviousRecord/16.png"
+                  },
+                  "LargeIcon": {
+                    "Identifier": "Actions/PreviousRecord/32.png"
+                  },
+                  "DefinitionId": 1830259763,
+                  "Action": {
+                    "t": "clact"
+                  }
+                },
+                {
+                  "t": "ac",
+                  "Caption": "&Next",
+                  "Visible": false,
+                  "ExpressionProperties": {
+                    "Enabled": true
+                  },
+                  "ControlIdentifier": "005e3a3f-94a7-0000-0c12-7200836bd2d2",
+                  "DesignName": "NextAction",
+                  "Synopsis": "Proceed to the next step in the assisted setup guide.",
+                  "Importance": 2,
+                  "Icon": {
+                    "Identifier": "Actions/NextRecord/16.png"
+                  },
+                  "LargeIcon": {
+                    "Identifier": "Actions/NextRecord/32.png"
+                  },
+                  "DefinitionId": 309499047,
+                  "Action": {
+                    "t": "clact"
+                  }
+                },
+                {
+                  "t": "ac",
+                  "Caption": "&Finish",
+                  "Enabled": false,
+                  "Visible": false,
+                  "ExpressionProperties": {
+                    "Enabled": true
+                  },
+                  "ControlIdentifier": "005e3a3f-2ee5-0000-0c52-bf00836bd2d2",
+                  "DesignName": "FinishAction",
+                  "Synopsis": "Complete the setup process and apply all configured settings.",
+                  "Importance": 2,
+                  "Icon": {
+                    "Identifier": "Actions/Approve/16.png"
+                  },
+                  "LargeIcon": {
+                    "Identifier": "Actions/Approve/32.png"
+                  },
+                  "DefinitionId": 1388261093,
+                  "Action": {
+                    "t": "clact"
+                  }
+                },
+                {
+                  "t": "ac",
+                  "Caption": "Refresh",
+                  "Visible": false,
+                  "ControlIdentifier": "424a3892-4f41-40b1-96a2-94915dc1cecb",
+                  "DesignName": "Control_Refresh",
+                  "MappingHint": "DO NOT SHOW IN RIBBON",
+                  "Synopsis": "Update the page with any changes made by other users.",
+                  "Importance": 2,
+                  "Icon": {
+                    "Identifier": "Actions/Refresh/16.png"
+                  },
+                  "LargeIcon": {
+                    "Identifier": "Actions/Refresh/32.png"
+                  },
+                  "DefinitionId": 2000008014,
+                  "SystemAction": 30,
+                  "Action": {
+                    "t": "clact"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "t": "gc",
+          "Caption": "Related",
+          "Visible": false,
+          "ControlIdentifier": "9d41d275-a821-453f-817c-241ed607cad6",
+          "Name": "Control_Related_Information",
+          "Importance": 1,
+          "ActionContainerType": 2,
+          "Children": [
+            {
+              "t": "ac",
+              "Caption": "User Setup",
+              "Visible": false,
+              "ControlIdentifier": "005e3a3f-af4e-0000-0c16-c000836bd2d2",
+              "DesignName": "OpenUserSetupAction",
+              "Synopsis": "Open the User Setup page, where you can configure user-specific settings.",
+              "Importance": 2,
+              "Icon": {
+                "Identifier": "Actions/User/16.png"
+              },
+              "LargeIcon": {
+                "Identifier": "Actions/User/32.png"
+              },
+              "DefinitionId": 381726542,
+              "Action": {
+                "t": "clact"
+              }
+            },
+            {
+              "t": "ac",
+              "Caption": "Document Output Setup",
+              "Visible": false,
+              "ControlIdentifier": "005e3a3f-522c-0000-0c16-d300836bd2d2",
+              "DesignName": "OpenDocOutputSetupAction",
+              "Synopsis": "Open the Document Output Setup page, where you can configure general settings for the Document Output module.",
+              "Importance": 2,
+              "Icon": {
+                "Identifier": "Actions/Setup/16.png"
+              },
+              "LargeIcon": {
+                "Identifier": "Actions/Setup/32.png"
+              },
+              "DefinitionId": 382947884,
+              "Action": {
+                "t": "ofact",
+                "DestinationFormCacheKey": "6175291:pagemode(Edit):embedded(False)"
+              }
+            }
+          ]
+        },
+        {
+          "t": "gc",
+          "Caption": "Views",
+          "Visible": false,
+          "LocalVisible": false,
+          "Name": "ViewsGroup",
+          "MappingHint": "PAGEVIEWS",
+          "Importance": 1
+        },
+        {
+          "t": "gc",
+          "ShowCaption": false,
+          "Visible": false,
+          "Name": "HelpGroup",
+          "MappingHint": "CommandBarHelpGroup",
+          "Importance": 1
+        },
+        {
+          "t": "gc",
+          "ShowCaption": false,
+          "Visible": false,
+          "Name": "LayoutGroup",
+          "MappingHint": "CommandBarLayoutGroup",
+          "Importance": 1
+        },
+        {
+          "t": "ssc",
+          "Editable": false,
+          "Visible": false,
+          "LocalVisible": false,
+          "Name": "SystemIndicator",
+          "Importance": 1,
+          "MaximumStringLength": 0,
+          "HelpUrl": "https://docs.continia.com/en-us/continia-document-output"
+        },
+        {
+          "t": "gc",
+          "Caption": "Dynamics 365 Business Central",
+          "Visible": false,
+          "ControlIdentifier": "d7c9f73f-9844-47ff-b4f4-88a77eb4e103",
+          "DesignName": "Control_Microsoft_Dynamics_NAV",
+          "Importance": 1,
+          "Children": [
+            {
+              "t": "gc",
+              "Caption": "Page",
+              "Visible": false,
+              "ControlIdentifier": "cdab913b-e283-4a38-ad03-c9d42763c1ca",
+              "DesignName": "Page",
+              "Importance": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "t": "gc",
+      "Caption": "StandardBanner",
+      "ShowCaption": false,
+      "Editable": false,
+      "LocalEditable": false,
+      "ExpressionProperties": {
+        "Visible": true
+      },
+      "ControlIdentifier": "005e3a3f-65d9-0000-0c74-c700836bd2d2",
+      "DesignName": "StandardBanner",
+      "MappingHint": "GROUP",
+      "Importance": 1,
+      "Sections": 1,
+      "Children": [
+        {
+          "t": "mtc",
+          "StringValue": "dfa116d1-1f68-4c9f-afbb-e4d7e0b93d56",
+          "ObjectValue": "dfa116d1-1f68-4c9f-afbb-e4d7e0b93d56",
+          "ShowCaption": false,
+          "Editable": false,
+          "LocalEditable": false,
+          "TableEditable": true,
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-a488-0000-0c45-9a00836bd2d2",
+          "DesignName": "MediaResourcesStd",
+          "MappingHint": "NavigatePageCoverImage",
+          "ColumnBinder": {
+            "Name": "1167762568_cControl1167762568"
+          },
+          "Importance": 2,
+          "ValidateTableRelation": false,
+          "ControlId": 1167762568,
+          "FieldBound": 1,
+          "IsPerson": false,
+          "IsDocument": false,
+          "Source": "img?sessionid=DEFAULTCRONUS+UK+Ltd.SR63912920391056671661FIN&ts=dfa116d1-1f68-4c9f-afbb-e4d7e0b93d56.png"
+        }
+      ]
+    },
+    {
+      "t": "gc",
+      "Caption": "FinishedBanner",
+      "ShowCaption": false,
+      "Editable": false,
+      "Visible": false,
+      "LocalVisible": false,
+      "LocalEditable": false,
+      "ExpressionProperties": {
+        "Visible": true
+      },
+      "ControlIdentifier": "005e3a3f-fc98-0000-0c51-5700836bd2d2",
+      "DesignName": "FinishedBanner",
+      "MappingHint": "GROUP",
+      "Importance": 1,
+      "Sections": 1,
+      "Children": [
+        {
+          "t": "mtc",
+          "StringValue": "fd8101c4-432a-420b-a628-2e1f39a7251c",
+          "ObjectValue": "fd8101c4-432a-420b-a628-2e1f39a7251c",
+          "ShowCaption": false,
+          "Editable": false,
+          "Visible": false,
+          "LocalEditable": false,
+          "TableEditable": true,
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-e58b-0000-0c43-f500836bd2d2",
+          "DesignName": "MediaResourcesDone",
+          "MappingHint": "NavigatePageCoverImage",
+          "ColumnBinder": {
+            "Name": "1140188555_cControl1140188555"
+          },
+          "Importance": 2,
+          "ValidateTableRelation": false,
+          "ControlId": 1140188555,
+          "FieldBound": 1,
+          "IsPerson": false,
+          "IsDocument": false,
+          "Source": "img?sessionid=DEFAULTCRONUS+UK+Ltd.SR63912920391056671661FIN&ts=fd8101c4-432a-420b-a628-2e1f39a7251c.png"
+        }
+      ]
+    },
+    {
+      "t": "gc",
+      "Caption": "StepVelcome",
+      "ShowCaption": false,
+      "ExpressionProperties": {
+        "Visible": true
+      },
+      "ControlIdentifier": "005e3a3f-3341-0000-0c6b-4600836bd2d2",
+      "DesignName": "StepVelcome",
+      "MappingHint": "GROUP",
+      "Importance": 1,
+      "Sections": 1,
+      "Children": [
+        {
+          "t": "gc",
+          "Caption": "Welcome to the setup of Document Output",
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-9b2d-0000-0c44-e800836bd2d2",
+          "DesignName": "Velcome",
+          "Importance": 1,
+          "HasInstructionalText": true,
+          "Children": [
+            {
+              "t": "gc",
+              "VisibleRecursive": 1,
+              "ControlIdentifier": "005e3a3f-9b2d-0000-0c44-e800836bd2d2",
+              "MappingHint": "GROUP",
+              "Importance": 1,
+              "Children": [
+                {
+                  "t": "ssc",
+                  "Caption": "To use Document Output you must complete this setup.",
+                  "Editable": false,
+                  "ControlIdentifier": "005e3a3f-9b2d-0000-0c44-e800836bd2d2",
+                  "Name": "InstructionalTextString",
+                  "MaximumStringLength": 0,
+                  "HelpUrl": "https://docs.continia.com/en-us/continia-document-output"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "t": "gc",
+          "Caption": "Let's go",
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-5e88-0000-0c5e-af00836bd2d2",
+          "DesignName": "LetsGo",
+          "Importance": 1,
+          "HasInstructionalText": true,
+          "Children": [
+            {
+              "t": "gc",
+              "VisibleRecursive": 1,
+              "ControlIdentifier": "005e3a3f-5e88-0000-0c5e-af00836bd2d2",
+              "MappingHint": "GROUP",
+              "Importance": 1,
+              "Children": [
+                {
+                  "t": "ssc",
+                  "Caption": "Choose Next to set up Document Output.",
+                  "Editable": false,
+                  "ControlIdentifier": "005e3a3f-5e88-0000-0c5e-af00836bd2d2",
+                  "Name": "InstructionalTextString",
+                  "MaximumStringLength": 0,
+                  "HelpUrl": "https://docs.continia.com/en-us/continia-document-output"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "t": "gc",
+      "Caption": "Step0",
+      "ShowCaption": false,
+      "Visible": false,
+      "LocalVisible": false,
+      "ExpressionProperties": {
+        "Visible": true
+      },
+      "ControlIdentifier": "005e3a3f-ce34-0000-0c5d-c300836bd2d2",
+      "DesignName": "Step0",
+      "MappingHint": "GROUP",
+      "Importance": 1,
+      "Sections": 1,
+      "Children": [
+        {
+          "t": "gc",
+          "Caption": "Full or custom setup",
+          "Visible": false,
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-f67c-0000-0c7b-8a00836bd2d2",
+          "DesignName": "Velcome1",
+          "Importance": 1,
+          "HasInstructionalText": true,
+          "Children": [
+            {
+              "t": "gc",
+              "Visible": false,
+              "VisibleRecursive": 2,
+              "ControlIdentifier": "005e3a3f-f67c-0000-0c7b-8a00836bd2d2",
+              "MappingHint": "GROUP",
+              "Importance": 1,
+              "Children": [
+                {
+                  "t": "ssc",
+                  "Caption": "Please choose if you would like to do a full or custom setup of Document Output.",
+                  "Editable": false,
+                  "Visible": false,
+                  "ControlIdentifier": "005e3a3f-f67c-0000-0c7b-8a00836bd2d2",
+                  "Name": "InstructionalTextString",
+                  "MaximumStringLength": 0,
+                  "HelpUrl": "https://docs.continia.com/en-us/continia-document-output"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "t": "gc",
+          "Caption": "FullSetup",
+          "ShowCaption": false,
+          "Visible": false,
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-8d5a-0000-0c5b-0c00836bd2d2",
+          "DesignName": "FullSetup",
+          "Importance": 1,
+          "HasInstructionalText": true,
+          "Children": [
+            {
+              "t": "gc",
+              "Visible": false,
+              "VisibleRecursive": 2,
+              "ControlIdentifier": "005e3a3f-8d5a-0000-0c5b-0c00836bd2d2",
+              "MappingHint": "GROUP",
+              "Importance": 1,
+              "Children": [
+                {
+                  "t": "ssc",
+                  "Caption": "Full setup will set up default Document Output templates, email signatures, SMTP setup and create job queues to send emails in the background.",
+                  "Editable": false,
+                  "Visible": false,
+                  "ControlIdentifier": "005e3a3f-8d5a-0000-0c5b-0c00836bd2d2",
+                  "Name": "InstructionalTextString",
+                  "MaximumStringLength": 0,
+                  "HelpUrl": "https://docs.continia.com/en-us/continia-document-output"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "t": "gc",
+          "Caption": "CustomSetup",
+          "ShowCaption": false,
+          "Visible": false,
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-3e72-0000-0c6c-7600836bd2d2",
+          "DesignName": "CustomSetup",
+          "Importance": 1,
+          "HasInstructionalText": true,
+          "Children": [
+            {
+              "t": "gc",
+              "Visible": false,
+              "VisibleRecursive": 2,
+              "ControlIdentifier": "005e3a3f-3e72-0000-0c6c-7600836bd2d2",
+              "MappingHint": "GROUP",
+              "Importance": 1,
+              "Children": [
+                {
+                  "t": "ssc",
+                  "Caption": "Custom setup will allow you to control each step of the configuration and adjust more advanced settings.",
+                  "Editable": false,
+                  "Visible": false,
+                  "ControlIdentifier": "005e3a3f-3e72-0000-0c6c-7600836bd2d2",
+                  "Name": "InstructionalTextString",
+                  "MaximumStringLength": 0,
+                  "HelpUrl": "https://docs.continia.com/en-us/continia-document-output"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "t": "sec",
+          "Caption": "Setup Type",
+          "StringValue": "Full",
+          "ObjectValue": 0,
+          "Visible": false,
+          "TableEditable": true,
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-49a7-0000-0c49-2a00836bd2d2",
+          "DesignName": "Setup Type",
+          "ColumnBinder": {
+            "Name": "1227508135_cControl1227508135"
+          },
+          "Formatter": {},
+          "Synopsis": "Specifies if the setup is full or custom.",
+          "Importance": 2,
+          "ValidateTableRelation": false,
+          "ControlId": 1227508135,
+          "FieldBound": 1,
+          "MaximumStringLength": 1000,
+          "HelpUrl": "https://docs.continia.com/en-us/continia-document-output",
+          "Items": [
+            {
+              "Text": "Full",
+              "Value": "0"
+            },
+            {
+              "Text": "Custom",
+              "Value": "1"
+            }
+          ],
+          "CurrentIndex": 0
+        }
+      ]
+    },
+    {
+      "t": "gc",
+      "Caption": "Step1",
+      "ShowCaption": false,
+      "Visible": false,
+      "LocalVisible": false,
+      "ExpressionProperties": {
+        "Visible": true
+      },
+      "ControlIdentifier": "005e3a3f-b763-0000-0c7c-3900836bd2d2",
+      "DesignName": "Step1",
+      "MappingHint": "GROUP",
+      "Importance": 1,
+      "Sections": 1,
+      "Children": [
+        {
+          "t": "gc",
+          "Caption": "Import templates",
+          "Visible": false,
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-6570-0000-0c4f-4f00836bd2d2",
+          "DesignName": "ImportTemplates",
+          "Importance": 1,
+          "HasInstructionalText": true,
+          "Children": [
+            {
+              "t": "gc",
+              "Visible": false,
+              "VisibleRecursive": 2,
+              "ControlIdentifier": "005e3a3f-6570-0000-0c4f-4f00836bd2d2",
+              "MappingHint": "GROUP",
+              "Importance": 1,
+              "Children": [
+                {
+                  "t": "ssc",
+                  "Caption": "Please choose if you want to import templates from Continia Online or from a file.",
+                  "Editable": false,
+                  "Visible": false,
+                  "ControlIdentifier": "005e3a3f-6570-0000-0c4f-4f00836bd2d2",
+                  "Name": "InstructionalTextString",
+                  "MaximumStringLength": 0,
+                  "HelpUrl": "https://docs.continia.com/en-us/continia-document-output"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "t": "sec",
+          "Caption": "Import from",
+          "StringValue": "Skip",
+          "ObjectValue": 2,
+          "Visible": false,
+          "TableEditable": true,
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-0046-0000-0c49-1c00836bd2d2",
+          "DesignName": "DownloadtemplatesfromContinia",
+          "ColumnBinder": {
+            "Name": "1226571846_cControl1226571846"
+          },
+          "Formatter": {},
+          "Synopsis": "Specifies the value of the Import From field.",
+          "Importance": 2,
+          "ValidateTableRelation": false,
+          "ControlId": 1226571846,
+          "FieldBound": 1,
+          "MaximumStringLength": 1000,
+          "HelpUrl": "https://docs.continia.com/en-us/continia-document-output",
+          "Items": [
+            {
+              "Text": "Online",
+              "Value": "0"
+            },
+            {
+              "Text": "File",
+              "Value": "1"
+            },
+            {
+              "Text": "Skip",
+              "Value": "2"
+            }
+          ],
+          "CurrentIndex": 2
+        },
+        {
+          "t": "sc",
+          "Caption": "Template filename",
+          "StringValue": "",
+          "Editable": false,
+          "Visible": false,
+          "LocalEditable": false,
+          "TableEditable": true,
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-9ff1-0000-0c5c-8f00836bd2d2",
+          "DesignName": "Templatefilename",
+          "ColumnBinder": {
+            "Name": "1552916465_cControl1552916465"
+          },
+          "Formatter": {},
+          "Synopsis": "Specifies the value of the Template File Name field.",
+          "Importance": 2,
+          "ValidateTableRelation": false,
+          "ControlId": 1552916465,
+          "FieldBound": 1,
+          "AssistEditAction": {
+            "t": "clact",
+            "SystemAction": 100
+          },
+          "ShowDetailsAction": {
+            "t": "clact",
+            "Enabled": false,
+            "SystemAction": 125
+          },
+          "MaximumStringLength": 0,
+          "DefaultAction": {
+            "t": "clact",
+            "SystemAction": 100
+          },
+          "HelpUrl": "https://docs.continia.com/en-us/continia-document-output",
+          "Actions": [
+            {
+              "t": "ac",
+              "Caption": "AssistEdit",
+              "ControlIdentifier": "072b0545-e0d6-4da6-a5b4-3f110de9e539",
+              "Name": "NavAssistEditAction",
+              "Importance": 2,
+              "Icon": {
+                "Identifier": "Actions/Action_AssistEdit.png"
+              },
+              "SystemAction": 100,
+              "Action": {
+                "t": "clact"
+              },
+              "ShortcutKeys": [
+                "SHIFT+F4"
+              ]
+            },
+            {
+              "t": "ac",
+              "Caption": "Show Details",
+              "Enabled": false,
+              "ControlIdentifier": "0811f208-e9cf-4e36-804b-400aed95af4e",
+              "Name": "NavShowDetailsAction",
+              "Importance": 2,
+              "Icon": {
+                "Identifier": "Actions/Find/16.png"
+              },
+              "LargeIcon": {
+                "Identifier": "Actions/Find/32.png"
+              },
+              "SystemAction": 125,
+              "Action": {
+                "t": "clact",
+                "Enabled": false
+              }
+            }
+          ]
+        },
+        {
+          "t": "gc",
+          "Caption": "Text1",
+          "ShowCaption": false,
+          "Visible": false,
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-311e-0000-0c58-aa00836bd2d2",
+          "DesignName": "Text1",
+          "Importance": 1,
+          "HasInstructionalText": true,
+          "Children": [
+            {
+              "t": "gc",
+              "Visible": false,
+              "VisibleRecursive": 2,
+              "ControlIdentifier": "005e3a3f-311e-0000-0c58-aa00836bd2d2",
+              "MappingHint": "GROUP",
+              "Importance": 1,
+              "Children": [
+                {
+                  "t": "ssc",
+                  "Caption": "Templates are what defines the text in emails, merge fields, and more.",
+                  "Editable": false,
+                  "Visible": false,
+                  "ControlIdentifier": "005e3a3f-311e-0000-0c58-aa00836bd2d2",
+                  "Name": "InstructionalTextString",
+                  "MaximumStringLength": 0,
+                  "HelpUrl": "https://docs.continia.com/en-us/continia-document-output"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "t": "gc",
+      "Caption": "Step2",
+      "ShowCaption": false,
+      "Visible": false,
+      "LocalVisible": false,
+      "ExpressionProperties": {
+        "Visible": true
+      },
+      "ControlIdentifier": "005e3a3f-3cfa-0000-0c56-3700836bd2d2",
+      "DesignName": "Step2",
+      "MappingHint": "GROUP",
+      "Importance": 1,
+      "Sections": 1,
+      "Children": [
+        {
+          "t": "gc",
+          "Caption": "Email Sending Method",
+          "Visible": false,
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-3e71-0000-0c37-1300836bd2d2",
+          "DesignName": "ChooseEmail",
+          "Importance": 1,
+          "HasInstructionalText": true,
+          "Children": [
+            {
+              "t": "gc",
+              "Visible": false,
+              "VisibleRecursive": 2,
+              "ControlIdentifier": "005e3a3f-3e71-0000-0c37-1300836bd2d2",
+              "MappingHint": "GROUP",
+              "Importance": 1,
+              "Children": [
+                {
+                  "t": "ssc",
+                  "Caption": "Please Choose how you want to send emails.",
+                  "Editable": false,
+                  "Visible": false,
+                  "ControlIdentifier": "005e3a3f-3e71-0000-0c37-1300836bd2d2",
+                  "Name": "InstructionalTextString",
+                  "MaximumStringLength": 0,
+                  "HelpUrl": "https://docs.continia.com/en-us/continia-document-output"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "t": "sec",
+          "Caption": "Email Sending Method",
+          "StringValue": "2",
+          "Visible": false,
+          "TableEditable": true,
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-7679-0000-0c53-9000836bd2d2",
+          "DesignName": "EmailSendingMethod",
+          "ColumnBinder": {
+            "Name": "1401976441_cControl1401976441"
+          },
+          "Formatter": {},
+          "Synopsis": "Specifies the value of the Email Sending Method field.",
+          "Importance": 2,
+          "ValidateTableRelation": false,
+          "ControlId": 1401976441,
+          "FieldBound": 1,
+          "MaximumStringLength": 1000,
+          "HelpUrl": "https://docs.continia.com/en-us/continia-document-output",
+          "Items": [
+            {
+              "Text": "Email Accounts",
+              "Value": "0"
+            },
+            {
+              "Text": "Azure Application Setup (Office 365)",
+              "Value": "1"
+            }
+          ],
+          "CurrentIndex": -1
+        },
+        {
+          "t": "sec",
+          "Caption": "Email Sending Method",
+          "StringValue": "Document Output SMTP",
+          "ObjectValue": 2,
+          "Visible": false,
+          "LocalVisible": false,
+          "TableEditable": true,
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-f816-0000-0c2f-7e00836bd2d2",
+          "DesignName": "EmailSendingMethodOnPrem",
+          "ColumnBinder": {
+            "Name": "796850198_cControl1401976441"
+          },
+          "Formatter": {},
+          "Synopsis": "Specifies the value of the Email Sending Method field.",
+          "Importance": 2,
+          "ValidateTableRelation": false,
+          "ControlId": 796850198,
+          "FieldBound": 1,
+          "MaximumStringLength": 1000,
+          "HelpUrl": "https://docs.continia.com/en-us/continia-document-output",
+          "Items": [
+            {
+              "Text": "Email Accounts",
+              "Value": "0"
+            },
+            {
+              "Text": "Azure Application Setup (Office 365)",
+              "Value": "1"
+            },
+            {
+              "Text": "Document Output SMTP",
+              "Value": "2"
+            }
+          ],
+          "CurrentIndex": 2
+        }
+      ]
+    },
+    {
+      "t": "gc",
+      "Caption": "Step3",
+      "ShowCaption": false,
+      "Visible": false,
+      "LocalVisible": false,
+      "ExpressionProperties": {
+        "Visible": true
+      },
+      "ControlIdentifier": "005e3a3f-c291-0000-0c30-3400836bd2d2",
+      "DesignName": "Step3",
+      "MappingHint": "GROUP",
+      "Importance": 1,
+      "Sections": 1,
+      "HasInstructionalText": true,
+      "Children": [
+        {
+          "t": "gc",
+          "Visible": false,
+          "VisibleRecursive": 2,
+          "ControlIdentifier": "005e3a3f-c291-0000-0c30-3400836bd2d2",
+          "MappingHint": "GROUP",
+          "Importance": 1,
+          "Children": [
+            {
+              "t": "ssc",
+              "Caption": "Link users with salespeople, used for email signatures:",
+              "Editable": false,
+              "Visible": false,
+              "ControlIdentifier": "005e3a3f-c291-0000-0c30-3400836bd2d2",
+              "Name": "InstructionalTextString",
+              "MaximumStringLength": 0,
+              "HelpUrl": "https://docs.continia.com/en-us/continia-document-output"
+            }
+          ]
+        },
+        {
+          "t": "fhc",
+          "Caption": "User Setup",
+          "StringValue": "",
+          "Visible": false,
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-7f47-0000-0c46-d500836bd2d2",
+          "DesignName": "UserSetupSubPage",
+          "Name": "1188396871",
+          "Children": [
+            {
+              "ServerId": "1DB",
+              "t": "lf",
+              "Caption": "User Setup",
+              "ControlIdentifier": "005e3a42-0000-0001-0c00-0000836bd2d2",
+              "DesignName": "CDO Setup Wizard User Setup",
+              "Importance": 1,
+              "SourceAppId": "f4b69b55-c90d-4937-8f53-2742898fa948",
+              "InitialActiveControlPath": "server:c[1]",
+              "ViewMode": 2,
+              "State": 1,
+              "FormStyle": 2,
+              "PageMode": 1,
+              "IsSubForm": true,
+              "IsPart": true,
+              "DesignerLevels": 15,
+              "SupportsAdvancedFiltering": true,
+              "PendingUpdates": 1,
+              "SystemId": null,
+              "SaveOnNavigate": true,
+              "HelpUrl": "https://docs.continia.com/en-us/continia-document-output",
+              "PersonalizationHelpUrl": "https://learn.microsoft.com/en-GB/dynamics365/business-central/ui-personalization-locked",
+              "IsBoundToTemporaryTable": true,
+              "SharedLayout": false,
+              "PageDataSourceType": 0,
+              "Children": [
+                {
+                  "t": "filc",
+                  "Caption": "User Setup",
+                  "StringValue": "",
+                  "ControlIdentifier": "886d4a84-3808-4545-92cf-374593fbc32f",
+                  "Name": "FilterControl",
+                  "Importance": 1,
+                  "FilterColumns": [
+                    {
+                      "Id": "91_User Setup.1.1",
+                      "Caption": "User ID",
+                      "source": {
+                        "field": "User ID",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.10.10",
+                      "Caption": "Salespers./Purch. Code",
+                      "source": {
+                        "field": "Salespers./Purch. Code",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.5",
+                      "Caption": "Allow Deferral Posting From",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Allow Deferral Posting From",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.6",
+                      "Caption": "Allow Deferral Posting To",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Allow Deferral Posting To",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.5600",
+                      "Caption": "Allow FA Posting From",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Allow FA Posting From",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.5601",
+                      "Caption": "Allow FA Posting To",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Allow FA Posting To",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.2",
+                      "Caption": "Allow Posting From",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Allow Posting From",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.5991",
+                      "Caption": "Allow Posting From DateFormula",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Allow Posting From DateFormula",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.3",
+                      "Caption": "Allow Posting To",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Allow Posting To",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.5992",
+                      "Caption": "Allow Posting To DateFormula",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Allow Posting To DateFormula",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.22",
+                      "Caption": "Allow VAT Date From",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Allow VAT Date From",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.23",
+                      "Caption": "Allow VAT Date To",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Allow VAT Date To",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.21",
+                      "Caption": "Approval Administrator",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Approval Administrator",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.11.11",
+                      "Caption": "Approver ID",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Approver ID",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.8000",
+                      "Caption": "Auto Contract Billing",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Auto Contract Billing",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.2000000001",
+                      "Caption": "Created At",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "SystemCreatedAt",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.2000000002.2000000002",
+                      "Caption": "Created By",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "SystemCreatedBy",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.17",
+                      "Caption": "E-Mail",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "E-Mail",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.31",
+                      "Caption": "Licence Type",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "License Type",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.2000000003",
+                      "Caption": "Modified At",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "SystemModifiedAt",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.2000000004.2000000004",
+                      "Caption": "Modified By",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "SystemModifiedBy",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.18",
+                      "Caption": "Phone No.",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Phone No.",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.90",
+                      "Caption": "Purch. Invoice Posting Policy",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Purch. Invoice Posting Policy",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.13",
+                      "Caption": "Purchase Amount Approval Limit",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Purchase Amount Approval Limit",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.5701.5701",
+                      "Caption": "Purchase Resp. Ctr. Filter",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Purchase Resp. Ctr. Filter",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.4",
+                      "Caption": "Register Time",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Register Time",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.19",
+                      "Caption": "Request Amount Approval Limit",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Request Amount Approval Limit",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.0",
+                      "Caption": "Row Version",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "timestamp",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.12",
+                      "Caption": "Sales Amount Approval Limit",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Sales Amount Approval Limit",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.80",
+                      "Caption": "Sales Invoice Posting Policy",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Sales Invoice Posting Policy",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.5700.5700",
+                      "Caption": "Sales Resp. Ctr. Filter",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Sales Resp. Ctr. Filter",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.10.10",
+                      "Caption": "Salespers./Purch. Code",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Salespers./Purch. Code",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.5980",
+                      "Caption": "Service Invoice Posting Policy",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Service Invoice Posting Policy",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.5900.5900",
+                      "Caption": "Service Resp. Ctr. Filter",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Service Resp. Ctr. Filter",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.16.16",
+                      "Caption": "Substitute",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Substitute",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.6210",
+                      "Caption": "Sustainability Manager",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Sustainability Manager",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.2000000000",
+                      "Caption": "System ID",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "$systemId",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.950",
+                      "Caption": "Time Sheet Admin.",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Time Sheet Admin.",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.15",
+                      "Caption": "Unlimited Purchase Approval",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Unlimited Purchase Approval",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.20",
+                      "Caption": "Unlimited Request Approval",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Unlimited Request Approval",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.14",
+                      "Caption": "Unlimited Sales Approval",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "Unlimited Sales Approval",
+                        "scope": "filter"
+                      }
+                    },
+                    {
+                      "Id": "91_User Setup.1.1",
+                      "Caption": "User ID",
+                      "Submenu": "All",
+                      "source": {
+                        "field": "User ID",
+                        "scope": "filter"
+                      }
+                    }
+                  ],
+                  "FlowFilterColumns": [],
+                  "Children": [
+                    {
+                      "t": "sfcl",
+                      "StringValue": "",
+                      "Importance": 1,
+                      "Children": [
+                        {
+                          "t": "fvc",
+                          "Caption": "Search",
+                          "StringValue": "",
+                          "ObjectValue": "",
+                          "ShowCaption": false,
+                          "DesignName": "filter:system:search",
+                          "Formatter": {},
+                          "MaximumStringLength": 5000,
+                          "QuickEntry": false,
+                          "ResolvedFilterValue": "",
+                          "UserTypedFilterValue": ""
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "t": "rc",
+                  "Caption": "Lines",
+                  "ControlIdentifier": "005e3a42-4d72-0000-0c24-2c00836bd2d2",
+                  "DesignName": "Lines",
+                  "Importance": 1,
+                  "Columns": [
+                    {
+                      "t": "rcc",
+                      "Caption": "User ID",
+                      "Editable": false,
+                      "LocalEditable": false,
+                      "TableEditable": true,
+                      "ControlIdentifier": "005e3a42-e70b-0000-0c53-d700836bd2d2",
+                      "DesignName": "1160040002",
+                      "ColumnBinder": {
+                        "Name": "1406658315_c1"
+                      },
+                      "Formatter": {},
+                      "Importance": 2,
+                      "ValidateTableRelation": false,
+                      "ControlId": 1406658315,
+                      "TableFieldNo": 1,
+                      "FieldBound": 2,
+                      "Width": 10,
+                      "SystemActionCount": 1,
+                      "HasLookup": true,
+                      "IsKeyColumn": true,
+                      "ColumnBinderPath": "91_User Setup.1.1",
+                      "MaxLength": 50,
+                      "Analysis": {
+                        "supported": true,
+                        "summing": false,
+                        "rowGroup": true,
+                        "pivot": true,
+                        "filterName": "agMultiColumnFilter",
+                        "createDateSyntheticFields": false,
+                        "isNumericField": false
+                      },
+                      "HelpUrl": "https://docs.continia.com/en-us/continia-document-output",
+                      "Actions": [
+                        {
+                          "t": "ac",
+                          "Caption": "Show Details",
+                          "Enabled": false,
+                          "ControlIdentifier": "0811f208-e9cf-4e36-804b-400aed95af4e",
+                          "Name": "NavShowDetailsAction",
+                          "Importance": 2,
+                          "Icon": {
+                            "Identifier": "Actions/Find/16.png"
+                          },
+                          "LargeIcon": {
+                            "Identifier": "Actions/Find/32.png"
+                          },
+                          "SystemAction": 125,
+                          "Action": {
+                            "t": "clact",
+                            "Enabled": false
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "t": "rcc",
+                      "Caption": "Salespers./Purch. Code",
+                      "TableEditable": true,
+                      "ControlIdentifier": "005e3a42-6ca2-0000-0c2d-d500836bd2d2",
+                      "DesignName": "1160040003",
+                      "ColumnBinder": {
+                        "Name": "768961698_c10"
+                      },
+                      "Formatter": {},
+                      "Importance": 2,
+                      "ControlId": 768961698,
+                      "TableFieldNo": 10,
+                      "FieldBound": 2,
+                      "Width": 10,
+                      "SystemActionCount": 1,
+                      "HasLookup": true,
+                      "ColumnBinderPath": "91_User Setup.10.10",
+                      "MaxLength": 20,
+                      "Analysis": {
+                        "supported": true,
+                        "summing": false,
+                        "rowGroup": true,
+                        "pivot": true,
+                        "filterName": "agMultiColumnFilter",
+                        "createDateSyntheticFields": false,
+                        "isNumericField": false
+                      },
+                      "HelpUrl": "https://docs.continia.com/en-us/continia-document-output",
+                      "Actions": [
+                        {
+                          "t": "ac",
+                          "Caption": "Show Details",
+                          "Enabled": false,
+                          "ControlIdentifier": "0811f208-e9cf-4e36-804b-400aed95af4e",
+                          "Name": "NavShowDetailsAction",
+                          "Importance": 2,
+                          "Icon": {
+                            "Identifier": "Actions/Find/16.png"
+                          },
+                          "LargeIcon": {
+                            "Identifier": "Actions/Find/32.png"
+                          },
+                          "SystemAction": 125,
+                          "Action": {
+                            "t": "clact",
+                            "Enabled": false
+                          }
+                        }
+                      ]
+                    }
+                  ],
+                  "CurrentRow": {
+                    "t": "rrc",
+                    "Name": "RepeaterRowControl",
+                    "Children": [
+                      {
+                        "t": "sc",
+                        "Caption": "User ID",
+                        "StringValue": "",
+                        "Editable": false,
+                        "TemplateControlPath": "server:c[1]/co[0]",
+                        "DesignName": "1160040002",
+                        "ColumnBinder": {
+                          "Name": "1406658315_c1"
+                        },
+                        "Formatter": {},
+                        "TableFieldNo": 1,
+                        "FieldBound": 2,
+                        "LookupAction": {
+                          "t": "lookac",
+                          "Enabled": false,
+                          "SystemAction": 110,
+                          "AllowFilterAsYouType": true,
+                          "CanShowSimpleLookup": true
+                        },
+                        "ShowDetailsAction": {
+                          "t": "clact",
+                          "Enabled": false,
+                          "SystemAction": 125
+                        },
+                        "MaximumStringLength": 50,
+                        "DefaultAction": {
+                          "t": "lookac",
+                          "Enabled": false,
+                          "SystemAction": 110,
+                          "AllowFilterAsYouType": true,
+                          "CanShowSimpleLookup": true
+                        }
+                      },
+                      {
+                        "t": "sc",
+                        "Caption": "Salespers./Purch. Code",
+                        "StringValue": "",
+                        "TemplateControlPath": "server:c[1]/co[1]",
+                        "DesignName": "1160040003",
+                        "ColumnBinder": {
+                          "Name": "768961698_c10"
+                        },
+                        "Formatter": {},
+                        "TableFieldNo": 10,
+                        "FieldBound": 2,
+                        "LookupAction": {
+                          "t": "lookac",
+                          "Enabled": false,
+                          "SystemAction": 110,
+                          "AllowFilterAsYouType": true,
+                          "CanShowSimpleLookup": true
+                        },
+                        "ShowDetailsAction": {
+                          "t": "clact",
+                          "Enabled": false,
+                          "SystemAction": 125
+                        },
+                        "MaximumStringLength": 20
+                      }
+                    ]
+                  },
+                  "ColumnGroups": [
+                    {
+                      "GroupName": "Brick",
+                      "Columns": [
+                        "server:c[1]/co[0]"
+                      ]
+                    }
+                  ],
+                  "IsScrollingEnabled": true,
+                  "BlockSize": 49,
+                  "IsAnalysisSupported": true,
+                  "PageSize": 49
+                },
+                {
+                  "t": "gc",
+                  "ControlIdentifier": "fb8cccf3-54ac-4d77-9ad8-136cec25583a",
+                  "Name": "CommandBar",
+                  "MappingHint": "TOOLBAR",
+                  "Importance": 1,
+                  "Children": [
+                    {
+                      "t": "gc",
+                      "Caption": "&Actions",
+                      "ControlIdentifier": "9bfb7851-c660-4082-9115-d127551f6a6a",
+                      "Name": "Control_Actions",
+                      "Importance": 1,
+                      "ActionContainerType": 1,
+                      "Children": [
+                        {
+                          "t": "ac",
+                          "Caption": "Open in Excel",
+                          "ControlIdentifier": "824ce6a9-f185-4c77-a9aa-f2a3ec3504b1",
+                          "DesignName": "Control_Microsoft_Excel_By_Server",
+                          "Synopsis": "Opens an Excel file with the data exported from the list (selected filters and columns).",
+                          "Importance": 2,
+                          "Icon": {
+                            "Identifier": "Actions/Excel/16.png"
+                          },
+                          "LargeIcon": {
+                            "Identifier": "Actions/Excel/32.png"
+                          },
+                          "DefinitionId": 2000005011,
+                          "SystemAction": 165,
+                          "Action": {
+                            "t": "clact"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "t": "gc",
+                      "Caption": "Related &Information",
+                      "Visible": false,
+                      "LocalVisible": false,
+                      "Name": "RelatedGroup",
+                      "Importance": 1,
+                      "ActionContainerType": 2
+                    },
+                    {
+                      "t": "gc",
+                      "Caption": "Views",
+                      "Visible": false,
+                      "LocalVisible": false,
+                      "Name": "ViewsGroup",
+                      "MappingHint": "PAGEVIEWS",
+                      "Importance": 1
+                    },
+                    {
+                      "t": "gc",
+                      "Caption": "&Reports",
+                      "Visible": false,
+                      "LocalVisible": false,
+                      "Name": "ReportsGroup",
+                      "Importance": 1,
+                      "ActionContainerType": 4
+                    },
+                    {
+                      "t": "gc",
+                      "ShowCaption": false,
+                      "Name": "HelpGroup",
+                      "MappingHint": "CommandBarHelpGroup",
+                      "Importance": 1
+                    },
+                    {
+                      "t": "gc",
+                      "ShowCaption": false,
+                      "Name": "LayoutGroup",
+                      "MappingHint": "CommandBarLayoutGroup",
+                      "Importance": 1
+                    },
+                    {
+                      "t": "ssc",
+                      "Editable": false,
+                      "Visible": false,
+                      "LocalVisible": false,
+                      "Name": "SystemIndicator",
+                      "Importance": 1,
+                      "MaximumStringLength": 0,
+                      "HelpUrl": "https://docs.continia.com/en-us/continia-document-output"
+                    }
+                  ]
+                },
+                {
+                  "t": "gc",
+                  "Name": "PromptActions",
+                  "MappingHint": "PromptActions",
+                  "Importance": 1,
+                  "ActionContainerType": 6,
+                  "Children": [
+                    {
+                      "t": "gc",
+                      "Name": "ClientPromptActions",
+                      "MappingHint": "ClientPromptActions",
+                      "Importance": 1
+                    }
+                  ]
+                }
+              ],
+              "Metadata": {
+                "id": 6175298,
+                "sourceTableId": 91,
+                "primaryKeyIds": [
+                  1
+                ]
+              },
+              "PageType": 4
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "t": "gc",
+      "Caption": "Step4",
+      "ShowCaption": false,
+      "Visible": false,
+      "LocalVisible": false,
+      "ExpressionProperties": {
+        "Visible": true
+      },
+      "ControlIdentifier": "005e3a3f-1b70-0000-0c3a-4600836bd2d2",
+      "DesignName": "Step4",
+      "MappingHint": "GROUP",
+      "Importance": 1,
+      "Sections": 1,
+      "Children": [
+        {
+          "t": "gc",
+          "Caption": "Set Handled (DO) on posted documents",
+          "Visible": false,
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-9dea-0000-0c3b-9b00836bd2d2",
+          "DesignName": "NoPrintedReset",
+          "Importance": 1,
+          "HasInstructionalText": true,
+          "Children": [
+            {
+              "t": "gc",
+              "Visible": false,
+              "VisibleRecursive": 2,
+              "ControlIdentifier": "005e3a3f-9dea-0000-0c3b-9b00836bd2d2",
+              "MappingHint": "GROUP",
+              "Importance": 1,
+              "Children": [
+                {
+                  "t": "ssc",
+                  "Caption": "Set Handled (DO) on old posted documents. To ensure that you do not email old documents.",
+                  "Editable": false,
+                  "Visible": false,
+                  "ControlIdentifier": "005e3a3f-9dea-0000-0c3b-9b00836bd2d2",
+                  "Name": "InstructionalTextString",
+                  "MaximumStringLength": 0,
+                  "HelpUrl": "https://docs.continia.com/en-us/continia-document-output"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "t": "dtc",
+          "Caption": "Set on documents posted before",
+          "StringValue": "2/27/2026",
+          "ObjectValue": "2026-02-27T00:00:00+00:00",
+          "Visible": false,
+          "TableEditable": true,
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-fcc3-0000-0c01-a400836bd2d2",
+          "DesignName": "Documents Before",
+          "ColumnBinder": {
+            "Name": "27589827_cControl27589827"
+          },
+          "Formatter": {},
+          "Synopsis": "Specifies the value of the Set on Documents Posted Before field.",
+          "Importance": 2,
+          "ValidateTableRelation": false,
+          "ControlId": 27589827,
+          "FieldBound": 1,
+          "HelpUrl": "https://docs.continia.com/en-us/continia-document-output"
+        },
+        {
+          "t": "i32c",
+          "Caption": "No. of Sales Shipments",
+          "StringValue": "0",
+          "ObjectValue": 0,
+          "Editable": false,
+          "Visible": false,
+          "LocalEditable": false,
+          "TableEditable": true,
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-e58d-0000-0c17-9800836bd2d2",
+          "DesignName": "Sales Shipments",
+          "ColumnBinder": {
+            "Name": "395896205_cControl395896205"
+          },
+          "Formatter": {
+            "HorizontalAlignment": "Right"
+          },
+          "Synopsis": "Specifies the value of the No. of Sales Shipments field.",
+          "Importance": 2,
+          "ValidateTableRelation": false,
+          "ControlId": 395896205,
+          "FieldBound": 1,
+          "DrillDownAction": {
+            "t": "ofact",
+            "SystemAction": 120
+          },
+          "MaximumStringLength": 25,
+          "DefaultAction": {
+            "t": "ofact",
+            "SystemAction": 120
+          },
+          "HelpUrl": "https://docs.continia.com/en-us/continia-document-output",
+          "Actions": [
+            {
+              "t": "ac",
+              "Caption": "DrillDown",
+              "ControlIdentifier": "e6b4fdb8-37e6-4f40-ab41-839ce5bb611d",
+              "Name": "NavDrilldownAction",
+              "Importance": 2,
+              "Icon": {
+                "Identifier": "Actions/Action_DrillDown.png"
+              },
+              "SystemAction": 120,
+              "Action": {
+                "t": "ofact"
+              },
+              "ShortcutKeys": [
+                "SHIFT+F8"
+              ]
+            }
+          ]
+        },
+        {
+          "t": "i32c",
+          "Caption": "No. of Sales Invoices",
+          "StringValue": "0",
+          "ObjectValue": 0,
+          "Editable": false,
+          "Visible": false,
+          "LocalEditable": false,
+          "TableEditable": true,
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-e53c-0000-0c4a-8500836bd2d2",
+          "DesignName": "Sales Invoices",
+          "ColumnBinder": {
+            "Name": "1250288956_cControl1250288956"
+          },
+          "Formatter": {
+            "HorizontalAlignment": "Right"
+          },
+          "Synopsis": "Specifies the value of the No. of Sales Invoices field.",
+          "Importance": 2,
+          "ValidateTableRelation": false,
+          "ControlId": 1250288956,
+          "FieldBound": 1,
+          "DrillDownAction": {
+            "t": "ofact",
+            "SystemAction": 120
+          },
+          "MaximumStringLength": 25,
+          "DefaultAction": {
+            "t": "ofact",
+            "SystemAction": 120
+          },
+          "HelpUrl": "https://docs.continia.com/en-us/continia-document-output",
+          "Actions": [
+            {
+              "t": "ac",
+              "Caption": "DrillDown",
+              "ControlIdentifier": "e6b4fdb8-37e6-4f40-ab41-839ce5bb611d",
+              "Name": "NavDrilldownAction",
+              "Importance": 2,
+              "Icon": {
+                "Identifier": "Actions/Action_DrillDown.png"
+              },
+              "SystemAction": 120,
+              "Action": {
+                "t": "ofact"
+              },
+              "ShortcutKeys": [
+                "SHIFT+F8"
+              ]
+            }
+          ]
+        },
+        {
+          "t": "i32c",
+          "Caption": "No. of Sales Credit Memos",
+          "StringValue": "0",
+          "ObjectValue": 0,
+          "Editable": false,
+          "Visible": false,
+          "LocalEditable": false,
+          "TableEditable": true,
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-df3e-0000-0c38-4a00836bd2d2",
+          "DesignName": "Sales Credit Memos",
+          "ColumnBinder": {
+            "Name": "944430910_cControl944430910"
+          },
+          "Formatter": {
+            "HorizontalAlignment": "Right"
+          },
+          "Synopsis": "Specifies the value of the No. of Sales Credit Memos field.",
+          "Importance": 2,
+          "ValidateTableRelation": false,
+          "ControlId": 944430910,
+          "FieldBound": 1,
+          "DrillDownAction": {
+            "t": "ofact",
+            "SystemAction": 120
+          },
+          "MaximumStringLength": 25,
+          "DefaultAction": {
+            "t": "ofact",
+            "SystemAction": 120
+          },
+          "HelpUrl": "https://docs.continia.com/en-us/continia-document-output",
+          "Actions": [
+            {
+              "t": "ac",
+              "Caption": "DrillDown",
+              "ControlIdentifier": "e6b4fdb8-37e6-4f40-ab41-839ce5bb611d",
+              "Name": "NavDrilldownAction",
+              "Importance": 2,
+              "Icon": {
+                "Identifier": "Actions/Action_DrillDown.png"
+              },
+              "SystemAction": 120,
+              "Action": {
+                "t": "ofact"
+              },
+              "ShortcutKeys": [
+                "SHIFT+F8"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "t": "gc",
+      "Caption": "StepFinish",
+      "ShowCaption": false,
+      "Visible": false,
+      "LocalVisible": false,
+      "ExpressionProperties": {
+        "Visible": true
+      },
+      "ControlIdentifier": "005e3a3f-70a9-0000-0c61-7a00836bd2d2",
+      "DesignName": "StepFinish",
+      "MappingHint": "GROUP",
+      "Importance": 1,
+      "Sections": 1,
+      "Children": [
+        {
+          "t": "gc",
+          "Caption": "That's it",
+          "Visible": false,
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-69cb-0000-0c69-6a00836bd2d2",
+          "DesignName": "Finish",
+          "Importance": 1,
+          "HasInstructionalText": true,
+          "Children": [
+            {
+              "t": "gc",
+              "Visible": false,
+              "VisibleRecursive": 2,
+              "ControlIdentifier": "005e3a3f-69cb-0000-0c69-6a00836bd2d2",
+              "MappingHint": "GROUP",
+              "Importance": 1,
+              "Children": [
+                {
+                  "t": "ssc",
+                  "Caption": "Choose Finish to enable the specified settings and complete the setup.",
+                  "Editable": false,
+                  "Visible": false,
+                  "ControlIdentifier": "005e3a3f-69cb-0000-0c69-6a00836bd2d2",
+                  "Name": "InstructionalTextString",
+                  "MaximumStringLength": 0,
+                  "HelpUrl": "https://docs.continia.com/en-us/continia-document-output"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "t": "gc",
+          "Caption": "Finish2",
+          "ShowCaption": false,
+          "Visible": false,
+          "ExpressionProperties": {
+            "Visible": true
+          },
+          "ControlIdentifier": "005e3a3f-dedf-0000-0c42-e700836bd2d2",
+          "DesignName": "Finish2",
+          "Importance": 1,
+          "HasInstructionalText": true,
+          "Children": [
+            {
+              "t": "gc",
+              "Visible": false,
+              "VisibleRecursive": 2,
+              "ControlIdentifier": "005e3a3f-dedf-0000-0c42-e700836bd2d2",
+              "MappingHint": "GROUP",
+              "Importance": 1,
+              "Children": [
+                {
+                  "t": "ssc",
+                  "Caption": "We hope you will enjoy working with Document Output.",
+                  "Editable": false,
+                  "Visible": false,
+                  "ControlIdentifier": "005e3a3f-dedf-0000-0c42-e700836bd2d2",
+                  "Name": "InstructionalTextString",
+                  "MaximumStringLength": 0,
+                  "HelpUrl": "https://docs.continia.com/en-us/continia-document-output"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "t": "gc",
+      "ShowCaption": false,
+      "ControlIdentifier": "ec1da4b5-d7a8-4091-a7b3-2db6107b6c56",
+      "Name": "ActionBar",
+      "MappingHint": "ACTIONBAR",
+      "Importance": 1,
+      "Children": [
+        {
+          "t": "ac",
+          "Caption": "&Back",
+          "Enabled": false,
+          "ExpressionProperties": {
+            "Enabled": true
+          },
+          "ControlIdentifier": "005e3a3f-8c33-0000-0c6d-1700836bd2d2",
+          "DesignName": "BackAction",
+          "Synopsis": "Return to the previous step in the assisted setup guide.",
+          "Importance": 2,
+          "Icon": {
+            "Identifier": "Actions/PreviousRecord/16.png"
+          },
+          "LargeIcon": {
+            "Identifier": "Actions/PreviousRecord/32.png"
+          },
+          "Action": {
+            "t": "clact"
+          }
+        },
+        {
+          "t": "ac",
+          "Caption": "&Next",
+          "ExpressionProperties": {
+            "Enabled": true
+          },
+          "ControlIdentifier": "005e3a3f-94a7-0000-0c12-7200836bd2d2",
+          "DesignName": "NextAction",
+          "Synopsis": "Proceed to the next step in the assisted setup guide.",
+          "Importance": 2,
+          "Icon": {
+            "Identifier": "Actions/NextRecord/16.png"
+          },
+          "LargeIcon": {
+            "Identifier": "Actions/NextRecord/32.png"
+          },
+          "Action": {
+            "t": "clact"
+          }
+        },
+        {
+          "t": "ac",
+          "Caption": "&Finish",
+          "Enabled": false,
+          "ExpressionProperties": {
+            "Enabled": true
+          },
+          "ControlIdentifier": "005e3a3f-2ee5-0000-0c52-bf00836bd2d2",
+          "DesignName": "FinishAction",
+          "Synopsis": "Complete the setup process and apply all configured settings.",
+          "Importance": 2,
+          "Icon": {
+            "Identifier": "Actions/Approve/16.png"
+          },
+          "LargeIcon": {
+            "Identifier": "Actions/Approve/32.png"
+          },
+          "Action": {
+            "t": "clact"
+          }
+        },
+        {
+          "t": "ac",
+          "Caption": "Close",
+          "ControlIdentifier": "71674c43-bac2-47be-8a98-4a646bb3fc42",
+          "Name": "{71674c43-bac2-47be-8a98-4a646bb3fc42}",
+          "Importance": 2,
+          "SystemAction": 350,
+          "Action": {
+            "t": "clact"
+          },
+          "ShortcutKeys": [
+            "CTRL+ENTER"
+          ]
+        }
+      ]
+    }
+  ],
+  "Query": "bookmark=10_eHFu9miCnEKF24noz1tSYw&page=6175295",
+  "Metadata": {
+    "id": 6175295,
+    "sourceTableId": 0
+  },
+  "PageType": 9
+}

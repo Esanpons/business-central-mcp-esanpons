@@ -27,6 +27,7 @@ import { RespondDialogOperation } from './operations/respond-dialog.js';
 import { SwitchCompanyOperation } from './operations/switch-company.js';
 import { ListCompaniesOperation } from './operations/list-companies.js';
 import { RunReportOperation } from './operations/run-report.js';
+import { WizardNavigateOperation } from './operations/wizard-navigate.js';
 import { buildToolRegistry, type Operations } from './mcp/tool-registry.js';
 import { MCPHandler } from './mcp/handler.js';
 // isErr no longer needed — SessionManager handles session creation errors internally
@@ -84,6 +85,7 @@ async function main() {
       switchCompany: new SwitchCompanyOperation(s, pageContextRepo, logger),
       listCompanies: new ListCompaniesOperation(pageService, dataService, () => s.companyName, logger),
       runReport: new RunReportOperation(s),
+      wizardNavigate: new WizardNavigateOperation(actionService, pageContextRepo),
     };
 
     return buildToolRegistry(operations);

@@ -171,10 +171,40 @@ export type EventPredicate = (event: BCEvent, context: {
 
 // -- PageState: derived from BCEvent[] projections --
 
+/**
+ * AL PageType names. Wire ordinal -> name mapping lives in control-tree-parser.ts
+ * `PAGE_TYPE_MAP` and is sourced from decompiled `Microsoft.Dynamics.Nav.Types.Metadata.PageType.cs`.
+ */
+export type PageType =
+  | 'Card'
+  | 'List'
+  | 'RoleCenter'
+  | 'CardPart'
+  | 'ListPart'
+  | 'Document'
+  | 'Worksheet'
+  | 'ListPlus'
+  | 'ConfirmationDialog'
+  | 'NavigatePage'
+  | 'StandardDialog'
+  | 'API'
+  | 'HeadlinePart'
+  | 'ReportPreview'
+  | 'ReportProcessingOnly'
+  | 'XmlPort'
+  | 'ReportViewer'
+  | 'FilterPage'
+  | 'ListQuery'
+  | 'BannerPart'
+  | 'PromptDialog'
+  | 'ConfigurationDialog'
+  | 'UserControlHost'
+  | 'Unknown';
+
 export interface PageState {
   readonly pageContextId: string;
   readonly formId: string;
-  readonly pageType: 'Card' | 'List' | 'Document' | 'Unknown';
+  readonly pageType: PageType;
   readonly controlTree: ControlField[];
   readonly repeater: RepeaterState | null;
   readonly filterControlPath: string | null;
@@ -230,6 +260,8 @@ export interface ActionInfo {
   readonly enabled: boolean;
   readonly visible: boolean;
   readonly isLineScoped: boolean;       // true if defined inside a repeater subtree
+  readonly iconIdentifier?: string;     // raw icon resource path, e.g. "Actions/NextRecord/16.png"
+  readonly wizardNav?: 'back' | 'next' | 'finish' | 'cancel'; // semantic role on a NavigatePage
 }
 
 export enum ControlContainerType {

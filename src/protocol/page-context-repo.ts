@@ -22,7 +22,7 @@ export class PageContextRepository {
     return id ? this.pages.get(id) : undefined;
   }
 
-  create(pageContextId: string, rootFormId: string): PageContext {
+  create(pageContextId: string, rootFormId: string, options?: { isModal?: boolean }): PageContext {
     const rootForm = this.formProjection.createInitial(rootFormId);
     const headerSection = this.sectionResolver.createHeaderSection(rootFormId);
 
@@ -35,6 +35,7 @@ export class PageContextRepository {
       sections: new Map([['header', headerSection]]),
       dialogs: [],
       ownedFormIds: [rootFormId],
+      isModal: options?.isModal ?? false,
     };
 
     this.pages.set(pageContextId, ctx);
@@ -86,9 +87,22 @@ export class PageContextRepository {
       return;
     }
 
-    // Dialog: route by ownerFormId
-    if (event.type === 'DialogOpened' && event.ownerFormId) {
-      const ownerPcId = targetPcId ?? this.formIdIndex.get(event.ownerFormId);
+    // Dialog: when the dialog's formId IS a page's rootFormId (modal-rooted page),
+    // treat the dialog's controlTree as the page's root layout. Otherwise it's a
+    // child dialog opened over an existing page (route via ownerFormId, fall back
+    // to targetPcId when an ownerless dialog arrives during the open invocation).
+    if (event.type === 'DialogOpened') {
+      const directPcId = targetPcId ?? this.formIdIndex.get(formId);
+      if (directPcId) {
+        const page = this.pages.get(directPcId);
+        if (page && page.rootFormId === formId) {
+          this.applyRootControlTree(directPcId, formId, event.controlTree);
+          return;
+        }
+      }
+      const ownerPcId = event.ownerFormId
+        ? (targetPcId ?? this.formIdIndex.get(event.ownerFormId))
+        : targetPcId;
       if (ownerPcId) {
         this.addDialog(ownerPcId, event);
       }
@@ -192,13 +206,22 @@ export class PageContextRepository {
   }
 
   private updateRootForm(pcId: string, event: BCEvent & { type: 'FormCreated' }): void {
+    this.applyRootControlTree(pcId, event.formId, event.controlTree);
+  }
+
+  /**
+   * Apply a control tree as the page's root form layout. Shared between
+   * `FormCreated` (regular pages) and `DialogOpened` (modal-rooted pages such
+   * as wizards / request pages).
+   */
+  private applyRootControlTree(pcId: string, formId: string, controlTree: unknown): void {
     const page = this.pages.get(pcId);
     if (!page) return;
 
-    const parsed = parseControlTree(event.controlTree);
-    const existingForm = page.forms.get(event.formId);
+    const parsed = parseControlTree(controlTree);
+    const existingForm = page.forms.get(formId);
     const updated: FormState = {
-      ...(existingForm ?? this.formProjection.createInitial(event.formId)),
+      ...(existingForm ?? this.formProjection.createInitial(formId)),
       controlTree: parsed.fields.length > 0 ? parsed.fields : (existingForm?.controlTree ?? []),
       tabs: parsed.tabs ?? existingForm?.tabs,
       repeaters: parsed.repeaters.size > 0 ? parsed.repeaters : (existingForm?.repeaters ?? new Map()),
@@ -207,7 +230,7 @@ export class PageContextRepository {
     };
 
     const forms = new Map(page.forms);
-    forms.set(event.formId, updated);
+    forms.set(formId, updated);
 
     this.pages.set(pcId, {
       ...page,

@@ -1,4 +1,4 @@
-import type { ControlField, RepeaterColumn, RepeaterState, ActionInfo, TabGroup } from './types.js';
+import type { ControlField, RepeaterColumn, RepeaterState, ActionInfo, TabGroup, PageType } from './types.js';
 
 export interface DiscoveredChildForm {
   readonly serverId: string;          // lf node's ServerId (used as formId)
@@ -10,7 +10,7 @@ export interface DiscoveredChildForm {
 
 export interface ParsedControlTree {
   caption: string;
-  pageType: 'Card' | 'List' | 'Document' | 'Unknown';
+  pageType: PageType;
   fields: ControlField[];
   tabs?: TabGroup[];
   repeaters: ReadonlyMap<string, RepeaterState>;
@@ -20,13 +20,46 @@ export interface ParsedControlTree {
   metadata?: { id: number; sourceTableId: number };
 }
 
-const FIELD_TYPES = new Set(['sc', 'dc', 'bc', 'dtc', 'i32c', 'sec', 'pc']);
+const FIELD_TYPES = new Set([
+  'sc',   // StringControl — text field
+  'dc',   // DecimalControl — numeric field
+  'bc',   // BooleanControl — checkbox
+  'dtc',  // DateControl
+  'i32c', // Int32Control
+  'sec',  // SelectControl — option/dropdown
+  'pc',   // PasswordControl
+  'ssc',  // StaticStringControl — read-only label / instructional text on wizards & cues
+]);
 
-const PAGE_TYPE_MAP: Record<number, ParsedControlTree['pageType']> = {
+/**
+ * Wire-level PageType ordinal -> AL PageType name. Indices come from BC's
+ * enum (decompiled `Microsoft.Dynamics.Nav.Types.Metadata.PageType.cs`).
+ * Order is load-bearing — values are serialized as the enum index.
+ */
+const PAGE_TYPE_MAP: Record<number, PageType> = {
   0: 'Card',
   1: 'List',
-  2: 'Document',
-  3: 'Document',  // Worksheet — treated as Document for our purposes
+  2: 'RoleCenter',
+  3: 'CardPart',
+  4: 'ListPart',
+  5: 'Document',
+  6: 'Worksheet',
+  7: 'ListPlus',
+  8: 'ConfirmationDialog',
+  9: 'NavigatePage',
+  10: 'StandardDialog',
+  11: 'API',
+  12: 'HeadlinePart',
+  13: 'ReportPreview',
+  14: 'ReportProcessingOnly',
+  15: 'XmlPort',
+  16: 'ReportViewer',
+  17: 'FilterPage',
+  18: 'ListQuery',
+  19: 'BannerPart',
+  20: 'PromptDialog',
+  21: 'ConfigurationDialog',
+  22: 'UserControlHost',
 };
 
 /**
@@ -137,6 +170,10 @@ function extractField(
   // Skip placeholder fields
   if (node.MappingHint === 'PlaceholderField') return;
 
+  // Skip ssc spacers/decorations: bare static strings with neither caption nor
+  // a column binder are layout fillers (e.g. blank rows in card forms).
+  if (t === 'ssc' && !node.Caption && !node.ColumnBinder) return;
+
   // Determine visibility: check direct Visible, then ExpressionProperties.Visible
   let visible = true;
   if (typeof node.Visible === 'boolean') {
@@ -173,6 +210,10 @@ function extractAction(
   result: ParsedControlTree,
   isLineScoped = false,
 ): void {
+  const icon = node.Icon as { Identifier?: string } | undefined;
+  const iconIdentifier = icon?.Identifier;
+  const wizardNav = classifyWizardNav(node, iconIdentifier);
+
   result.actions.push({
     controlPath,
     caption: (node.Caption as string) ?? '',
@@ -180,7 +221,36 @@ function extractAction(
     enabled: (node.Enabled as boolean) ?? true,
     visible: (node.Visible as boolean) ?? true,
     isLineScoped,
+    ...(iconIdentifier ? { iconIdentifier } : {}),
+    ...(wizardNav ? { wizardNav } : {}),
   });
+}
+
+/**
+ * Detect wizard navigation actions (Back / Next / Finish / Cancel) on a
+ * NavigatePage. BC's own client classifies these by icon resource — confirmed
+ * in `Microsoft.Dynamics.Framework.UI.NavigatePageActionControlHelper.cs`.
+ *
+ * Two icon naming conventions exist in the wild:
+ *   modern: `Actions/PreviousRecord/16.png`, `Actions/NextRecord/16.png`, `Actions/Approve/16.png`
+ *   legacy: `Action_PreviousRecord_16x16.png`, `Action_NextRecord_16x16.png`, `Action_Approve_16x16.png`
+ *
+ * Cancel is not icon-classified by BC; we detect it via SystemAction.Cancel(310)
+ * or Abort(320) or the conventional close-action SystemAction 350.
+ */
+function classifyWizardNav(
+  node: Record<string, unknown>,
+  iconIdentifier: string | undefined,
+): 'back' | 'next' | 'finish' | 'cancel' | undefined {
+  if (iconIdentifier) {
+    const id = iconIdentifier;
+    if (/PreviousRecord/i.test(id)) return 'back';
+    if (/NextRecord|Action_Start/i.test(id)) return 'next';
+    if (/Approve/i.test(id)) return 'finish';
+  }
+  const sysAction = node.SystemAction as number | undefined;
+  if (sysAction === 310 || sysAction === 320 || sysAction === 350) return 'cancel';
+  return undefined;
 }
 
 function extractRepeater(

@@ -54,16 +54,28 @@ export class PageService {
     const events = result.value;
     const pageContextId = `session:page:${pageId}:${uuid().substring(0, 8)}`;
 
-    // Find the FormCreated event to get the main formId
-    const formCreated = events.find(e => e.type === 'FormCreated');
-    const formId = formCreated?.type === 'FormCreated' ? formCreated.formId : '';
+    // Resolve the page root: prefer FormCreated (regular page). Fall back to
+    // DialogOpened for modal-rooted pages — wizards (NavigatePage), request
+    // pages (StandardDialog), confirmation prompts. The ownerless DialogOpened
+    // arrives in the same OpenForm response and IS the page.
+    const formCreated = events.find((e): e is BCEvent & { type: 'FormCreated' } => e.type === 'FormCreated' && !e.parentFormId);
+    const dialogOpened = !formCreated
+      ? events.find((e): e is BCEvent & { type: 'DialogOpened' } => e.type === 'DialogOpened')
+      : undefined;
+    const root = formCreated ?? dialogOpened;
 
-    if (!formId) {
-      this.logger.warn(`No FormCreated event for page ${pageId}. Events: ${events.map(e => e.type).join(', ')}`);
+    if (!root) {
+      this.logger.warn(`No FormCreated/DialogOpened event for page ${pageId}. Events: ${events.map(e => e.type).join(', ')}`);
+      return err(new ProtocolError(`Page ${pageId} did not return a form root. Events: ${events.map(e => e.type).join(', ')}`));
     }
 
-    // Create page context and apply all events
-    this.repo.create(pageContextId, formId);
+    const formId = root.formId;
+    const isModal = root.type === 'DialogOpened';
+
+    // Create page context and apply all events. The repo recognises a
+    // DialogOpened whose formId equals rootFormId and treats it as the root
+    // layout (see applyRootControlTree).
+    this.repo.create(pageContextId, formId, { isModal });
     this.repo.applyToPage(pageContextId, events);
 
     // Discover child forms embedded in the root form's control tree (fhc -> lf nodes)

@@ -1,15 +1,22 @@
 // src/protocol/page-context.ts
 import type { FormState } from './form-state.js';
 import type { SectionDescriptor } from './section-resolver.js';
-import type { DialogInfo } from './types.js';
+import type { DialogInfo, PageType } from './types.js';
 
 export interface PageContext {
   readonly pageContextId: string;
   readonly rootFormId: string;
-  readonly pageType: 'Card' | 'List' | 'Document' | 'Unknown';
+  readonly pageType: PageType;
   readonly caption: string;
   readonly forms: ReadonlyMap<string, FormState>;
   readonly sections: ReadonlyMap<string, SectionDescriptor>;
   readonly dialogs: DialogInfo[];
   readonly ownedFormIds: string[];
+  /**
+   * True when the root was a `DialogOpened` (modal page — wizards, request pages,
+   * confirmation prompts). Modal-rooted pages must be closed via the modal's own
+   * Cancel/Finish/Close action; CloseForm on the root works but BC may emit a
+   * LogicalModalityViolation if other modals layered on top.
+   */
+  readonly isModal: boolean;
 }

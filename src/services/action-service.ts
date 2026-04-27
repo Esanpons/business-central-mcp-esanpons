@@ -83,6 +83,38 @@ export class ActionService {
     return this.invokeAction(pageContextId, form, action.controlPath, action.systemAction);
   }
 
+  /**
+   * Drive a NavigatePage wizard by semantic step (`back` / `next` / `finish` / `cancel`).
+   * The matching action's controlPath is resolved from the parser's `wizardNav` tag.
+   *
+   * Reference: `Microsoft.Dynamics.Framework.UI.NavigatePageActionControlHelper.cs`
+   * — BC's own client classifies these by icon resource, not SystemAction.
+   */
+  async executeWizardNav(
+    pageContextId: string,
+    nav: 'back' | 'next' | 'finish' | 'cancel',
+  ): Promise<Result<ActionResult, ProtocolError>> {
+    const ctx = this.repo.get(pageContextId);
+    if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
+
+    const root = ctx.forms.get(ctx.rootFormId);
+    if (!root) return err(new ProtocolError(`Root form not found for page ${pageContextId}`));
+
+    const action = root.actions.find(a => a.wizardNav === nav);
+    if (!action) {
+      const available = root.actions.filter(a => a.wizardNav).map(a => a.wizardNav);
+      return err(new ProtocolError(
+        `No wizard action of type '${nav}' on this page (page is ${ctx.pageType}, isModal=${ctx.isModal})`,
+        { availableWizardNav: available },
+      ));
+    }
+    if (!action.enabled) {
+      return err(new ProtocolError(`Wizard action '${nav}' is disabled at this step`));
+    }
+
+    return this.invokeAction(pageContextId, root, action.controlPath, action.systemAction);
+  }
+
   async executeSystemAction(pageContextId: string, systemAction: number, sectionId?: string): Promise<Result<ActionResult, ProtocolError>> {
     const ctx = this.repo.get(pageContextId);
     if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
