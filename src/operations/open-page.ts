@@ -5,8 +5,8 @@ import { resolveSection } from '../protocol/section-resolver.js';
 import { mapRowCellKeys } from '../services/data-service.js';
 import { isEffectivelyVisible } from '../protocol/visibility.js';
 import { fields as treeFields, actions as treeActions, groupVisibility as treeGroupVisibility } from '../protocol/form-views.js';
-import { ancestorsOf } from '../protocol/form-tree-walk.js';
-import { isGroupNode, type ActionNode, type FormNode } from '../protocol/form-node.js';
+import { ancestorGroupPaths } from '../protocol/form-tree-walk.js';
+import { type ActionNode } from '../protocol/form-node.js';
 
 export interface OpenPageInput {
   pageId: string;
@@ -29,10 +29,6 @@ export interface OpenPageOutput {
     wizardNav?: 'back' | 'next' | 'finish' | 'cancel';
   }>;
   rows?: Array<{ bookmark: string; cells: Record<string, unknown> }>;
-}
-
-function ancestorGroupPaths(root: FormNode, controlPath: string): readonly string[] {
-  return ancestorsOf(root, controlPath).filter(n => isGroupNode(n)).map(n => n.controlPath);
 }
 
 function classifyWizardNav(a: ActionNode): 'back' | 'next' | 'finish' | 'cancel' | undefined {

@@ -1,5 +1,5 @@
 // src/protocol/form-tree-walk.ts
-import { childrenOf, type FormNode } from './form-node.js';
+import { childrenOf, isGroupNode, type FormNode } from './form-node.js';
 
 /** Pre-order traversal of the tree, yielding every node including the root. */
 export function* walkTree(root: FormNode): Generator<FormNode> {
@@ -44,4 +44,18 @@ export function ancestorsOf(root: FormNode, controlPath: string): readonly FormN
     return undefined;
   }
   return visit(root, []) ?? [];
+}
+
+const ancestorGroupPathsCache = new WeakMap<FormNode, Map<string, readonly string[]>>();
+
+/** Returns the gc-only ancestor controlPaths for the node at controlPath.
+ * Memoised per root; same root reference returns the same array reference. */
+export function ancestorGroupPaths(root: FormNode, controlPath: string): readonly string[] {
+  let cache = ancestorGroupPathsCache.get(root);
+  if (!cache) { cache = new Map(); ancestorGroupPathsCache.set(root, cache); }
+  const cached = cache.get(controlPath);
+  if (cached) return cached;
+  const result = ancestorsOf(root, controlPath).filter(n => isGroupNode(n)).map(n => n.controlPath);
+  cache.set(controlPath, result);
+  return result;
 }
