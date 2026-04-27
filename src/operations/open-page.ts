@@ -4,6 +4,9 @@ import type { PageService } from '../services/page-service.js';
 import { resolveSection } from '../protocol/section-resolver.js';
 import { mapRowCellKeys } from '../services/data-service.js';
 import { isEffectivelyVisible } from '../protocol/visibility.js';
+import { fields as treeFields, actions as treeActions, groupVisibility as treeGroupVisibility } from '../protocol/form-views.js';
+import { ancestorsOf } from '../protocol/form-tree-walk.js';
+import { isGroupNode, type ActionNode, type FormNode } from '../protocol/form-node.js';
 
 export interface OpenPageInput {
   pageId: string;
@@ -28,6 +31,21 @@ export interface OpenPageOutput {
   rows?: Array<{ bookmark: string; cells: Record<string, unknown> }>;
 }
 
+function ancestorGroupPaths(root: FormNode, controlPath: string): readonly string[] {
+  return ancestorsOf(root, controlPath).filter(n => isGroupNode(n)).map(n => n.controlPath);
+}
+
+function classifyWizardNav(a: ActionNode): 'back' | 'next' | 'finish' | 'cancel' | undefined {
+  const id = a.iconIdentifier;
+  if (id) {
+    if (/PreviousRecord/i.test(id)) return 'back';
+    if (/NextRecord|Action_Start/i.test(id)) return 'next';
+    if (/Approve/i.test(id)) return 'finish';
+  }
+  if (a.systemAction === 310 || a.systemAction === 320 || a.systemAction === 350) return 'cancel';
+  return undefined;
+}
+
 export class OpenPageOperation {
   constructor(private readonly pageService: PageService) {}
 
@@ -42,24 +60,44 @@ export class OpenPageOperation {
       const form = 'error' in resolved ? undefined : resolved.form;
       const repeater = 'error' in resolved ? null : resolved.repeater;
 
-      const groupVis = form?.groupVisibility ?? new Map();
+      const root = form?.root;
+      const groupVis = root ? treeGroupVisibility(root) : new Map<string, boolean>();
       const ws = ctx.wizardState;
+      const fieldList = root ? treeFields(root) : [];
+      const actionList = root ? treeActions(root) : [];
+
       return {
         pageContextId: ctx.pageContextId,
         pageType: ctx.pageType,
         caption: ctx.caption || ctx.rootFormId,
         isModal: ctx.isModal,
-        fields: (form?.controlTree ?? [])
-          .filter(f => f.caption && isEffectivelyVisible(f, groupVis, ws))
-          .map(f => ({ name: f.caption, value: f.stringValue, editable: f.editable, type: f.type })),
-        actions: (form?.actions ?? [])
-          .filter(a => a.enabled && a.caption && isEffectivelyVisible(a, groupVis, ws))
-          .map(a => ({
-            name: a.caption,
-            systemAction: a.systemAction,
-            enabled: a.enabled,
-            ...(a.wizardNav ? { wizardNav: a.wizardNav } : {}),
+        fields: fieldList
+          .filter(f => f.properties.caption && isEffectivelyVisible(
+            { visible: f.properties.visible ?? true, ancestorGroupPaths: root ? ancestorGroupPaths(root, f.controlPath) : [] },
+            groupVis,
+            ws,
+          ))
+          .map(f => ({
+            name: f.properties.caption!,
+            value: f.properties.stringValue,
+            editable: f.properties.editable ?? false,
+            type: f.type,
           })),
+        actions: actionList
+          .filter(a => (a.properties.enabled ?? true) && a.properties.caption && isEffectivelyVisible(
+            { visible: a.properties.visible ?? true, ancestorGroupPaths: root ? ancestorGroupPaths(root, a.controlPath) : [] },
+            groupVis,
+            ws,
+          ))
+          .map(a => {
+            const wn = classifyWizardNav(a);
+            return {
+              name: a.properties.caption!,
+              systemAction: a.systemAction,
+              enabled: a.properties.enabled ?? true,
+              ...(wn ? { wizardNav: wn } : {}),
+            };
+          }),
         rows: repeater ? mapRowCellKeys(repeater.rows, repeater.columns).map(r => ({ bookmark: r.bookmark, cells: r.cells })) : undefined,
       };
     });
