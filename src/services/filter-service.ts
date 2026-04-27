@@ -3,10 +3,28 @@ import { ProtocolError } from '../core/errors.js';
 import type { BCSession } from '../session/bc-session.js';
 import type { PageContextRepository } from '../protocol/page-context-repo.js';
 import type { PageContext } from '../protocol/page-context.js';
-import type { FilterInteraction } from '../protocol/types.js';
+import type { FilterInteraction, RepeaterState } from '../protocol/types.js';
 import { FilterOperation } from '../protocol/types.js';
-import { resolveSection } from '../protocol/section-resolver.js';
+import { resolveSection, type ResolvedSection } from '../protocol/section-resolver.js';
 import type { Logger } from '../core/logger.js';
+
+// TODO(tier-2/T20): remove when filter-service reads directly from RepeaterNode
+function toRepeaterState(resolved: ResolvedSection): RepeaterState | null {
+  if (!resolved.repeater) return null;
+  return {
+    controlPath: resolved.repeater.controlPath,
+    columns: resolved.repeater.columns.map(c => ({
+      controlPath: c.controlPath,
+      caption: c.properties.caption ?? '',
+      type: 'rcc' as const,
+      columnBinderName: c.columnBinder?.name,
+      columnBinderPath: c.columnBinder?.path,
+    })),
+    rows: [...resolved.rows],
+    totalRowCount: resolved.repeater.properties.totalRowCount ?? null,
+    currentBookmark: resolved.repeater.properties.bookmark ?? null,
+  };
+}
 
 export interface Filter {
   column: string;
@@ -42,19 +60,21 @@ export class FilterService {
 
       const currentResolved = resolveSection(currentCtx, sectionId);
       if ('error' in currentResolved) return err(new ProtocolError(currentResolved.error, { availableSections: currentResolved.availableSections }));
-      if (!currentResolved.repeater) return err(new ProtocolError('State lost during filter application'));
+      // TODO(tier-2/T20): remove adapter when filter-service reads directly from RepeaterNode
+      const currentRepeater = toRepeaterState(currentResolved);
+      if (!currentRepeater) return err(new ProtocolError('State lost during filter application'));
 
       const filterControlPath = currentResolved.form.filterControlPath;
       if (!filterControlPath) return err(new ProtocolError('FilterControlPath lost during filter application'));
 
       // Resolve column name to filterColumnId (ColumnBinderPath from repeater columns)
-      const column = currentResolved.repeater.columns.find(c =>
+      const column = currentRepeater.columns.find(c =>
         c.caption.toLowerCase() === filter.column.toLowerCase()
       );
 
       if (!column) {
         return err(new ProtocolError(`Filter column not found: ${filter.column}`, {
-          availableColumns: currentResolved.repeater.columns.map(c => c.caption).filter(Boolean),
+          availableColumns: currentRepeater.columns.map(c => c.caption).filter(Boolean),
         }));
       }
 
@@ -75,7 +95,7 @@ export class FilterService {
       };
 
       this.logger.info(`[Filter] Filter(AddLine) on ${filterControlPath}, column=${columnBinderPath}, value="${filter.value}"`);
-      this.logger.info(`[Filter] repeater.controlPath=${currentResolved.repeater.controlPath}, formId=${currentResolved.form.formId}`);
+      this.logger.info(`[Filter] repeater.controlPath=${currentRepeater.controlPath}, formId=${currentResolved.form.formId}`);
 
       const addResult = await this.session.invoke(
         addLineInteraction,

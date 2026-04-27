@@ -38,18 +38,6 @@ export interface FormState {
   readonly groupVisibility: ReadonlyMap<string, boolean>;
 }
 
-/** Returns the first (and usually only) repeater, or null. */
-export function primaryRepeater(form: FormState): RepeaterState | null {
-  const first = form.repeaters.values().next();
-  return first.done ? null : first.value;
-}
-
-/** Returns the repeater matching a controlPath, or the primary. */
-export function resolveRepeater(form: FormState, controlPath?: string): RepeaterState | null {
-  if (controlPath) return form.repeaters.get(controlPath) ?? null;
-  return primaryRepeater(form);
-}
-
 export class FormProjection {
   /** Creates an empty FormState for the given formId. */
   createInitial(formId: string, parentFormId?: string): FormState {

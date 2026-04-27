@@ -4,7 +4,25 @@ import type { BCSession } from '../session/bc-session.js';
 import type { PageContextRepository } from '../protocol/page-context-repo.js';
 import type { BCEvent, RepeaterRow, RepeaterColumn, RepeaterState, ControlField, TabGroup, SaveValueInteraction, SetCurrentRowInteraction, ScrollRepeaterInteraction } from '../protocol/types.js';
 import type { Logger } from '../core/logger.js';
-import { resolveSection } from '../protocol/section-resolver.js';
+import { resolveSection, type ResolvedSection } from '../protocol/section-resolver.js';
+
+// TODO(tier-2/T19): remove when data-service reads directly from RepeaterNode + rows
+function toRepeaterState(resolved: ResolvedSection): RepeaterState | null {
+  if (!resolved.repeater) return null;
+  return {
+    controlPath: resolved.repeater.controlPath,
+    columns: resolved.repeater.columns.map(c => ({
+      controlPath: c.controlPath,
+      caption: c.properties.caption ?? '',
+      type: 'rcc' as const,
+      columnBinderName: c.columnBinder?.name,
+      columnBinderPath: c.columnBinder?.path,
+    })),
+    rows: [...resolved.rows],
+    totalRowCount: resolved.repeater.properties.totalRowCount ?? null,
+    currentBookmark: resolved.repeater.properties.bookmark ?? null,
+  };
+}
 
 export interface FieldWriteResult {
   fieldName: string;
@@ -32,8 +50,9 @@ export class DataService {
     if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
     const resolved = resolveSection(ctx, sectionId);
     if ('error' in resolved) return err(new ProtocolError(resolved.error, { availableSections: resolved.availableSections }));
-    if (!resolved.repeater) return ok([]);
-    return ok(mapRowCellKeys(resolved.repeater.rows, resolved.repeater.columns));
+    const repeater = toRepeaterState(resolved);
+    if (!repeater) return ok([]);
+    return ok(mapRowCellKeys(repeater.rows, repeater.columns));
   }
 
   getRepeaterTotalRowCount(pageContextId: string, sectionId?: string): number | null {
@@ -41,7 +60,7 @@ export class DataService {
     if (!ctx) return null;
     const resolved = resolveSection(ctx, sectionId);
     if ('error' in resolved) return null;
-    return resolved.repeater?.totalRowCount ?? null;
+    return resolved.repeater?.properties.totalRowCount ?? null;
   }
 
   getTabs(pageContextId: string, sectionId?: string): Result<TabGroup[] | undefined, ProtocolError> {
@@ -110,7 +129,9 @@ export class DataService {
     const resolved = resolveSection(ctx, options?.sectionId, 'header');
     if ('error' in resolved) return err(new ProtocolError(resolved.error, { availableSections: resolved.availableSections }));
 
-    const { form, repeater } = resolved;
+    const { form } = resolved;
+    // TODO(tier-2/T19): remove adapter when writeLineCell migrated to RepeaterNode
+    const repeater = toRepeaterState(resolved);
 
     // Line cell write: when targeting a specific row in a repeater section
     if (repeater && (options?.bookmark !== undefined || options?.rowIndex !== undefined)) {

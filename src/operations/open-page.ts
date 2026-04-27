@@ -1,7 +1,7 @@
 import { mapResult, type Result } from '../core/result.js';
 import type { ProtocolError } from '../core/errors.js';
 import type { PageService } from '../services/page-service.js';
-import { resolveSection } from '../protocol/section-resolver.js';
+import { resolveSection, type ResolvedSection } from '../protocol/section-resolver.js';
 import { mapRowCellKeys } from '../services/data-service.js';
 import { isEffectivelyVisible } from '../protocol/visibility.js';
 import { fields as treeFields, actions as treeActions, groupVisibility as treeGroupVisibility } from '../protocol/form-views.js';
@@ -85,7 +85,17 @@ export class OpenPageOperation {
               ...(wn ? { wizardNav: wn } : {}),
             };
           }),
-        rows: repeater ? mapRowCellKeys(repeater.rows, repeater.columns).map(r => ({ bookmark: r.bookmark, cells: r.cells })) : undefined,
+        // TODO(tier-2/T25): replace adapter with direct tree-node reads
+        rows: repeater ? mapRowCellKeys(
+          [...(resolved as ResolvedSection).rows],
+          repeater.columns.map(c => ({
+            controlPath: c.controlPath,
+            caption: c.properties.caption ?? '',
+            type: 'rcc' as const,
+            columnBinderName: c.columnBinder?.name,
+            columnBinderPath: c.columnBinder?.path,
+          })),
+        ).map(r => ({ bookmark: r.bookmark, cells: r.cells })) : undefined,
       };
     });
   }

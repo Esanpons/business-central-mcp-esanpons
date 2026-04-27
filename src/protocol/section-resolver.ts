@@ -1,9 +1,10 @@
 // src/protocol/section-resolver.ts
-import { parseControlTree } from './control-tree-parser.js';
+import { buildFormTree } from './form-tree-builder.js';
+import { repeaters as treeRepeaters } from './form-views.js';
 import type { PageContext } from './page-context.js';
 import type { FormState } from './form-state.js';
-import { primaryRepeater, resolveRepeater } from './form-state.js';
-import type { RepeaterState } from './types.js';
+import type { RepeaterRow } from './types.js';
+import type { RepeaterNode } from './form-node.js';
 
 export type SectionKind = 'header' | 'lines' | 'factbox' | 'requestPage' | 'subpage';
 
@@ -19,18 +20,13 @@ export interface SectionDescriptor {
 export interface ResolvedSection {
   section: SectionDescriptor;
   form: FormState;
-  repeater: RepeaterState | null;
+  repeater: RepeaterNode | null;
+  rows: readonly RepeaterRow[];
 }
 
 export class SectionResolver {
   createHeaderSection(rootFormId: string): SectionDescriptor {
-    return {
-      sectionId: 'header',
-      kind: 'header',
-      caption: 'Header',
-      formId: rootFormId,
-      valid: true,
-    };
+    return { sectionId: 'header', kind: 'header', caption: 'Header', formId: rootFormId, valid: true };
   }
 
   deriveSection(
@@ -38,30 +34,27 @@ export class SectionResolver {
     childFormId: string,
     childControlTree: unknown,
   ): SectionDescriptor {
-    const parsed = parseControlTree(childControlTree);
+    // Build the child form's tree to inspect repeater structure. Note: BC sends
+    // child form trees as raw lf JSON in FormCreated/DialogOpened payloads,
+    // which is exactly what buildFormTree expects.
+    const childRoot = buildFormTree(childControlTree);
+    const reps = treeRepeaters(childRoot);
 
-    if (parsed.repeaters.size > 0) {
-      const [repeaterPath] = parsed.repeaters.keys();
+    if (reps.size > 0) {
+      const [repeaterPath] = reps.keys();
       const id = this.uniqueSectionId(parentPageContext, 'lines');
       return {
-        sectionId: id,
-        kind: 'lines',
-        caption: parsed.caption || 'Lines',
+        sectionId: id, kind: 'lines',
+        caption: childRoot.properties.caption || 'Lines',
         formId: childFormId,
         repeaterControlPath: repeaterPath,
         valid: true,
       };
     }
 
-    const caption = parsed.caption || 'Subpage';
+    const caption = childRoot.properties.caption || 'Subpage';
     const id = this.uniqueSectionId(parentPageContext, `subpage:${caption}`);
-    return {
-      sectionId: id,
-      kind: 'subpage',
-      caption,
-      formId: childFormId,
-      valid: true,
-    };
+    return { sectionId: id, kind: 'subpage', caption, formId: childFormId, valid: true };
   }
 
   private uniqueSectionId(ctx: PageContext, base: string): string {
@@ -73,7 +66,6 @@ export class SectionResolver {
   }
 }
 
-/** Resolve a sectionId to its FormState and repeater. */
 export function resolveSection(
   ctx: PageContext,
   sectionId?: string,
@@ -82,10 +74,7 @@ export function resolveSection(
   const id = sectionId ?? defaultSection ?? 'header';
   const section = ctx.sections.get(id);
   if (!section) {
-    return {
-      error: `Section '${id}' not found.`,
-      availableSections: Array.from(ctx.sections.keys()),
-    };
+    return { error: `Section '${id}' not found.`, availableSections: Array.from(ctx.sections.keys()) };
   }
   if (!section.valid) {
     return {
@@ -95,13 +84,12 @@ export function resolveSection(
   }
   const form = ctx.forms.get(section.formId);
   if (!form) {
-    return {
-      error: `Form for section '${id}' not found (formId: ${section.formId}).`,
-      availableSections: Array.from(ctx.sections.keys()),
-    };
+    return { error: `Form for section '${id}' not found (formId: ${section.formId}).`, availableSections: Array.from(ctx.sections.keys()) };
   }
+  const reps = treeRepeaters(form.root);
   const repeater = section.repeaterControlPath
-    ? resolveRepeater(form, section.repeaterControlPath)
-    : primaryRepeater(form);
-  return { section, form, repeater };
+    ? (reps.get(section.repeaterControlPath) ?? null)
+    : (reps.size > 0 ? reps.values().next().value! : null);
+  const rows = repeater ? (form.rows.get(repeater.controlPath) ?? []) : [];
+  return { section, form, repeater, rows };
 }

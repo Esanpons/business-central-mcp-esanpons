@@ -59,9 +59,10 @@ export class NavigateOperation {
     if (isErr(result)) return result;
     return mapResult(result, (ctx) => {
       const resolved = resolveSection(ctx);
-      const repeater = 'error' in resolved ? null : resolved.repeater;
+      // TODO(tier-2/T25): replace adapter with direct tree-node reads
+      const rows = 'error' in resolved ? [] : resolved.rows;
       return {
-        rows: repeater?.rows.map(r => ({ bookmark: r.bookmark, cells: r.cells })),
+        rows: rows.map(r => ({ bookmark: r.bookmark, cells: r.cells })),
         changedSections: [],
         dialogsOpened: [],
         requiresDialogResponse: false,

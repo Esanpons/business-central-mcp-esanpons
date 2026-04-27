@@ -36,7 +36,10 @@ describe('SectionResolver', () => {
 
   it('derives lines section for child form with repeater', () => {
     const ctx = makePageContext();
+    // Real BC FormCreated payloads include t:'lf', ServerId, PageType at root
     const childTree = {
+      t: 'lf',
+      ServerId: 'child1',
       Caption: 'Sales Order Subform',
       PageType: 1,
       Children: [{
@@ -53,7 +56,7 @@ describe('SectionResolver', () => {
 
   it('derives subpage for child form without repeater', () => {
     const ctx = makePageContext();
-    const childTree = { Caption: 'Unknown Part', Children: [] };
+    const childTree = { t: 'lf', ServerId: 'child2', Caption: 'Unknown Part', PageType: 0, Children: [] };
     const section = resolver.deriveSection(ctx, 'child2', childTree);
     expect(section.kind).toBe('subpage');
     expect(section.sectionId).toBe('subpage:Unknown Part');
@@ -65,7 +68,10 @@ describe('SectionResolver', () => {
     ]);
     const ctx = makePageContext(existing);
     const childTree = {
+      t: 'lf',
+      ServerId: 'child3',
       Caption: 'Second Lines',
+      PageType: 1,
       Children: [{ t: 'rc', Columns: [{ t: 'rcc', Caption: 'Col' }] }],
     };
     const section = resolver.deriveSection(ctx, 'child3', childTree);
