@@ -214,6 +214,11 @@ export interface PageState {
   readonly openFormIds: string[];
 }
 
+/**
+ * MCP tool output DTO. Internal code reads `FieldNode` from `form-node.ts`
+ * via `fields(root)` from `form-views.ts`. This shape is preserved at the
+ * MCP boundary for tool output JSON stability.
+ */
 export interface ControlField {
   readonly controlPath: string;
   readonly caption: string;
@@ -264,6 +269,11 @@ export interface TabGroup {
   readonly fields: ControlField[];
 }
 
+/**
+ * MCP tool output DTO. Internal code reads `ActionNode` from `form-node.ts`
+ * via `actions(root)` from `form-views.ts`. This shape is preserved at the
+ * MCP boundary for tool output JSON stability.
+ */
 export interface ActionInfo {
   readonly controlPath: string;
   readonly caption: string;
@@ -273,8 +283,6 @@ export interface ActionInfo {
   readonly isLineScoped: boolean;       // true if defined inside a repeater subtree
   readonly iconIdentifier?: string;     // raw icon resource path, e.g. "Actions/NextRecord/16.png"
   readonly wizardNav?: 'back' | 'next' | 'finish' | 'cancel'; // semantic role on a NavigatePage
-  /** Ancestor gc paths — same shape and intent as on `ControlField`. */
-  readonly ancestorGroupPaths: readonly string[];
 }
 
 /**
@@ -363,7 +371,6 @@ export function derivePageState(ctx: PageContext): PageState {
       visible: a.properties.visible ?? true,
       isLineScoped: a.isLineScoped,
       iconIdentifier: a.iconIdentifier,
-      ancestorGroupPaths: [],
     })) : [],
     childForms: Array.from(ctx.forms.entries())
       .filter(([fId]) => fId !== ctx.rootFormId)
