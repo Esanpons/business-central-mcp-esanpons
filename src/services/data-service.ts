@@ -2,25 +2,26 @@ import { ok, err, isErr, type Result } from '../core/result.js';
 import { ProtocolError } from '../core/errors.js';
 import type { BCSession } from '../session/bc-session.js';
 import type { PageContextRepository } from '../protocol/page-context-repo.js';
-import type { BCEvent, RepeaterRow, RepeaterColumn, RepeaterState, ControlField, TabGroup, SaveValueInteraction, SetCurrentRowInteraction, ScrollRepeaterInteraction } from '../protocol/types.js';
+import type { BCEvent, RepeaterRow, RepeaterColumn, ControlField, TabGroup, SaveValueInteraction, SetCurrentRowInteraction, ScrollRepeaterInteraction } from '../protocol/types.js';
 import type { Logger } from '../core/logger.js';
-import { resolveSection, type ResolvedSection } from '../protocol/section-resolver.js';
+import { resolveSection } from '../protocol/section-resolver.js';
+import { fields as treeFields, tabs as treeTabs } from '../protocol/form-views.js';
+import { findByControlPath, ancestorGroupPaths } from '../protocol/form-tree-walk.js';
+import { isFieldNode, type FieldNode, type FormNode, type RepeaterNode } from '../protocol/form-node.js';
 
-// TODO(tier-2/T19): remove when data-service reads directly from RepeaterNode + rows
-function toRepeaterState(resolved: ResolvedSection): RepeaterState | null {
-  if (!resolved.repeater) return null;
+function fieldNodeToControlField(root: FormNode, f: FieldNode): ControlField {
   return {
-    controlPath: resolved.repeater.controlPath,
-    columns: resolved.repeater.columns.map(c => ({
-      controlPath: c.controlPath,
-      caption: c.properties.caption ?? '',
-      type: 'rcc' as const,
-      columnBinderName: c.columnBinder?.name,
-      columnBinderPath: c.columnBinder?.path,
-    })),
-    rows: [...resolved.rows],
-    totalRowCount: resolved.repeater.properties.totalRowCount ?? null,
-    currentBookmark: resolved.repeater.properties.bookmark ?? null,
+    controlPath: f.controlPath,
+    caption: f.properties.caption ?? '',
+    type: f.type,
+    editable: f.properties.editable ?? false,
+    visible: f.properties.visible ?? true,
+    stringValue: f.properties.stringValue,
+    value: f.properties.objectValue ?? f.properties.stringValue,
+    columnBinderName: f.columnBinder?.name,
+    ...(f.hasLookup ? { isLookup: true } : {}),
+    ...(f.properties.showMandatory ? { showMandatory: true } : {}),
+    ancestorGroupPaths: ancestorGroupPaths(root, f.controlPath),
   };
 }
 
@@ -50,9 +51,15 @@ export class DataService {
     if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
     const resolved = resolveSection(ctx, sectionId);
     if ('error' in resolved) return err(new ProtocolError(resolved.error, { availableSections: resolved.availableSections }));
-    const repeater = toRepeaterState(resolved);
-    if (!repeater) return ok([]);
-    return ok(mapRowCellKeys(repeater.rows, repeater.columns));
+    if (!resolved.repeater) return ok([]);
+    const cols = resolved.repeater.columns.map(c => ({
+      controlPath: c.controlPath,
+      caption: c.properties.caption ?? '',
+      type: 'rcc' as const,
+      columnBinderName: c.columnBinder?.name,
+      columnBinderPath: c.columnBinder?.path,
+    }));
+    return ok(mapRowCellKeys([...resolved.rows], cols));
   }
 
   getRepeaterTotalRowCount(pageContextId: string, sectionId?: string): number | null {
@@ -68,7 +75,12 @@ export class DataService {
     if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
     const resolved = resolveSection(ctx, sectionId, 'header');
     if ('error' in resolved) return err(new ProtocolError(resolved.error, { availableSections: resolved.availableSections }));
-    return ok(resolved.form.tabs);
+    const ts = treeTabs(resolved.form.root);
+    if (ts.length === 0) return ok(undefined);
+    return ok(ts.map(t => ({
+      caption: t.caption,
+      fields: t.fields.map(f => fieldNodeToControlField(resolved.form.root, f)),
+    })));
   }
 
   /**
@@ -107,7 +119,8 @@ export class DataService {
     if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
     const resolved = resolveSection(ctx, sectionId, 'header');
     if ('error' in resolved) return err(new ProtocolError(resolved.error, { availableSections: resolved.availableSections }));
-    return ok(this.resolveField(resolved.form.controlTree, fieldName));
+    const node = this.resolveFieldNode(resolved.form.root, fieldName);
+    return ok(node ? fieldNodeToControlField(resolved.form.root, node) : undefined);
   }
 
   getFields(pageContextId: string, sectionId?: string): Result<ControlField[], ProtocolError> {
@@ -115,7 +128,7 @@ export class DataService {
     if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
     const resolved = resolveSection(ctx, sectionId, 'header');
     if ('error' in resolved) return err(new ProtocolError(resolved.error, { availableSections: resolved.availableSections }));
-    return ok(resolved.form.controlTree);
+    return ok(treeFields(resolved.form.root).map(f => fieldNodeToControlField(resolved.form.root, f)));
   }
 
   async writeField(
@@ -130,35 +143,33 @@ export class DataService {
     if ('error' in resolved) return err(new ProtocolError(resolved.error, { availableSections: resolved.availableSections }));
 
     const { form } = resolved;
-    // TODO(tier-2/T19): remove adapter when writeLineCell migrated to RepeaterNode
-    const repeater = toRepeaterState(resolved);
 
     // Line cell write: when targeting a specific row in a repeater section
-    if (repeater && (options?.bookmark !== undefined || options?.rowIndex !== undefined)) {
+    if (resolved.repeater && (options?.bookmark !== undefined || options?.rowIndex !== undefined)) {
       // Line interactions use the CHILD form's formId (the subpage form).
       // BC sends DataLoaded with root formId but SetCurrentRow/SaveValue use child formId.
       // Verified: SetCurrentRow with root formId -> InvalidBookmarkException;
       //           SetCurrentRow with child formId -> SUCCESS.
-      return this.writeLineCell(pageContextId, form.formId, repeater, fieldName, value, options);
+      return this.writeLineCell(pageContextId, form.formId, resolved.repeater, [...resolved.rows], fieldName, value, options);
     }
 
     // Header/card field write
-    const field = this.resolveField(form.controlTree, fieldName);
-    if (!field) {
+    const fieldNode = this.resolveFieldNode(form.root, fieldName);
+    if (!fieldNode) {
       return err(new ProtocolError(`Field not found: ${fieldName}`, {
         pageContextId,
-        availableFields: form.controlTree.map(f => f.caption || f.controlPath).filter(Boolean),
+        availableFields: treeFields(form.root).map(f => f.properties.caption ?? f.controlPath).filter(Boolean),
       }));
     }
 
     const interaction: SaveValueInteraction = {
       type: 'SaveValue',
       formId: form.formId,
-      controlPath: field.controlPath,
+      controlPath: fieldNode.controlPath,
       newValue: value,
     };
 
-    this.logger.debug('data', `writeField: ${fieldName} = ${value}`, { pageContextId, controlPath: field.controlPath });
+    this.logger.debug('data', `writeField: ${fieldName} = ${value}`, { pageContextId, controlPath: fieldNode.controlPath });
 
     const result = await this.session.invoke(
       interaction,
@@ -171,13 +182,14 @@ export class DataService {
 
     const updatedCtx = this.repo.get(pageContextId);
     const updatedForm = updatedCtx?.forms.get(form.formId);
-    const updatedField = updatedForm?.controlTree.find(f => f.controlPath === field.controlPath);
+    const updatedNode = updatedForm ? findByControlPath(updatedForm.root, fieldNode.controlPath) : undefined;
+    const newValue = updatedNode && isFieldNode(updatedNode) ? (updatedNode.properties.stringValue ?? value) : value;
 
     return ok({
       fieldName,
-      controlPath: field.controlPath,
+      controlPath: fieldNode.controlPath,
       success: true,
-      newValue: updatedField?.stringValue ?? value,
+      newValue,
       events,
     });
   }
@@ -204,83 +216,63 @@ export class DataService {
   private async writeLineCell(
     pageContextId: string,
     formId: string,
-    repeater: RepeaterState,
+    repeater: RepeaterNode,
+    rows: readonly RepeaterRow[],
     fieldName: string,
     value: string,
     options: { bookmark?: string; rowIndex?: number },
   ): Promise<Result<FieldWriteResult, ProtocolError>> {
-    // Resolve bookmark from rowIndex if needed
     let bookmark = options.bookmark;
     if (!bookmark && options.rowIndex !== undefined) {
-      const row = repeater.rows[options.rowIndex];
-      if (!row) {
-        return err(new ProtocolError(
-          `Row index ${options.rowIndex} out of range. Loaded rows: 0-${repeater.rows.length - 1}.`,
-        ));
-      }
+      const row = rows[options.rowIndex];
+      if (!row) return err(new ProtocolError(`Row index ${options.rowIndex} out of range. Loaded rows: 0-${rows.length - 1}.`));
       bookmark = row.bookmark;
     }
     if (!bookmark) return err(new ProtocolError('No bookmark or rowIndex provided for line cell write'));
 
-    // Step 1: Select the row (on the ROOT form -- BC routes line interactions through root)
+    // Step 1: select the row
     const selectInteraction: SetCurrentRowInteraction = {
-      type: 'SetCurrentRow',
-      formId,
-      controlPath: repeater.controlPath,
-      key: bookmark,
+      type: 'SetCurrentRow', formId, controlPath: repeater.controlPath, key: bookmark,
     };
-    const selectResult = await this.session.invoke(selectInteraction, (event) =>
-      event.type === 'InvokeCompleted' || event.type === 'BookmarkChanged',
+    const selectResult = await this.session.invoke(
+      selectInteraction,
+      (event) => event.type === 'InvokeCompleted' || event.type === 'BookmarkChanged',
     );
     if (isErr(selectResult)) return selectResult;
     this.repo.applyToPage(pageContextId, selectResult.value);
 
-    // Step 2: Find column by caption
-    const col = repeater.columns.find(c => c.caption.toLowerCase() === fieldName.toLowerCase());
+    // Step 2: find column by caption
+    const col = repeater.columns.find(c => (c.properties.caption ?? '').toLowerCase() === fieldName.toLowerCase());
     if (!col) {
       return err(new ProtocolError(`Column '${fieldName}' not found in repeater.`, {
-        availableColumns: repeater.columns.map(c => c.caption).filter(Boolean),
+        availableColumns: repeater.columns.map(c => c.properties.caption ?? '').filter(Boolean),
       }));
     }
-
-    // Extract column index from controlPath (e.g., ".../co[2]" -> 2)
     const match = col.controlPath.match(/co\[(\d+)\]/);
     if (!match) return err(new ProtocolError(`Cannot determine column index from ${col.controlPath}`));
     const colIndex = parseInt(match[1]!, 10);
-
-    // Step 3: SaveValue on the cell via {repeater}/cr/c[N]
-    // cr -> CurrentRowViewport.Children[0] (the current data row)
-    // c[N] -> data row's Children[N] (the cell control at column index N)
-    // Note: NOT cr/co[N] -- co resolves on the RepeaterControl to DefaultRowTemplate,
-    // but we need the CURRENT row's cell. Verified from decompiled LogicalControl.ResolvePathName.
     const cellPath = `${repeater.controlPath}/cr/c[${colIndex}]`;
     const saveInteraction: SaveValueInteraction = {
-      type: 'SaveValue',
-      formId,
-      controlPath: cellPath,
-      newValue: value,
+      type: 'SaveValue', formId, controlPath: cellPath, newValue: value,
     };
-
     this.logger.info(`writeLineCell: ${fieldName} = ${value} at ${cellPath} (formId=${formId})`);
-
-    const saveResult = await this.session.invoke(saveInteraction, (event) =>
-      event.type === 'InvokeCompleted' || event.type === 'PropertyChanged',
+    const saveResult = await this.session.invoke(
+      saveInteraction,
+      (event) => event.type === 'InvokeCompleted' || event.type === 'PropertyChanged',
     );
     if (isErr(saveResult)) return saveResult;
-    const saveEvents = saveResult.value;
-    this.repo.applyToPage(pageContextId, saveEvents);
-
-    // Combine events from select + save steps
-    const allEvents = [...(isErr(selectResult) ? [] : selectResult.value), ...saveEvents];
+    const allEvents = [...selectResult.value, ...saveResult.value];
+    this.repo.applyToPage(pageContextId, saveResult.value);
     return ok({ fieldName, controlPath: cellPath, success: true, newValue: value, events: allEvents });
   }
 
-  private resolveField(controlTree: ControlField[], fieldName: string): ControlField | undefined {
+  private resolveFieldNode(root: FormNode, fieldName: string): FieldNode | undefined {
     const lower = fieldName.toLowerCase();
-    return controlTree.find(f =>
-      f.caption.toLowerCase() === lower ||
-      f.controlPath === fieldName,
-    );
+    for (const f of treeFields(root)) {
+      if ((f.properties.caption ?? '').toLowerCase() === lower) return f;
+      if (f.controlPath === fieldName) return f;
+    }
+    return undefined;
   }
 }
 
