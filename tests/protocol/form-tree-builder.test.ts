@@ -1,7 +1,7 @@
 // tests/protocol/form-tree-builder.test.ts
 import { describe, it, expect } from 'vitest';
 import { buildFormTree } from '../../src/protocol/form-tree-builder.js';
-import { isLogicalFormNode, isGroupNode, isFieldNode } from '../../src/protocol/form-node.js';
+import { isLogicalFormNode, isGroupNode, isFieldNode, isActionNode } from '../../src/protocol/form-node.js';
 import type { FormNode } from '../../src/protocol/form-node.js';
 
 describe('buildFormTree — root + groups', () => {
@@ -97,5 +97,51 @@ describe('buildFormTree — fields', () => {
     if (!('children' in root)) throw new Error('expected children');
     const f = root.children[0] as FormNode;
     expect(f.properties.visible).toBe(true);
+  });
+});
+
+describe('buildFormTree — actions', () => {
+  it('builds ActionNode with systemAction + iconIdentifier', () => {
+    const raw = { t: 'lf', ServerId: 'F1', PageType: 9, Children: [
+      { t: 'ac', Caption: '&Next', SystemAction: 0, Icon: { Identifier: 'Actions/NextRecord/16.png' } },
+    ] };
+    const root = buildFormTree(raw);
+    if (!('children' in root)) throw new Error('expected children');
+    const action = root.children.find(isActionNode);
+    expect(action).toBeDefined();
+    expect(action!.systemAction).toBe(0);
+    expect(action!.iconIdentifier).toBe('Actions/NextRecord/16.png');
+    expect(action!.properties.caption).toBe('&Next');
+    expect(action!.isLineScoped).toBe(false);
+  });
+
+  it('walks sub-actions inside an ActionNode\'s Children', () => {
+    const raw = { t: 'lf', ServerId: 'F1', PageType: 0, Children: [
+      { t: 'ac', Caption: 'Menu', Children: [
+        { t: 'ac', Caption: 'Item1', SystemAction: 10 },
+        { t: 'ac', Caption: 'Item2', SystemAction: 20 },
+      ] },
+    ] };
+    const root = buildFormTree(raw);
+    if (!('children' in root)) throw new Error('expected children');
+    const menu = root.children[0] as FormNode;
+    if (!isActionNode(menu)) throw new Error('expected ActionNode');
+    expect(menu.children.length).toBe(2);
+    expect(menu.children[0]!.properties.caption).toBe('Item1');
+    expect(menu.children[1]!.systemAction).toBe(20);
+  });
+
+  it('marks actions inside a repeater as line-scoped', () => {
+    const raw = { t: 'lf', ServerId: 'F1', PageType: 1, Children: [
+      { t: 'rc', Children: [
+        { t: 'ac', Caption: 'RowAction', SystemAction: 20 },
+      ], Columns: [] },
+    ] };
+    const root = buildFormTree(raw);
+    if (!('children' in root)) throw new Error('expected children');
+    const rep = root.children[0] as FormNode;
+    if (rep.type !== 'rc' || !('children' in rep)) throw new Error('expected RepeaterNode');
+    const action = rep.children.find(isActionNode);
+    expect(action?.isLineScoped).toBe(true);
   });
 });

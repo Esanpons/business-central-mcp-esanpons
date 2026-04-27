@@ -7,7 +7,7 @@
 // (sc/dc/bc/...) are emitted by Microsoft.Dynamics.Framework.UI.Client.LogicalControlSerializer.
 
 import type {
-  FormNode, LogicalFormNode, GroupNode, FieldNode, UnknownNode, NodeProperties, FieldType,
+  FormNode, LogicalFormNode, GroupNode, FieldNode, ActionNode, UnknownNode, NodeProperties, FieldType,
 } from './form-node.js';
 import { FIELD_TYPES } from './form-node.js';
 import type { PageType } from './types.js';
@@ -83,7 +83,13 @@ function buildNode(obj: Record<string, unknown>, controlPath: string, insideRepe
   if (!t) return makeUnknown(controlPath, '', readProperties(obj));
 
   if (t === 'gc') return buildGroup(obj, controlPath, insideRepeater);
+  if (t === 'ac') return buildAction(obj, controlPath, insideRepeater);
   if (FIELD_TYPES.has(t as FieldType)) return buildField(obj, t as FieldType, controlPath);
+  if (t === 'rc') {
+    // Repeater nodes get full handling in T7. For now, treat as UnknownNode but
+    // propagate insideRepeater=true so descendant actions get correctly tagged.
+    return makeUnknown(controlPath, t, readProperties(obj), buildChildren(obj.Children, controlPath, true));
+  }
   return makeUnknown(controlPath, t, readProperties(obj), buildChildren(obj.Children, controlPath, insideRepeater));
 }
 
@@ -120,6 +126,31 @@ function buildField(obj: Record<string, unknown>, t: FieldType, controlPath: str
     properties: props,
     ...(binder?.Name ? { columnBinder: { name: binder.Name, ...(binder.Path ? { path: binder.Path } : {}) } } : {}),
     ...(hasLookup ? { hasLookup: true } : {}),
+  };
+}
+
+function buildAction(obj: Record<string, unknown>, controlPath: string, insideRepeater: boolean): ActionNode {
+  const icon = obj.Icon as { Identifier?: string } | undefined;
+  const sub: ActionNode[] = [];
+  const rawChildren = obj.Children;
+  if (Array.isArray(rawChildren)) {
+    for (let i = 0; i < rawChildren.length; i++) {
+      const c = rawChildren[i];
+      if (!c || typeof c !== 'object') continue;
+      const child = c as Record<string, unknown>;
+      if (child.t !== 'ac') continue;
+      const sep = controlPath === 'server:' ? '' : '/';
+      sub.push(buildAction(child, `${controlPath}${sep}c[${i}]`, insideRepeater));
+    }
+  }
+  return {
+    type: 'ac',
+    controlPath,
+    systemAction: (obj.SystemAction as number) ?? 0,
+    properties: readProperties(obj),
+    children: sub,
+    isLineScoped: insideRepeater,
+    ...(icon?.Identifier ? { iconIdentifier: icon.Identifier } : {}),
   };
 }
 
