@@ -8,6 +8,8 @@ import { SystemAction } from '../protocol/types.js';
 import { resolveSection } from '../protocol/section-resolver.js';
 import type { FormState } from '../protocol/form-state.js';
 import { isEffectivelyVisible } from '../protocol/visibility.js';
+import { actions as treeActions, groupVisibility as treeGroupVisibility } from '../protocol/form-views.js';
+import type { ActionNode } from '../protocol/form-node.js';
 import type { Logger } from '../core/logger.js';
 
 /** System actions that target a specific row via the repeater control. */
@@ -24,6 +26,17 @@ const SYSTEM_ACTION_NAMES: Map<string, number> = new Map([
   ['edit', SystemAction.Edit],
   ['view', SystemAction.View],
 ]);
+
+function classifyWizardNav(a: ActionNode): 'back' | 'next' | 'finish' | 'cancel' | undefined {
+  const id = a.iconIdentifier;
+  if (id) {
+    if (/PreviousRecord/i.test(id)) return 'back';
+    if (/NextRecord|Action_Start/i.test(id)) return 'next';
+    if (/Approve/i.test(id)) return 'finish';
+  }
+  if (a.systemAction === 310 || a.systemAction === 320 || a.systemAction === 350) return 'cancel';
+  return undefined;
+}
 
 export interface ActionResult {
   success: boolean;
@@ -48,43 +61,40 @@ export class ActionService {
     if ('error' in resolved) return err(new ProtocolError(resolved.error, { availableSections: resolved.availableSections }));
 
     const { form } = resolved;
+    const allActions = treeActions(form.root);
 
-    // Check if the action name is a well-known system action (New, Delete, Refresh, etc.)
+    // Well-known SystemAction fast path
     const systemActionByName = SYSTEM_ACTION_NAMES.get(actionName.toLowerCase());
     if (systemActionByName !== undefined) {
       return this.executeSystemAction(pageContextId, systemActionByName, sectionId);
     }
 
-    // Find action by caption (case-insensitive)
-    const action = form.actions.find(a =>
-      a.caption.toLowerCase() === actionName.toLowerCase()
-    );
-    if (!action) {
-      // Check other sections for the action to provide instructional error
-      const lower = actionName.toLowerCase();
+    const lower = actionName.toLowerCase();
+    const actionNode = allActions.find(a => (a.properties.caption ?? '').toLowerCase() === lower);
+    if (!actionNode) {
+      // Provide the cross-section hint
       for (const [otherId, otherSection] of ctx.sections) {
         if (otherId === (sectionId ?? 'header')) continue;
         const otherForm = ctx.forms.get(otherSection.formId);
-        if (otherForm?.actions.some(a => a.caption.toLowerCase() === lower)) {
+        if (otherForm && treeActions(otherForm.root).some(a => (a.properties.caption ?? '').toLowerCase() === lower)) {
           return err(new ProtocolError(
             `Action '${actionName}' not found in section '${sectionId ?? 'header'}'. It exists in section '${otherId}'. Use section: '${otherId}' to target it.`,
             { availableSections: Array.from(ctx.sections.keys()) },
           ));
         }
       }
+      const groupVis = treeGroupVisibility(form.root);
       return err(new ProtocolError(`Action not found: ${actionName}`, {
-        availableActions: form.actions
-          .filter(a => a.enabled && isEffectivelyVisible(form.root, a.controlPath, form.groupVisibility))
-          .map(a => a.caption)
+        availableActions: allActions
+          .filter(a => (a.properties.enabled ?? true) && isEffectivelyVisible(form.root, a.controlPath, groupVis, ctx.wizardState))
+          .map(a => a.properties.caption ?? '')
           .filter(Boolean),
       }));
     }
-
-    if (!action.enabled) {
+    if (actionNode.properties.enabled === false) {
       return err(new ProtocolError(`Action is disabled: ${actionName}`));
     }
-
-    return this.invokeAction(pageContextId, form, action.controlPath, action.systemAction);
+    return this.invokeAction(pageContextId, form, actionNode.controlPath, actionNode.systemAction);
   }
 
   /**
@@ -104,19 +114,20 @@ export class ActionService {
     const root = ctx.forms.get(ctx.rootFormId);
     if (!root) return err(new ProtocolError(`Root form not found for page ${pageContextId}`));
 
-    const action = root.actions.find(a => a.wizardNav === nav);
-    if (!action) {
-      const available = root.actions.filter(a => a.wizardNav).map(a => a.wizardNav);
+    const allActions = treeActions(root.root);
+    const actionNode = allActions.find(a => classifyWizardNav(a) === nav);
+    if (!actionNode) {
+      const available = allActions.map(a => classifyWizardNav(a)).filter(Boolean);
       return err(new ProtocolError(
         `No wizard action of type '${nav}' on this page (page is ${ctx.pageType}, isModal=${ctx.isModal})`,
         { availableWizardNav: available },
       ));
     }
-    if (!action.enabled) {
+    if (actionNode.properties.enabled === false) {
       return err(new ProtocolError(`Wizard action '${nav}' is disabled at this step`));
     }
 
-    const result = await this.invokeAction(pageContextId, root, action.controlPath, action.systemAction);
+    const result = await this.invokeAction(pageContextId, root, actionNode.controlPath, actionNode.systemAction);
 
     // BC's web client owns the step variable client-side and emits no
     // PropertyChanged events when Next/Back fires. Mirror the step transition
@@ -155,7 +166,7 @@ export class ActionService {
     if (repeater && ROW_TARGETING_ACTIONS.has(systemAction)) {
       controlPath = repeater.controlPath + '/cr/c[0]';
     } else {
-      const action = form.actions.find(a => a.systemAction === systemAction);
+      const action = treeActions(form.root).find(a => a.systemAction === systemAction);
       controlPath = action?.controlPath ?? 'server:c[0]';
     }
 
