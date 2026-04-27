@@ -38,9 +38,10 @@ export class ExecuteActionOperation {
       if (ar.updatedState) {
         const resolved = resolveSection(ar.updatedState, 'header');
         if (!('error' in resolved)) {
+          const formRoot = resolved.form.root;
           const groupVis = resolved.form.groupVisibility;
           updatedFields = resolved.form.controlTree
-            .filter(f => f.caption && isEffectivelyVisible(f, groupVis, ar.updatedState!.wizardState))
+            .filter(f => f.caption && isEffectivelyVisible(formRoot, f.controlPath, groupVis, ar.updatedState!.wizardState))
             .map(f => ({ name: f.caption, value: f.stringValue }));
         }
       }

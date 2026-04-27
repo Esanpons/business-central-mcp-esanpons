@@ -74,7 +74,7 @@ export class ActionService {
       }
       return err(new ProtocolError(`Action not found: ${actionName}`, {
         availableActions: form.actions
-          .filter(a => a.enabled && isEffectivelyVisible(a, form.groupVisibility))
+          .filter(a => a.enabled && isEffectivelyVisible(form.root, a.controlPath, form.groupVisibility))
           .map(a => a.caption)
           .filter(Boolean),
       }));

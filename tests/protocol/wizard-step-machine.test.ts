@@ -86,26 +86,26 @@ describe('PageContextRepository.advanceWizardStep', () => {
     const welcomeField = root.controlTree.find(f => f.caption === 'WelcomeField')!;
     const step0Field = root.controlTree.find(f => f.caption === 'Step0Field')!;
     const step1Field = root.controlTree.find(f => f.caption === 'Step1Field')!;
-    expect(isEffectivelyVisible(welcomeField, root.groupVisibility)).toBe(true);
-    expect(isEffectivelyVisible(step0Field, root.groupVisibility)).toBe(false);
-    expect(isEffectivelyVisible(step1Field, root.groupVisibility)).toBe(false);
+    expect(isEffectivelyVisible(root.root, welcomeField.controlPath, root.groupVisibility)).toBe(true);
+    expect(isEffectivelyVisible(root.root, step0Field.controlPath, root.groupVisibility)).toBe(false);
+    expect(isEffectivelyVisible(root.root, step1Field.controlPath, root.groupVisibility)).toBe(false);
 
     // Advance to step 1 (Step0 group)
     repo.advanceWizardStep(pcId, 1);
     ctx = repo.get(pcId)!;
     root = ctx.forms.get('F1')!;
-    expect(isEffectivelyVisible(welcomeField, root.groupVisibility)).toBe(false);
-    expect(isEffectivelyVisible(step0Field, root.groupVisibility)).toBe(true);
-    expect(isEffectivelyVisible(step1Field, root.groupVisibility)).toBe(false);
+    expect(isEffectivelyVisible(root.root, welcomeField.controlPath, root.groupVisibility)).toBe(false);
+    expect(isEffectivelyVisible(root.root, step0Field.controlPath, root.groupVisibility)).toBe(true);
+    expect(isEffectivelyVisible(root.root, step1Field.controlPath, root.groupVisibility)).toBe(false);
     expect(ctx.wizardState!.currentStepIndex).toBe(1);
 
     // Advance to step 2 (Step1 group)
     repo.advanceWizardStep(pcId, 2);
     ctx = repo.get(pcId)!;
     root = ctx.forms.get('F1')!;
-    expect(isEffectivelyVisible(welcomeField, root.groupVisibility)).toBe(false);
-    expect(isEffectivelyVisible(step0Field, root.groupVisibility)).toBe(false);
-    expect(isEffectivelyVisible(step1Field, root.groupVisibility)).toBe(true);
+    expect(isEffectivelyVisible(root.root, welcomeField.controlPath, root.groupVisibility)).toBe(false);
+    expect(isEffectivelyVisible(root.root, step0Field.controlPath, root.groupVisibility)).toBe(false);
+    expect(isEffectivelyVisible(root.root, step1Field.controlPath, root.groupVisibility)).toBe(true);
     expect(ctx.wizardState!.currentStepIndex).toBe(2);
 
     // Step backwards

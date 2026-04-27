@@ -5,7 +5,6 @@ import { resolveSection } from '../protocol/section-resolver.js';
 import { mapRowCellKeys } from '../services/data-service.js';
 import { isEffectivelyVisible } from '../protocol/visibility.js';
 import { fields as treeFields, actions as treeActions, groupVisibility as treeGroupVisibility } from '../protocol/form-views.js';
-import { ancestorGroupPaths } from '../protocol/form-tree-walk.js';
 import { type ActionNode } from '../protocol/form-node.js';
 
 export interface OpenPageInput {
@@ -68,11 +67,7 @@ export class OpenPageOperation {
         caption: ctx.caption || ctx.rootFormId,
         isModal: ctx.isModal,
         fields: fieldList
-          .filter(f => f.properties.caption && isEffectivelyVisible(
-            { visible: f.properties.visible ?? true, ancestorGroupPaths: root ? ancestorGroupPaths(root, f.controlPath) : [] },
-            groupVis,
-            ws,
-          ))
+          .filter(f => f.properties.caption && root && isEffectivelyVisible(root, f.controlPath, groupVis, ws))
           .map(f => ({
             name: f.properties.caption!,
             value: f.properties.stringValue,
@@ -80,11 +75,7 @@ export class OpenPageOperation {
             type: f.type,
           })),
         actions: actionList
-          .filter(a => (a.properties.enabled ?? true) && a.properties.caption && isEffectivelyVisible(
-            { visible: a.properties.visible ?? true, ancestorGroupPaths: root ? ancestorGroupPaths(root, a.controlPath) : [] },
-            groupVis,
-            ws,
-          ))
+          .filter(a => (a.properties.enabled ?? true) && a.properties.caption && root && isEffectivelyVisible(root, a.controlPath, groupVis, ws))
           .map(a => {
             const wn = classifyWizardNav(a);
             return {

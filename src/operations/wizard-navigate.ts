@@ -51,15 +51,16 @@ export class WizardNavigateOperation {
 
       if (ctx) {
         const resolved = resolveSection(ctx, 'header');
-        const root = 'error' in resolved ? undefined : resolved.form;
-        const groupVis = root?.groupVisibility ?? new Map();
+        const form = 'error' in resolved ? undefined : resolved.form;
+        const formRoot = form?.root;
+        const groupVis = form?.groupVisibility ?? new Map();
         const ws = ctx.wizardState;
         caption = ctx.caption || caption;
-        fields = (root?.controlTree ?? [])
-          .filter(f => f.caption && isEffectivelyVisible(f, groupVis, ws))
+        fields = (form?.controlTree ?? [])
+          .filter(f => f.caption && formRoot && isEffectivelyVisible(formRoot, f.controlPath, groupVis, ws))
           .map(f => ({ name: f.caption, value: f.stringValue, editable: f.editable }));
-        availableNav = (root?.actions ?? [])
-          .filter(a => a.wizardNav && a.enabled && isEffectivelyVisible(a, groupVis, ws))
+        availableNav = (form?.actions ?? [])
+          .filter(a => a.wizardNav && a.enabled && formRoot && isEffectivelyVisible(formRoot, a.controlPath, groupVis, ws))
           .map(a => a.wizardNav!) as WizardNav[];
         closed = (input.action === 'finish' || input.action === 'cancel') && availableNav.length === 0;
       } else {

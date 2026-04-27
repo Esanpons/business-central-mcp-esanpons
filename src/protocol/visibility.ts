@@ -21,21 +21,22 @@
 //      state machine since BC never broadcasts step transitions
 
 import type { GroupVisibility, WizardState } from './types.js';
-
-export interface VisibilityCarrier {
-  readonly visible: boolean;
-  readonly ancestorGroupPaths: readonly string[];
-}
+import type { FormNode } from './form-node.js';
+import { findByControlPath, ancestorGroupPaths } from './form-tree-walk.js';
 
 export function isEffectivelyVisible(
-  control: VisibilityCarrier,
+  root: FormNode,
+  controlPath: string,
   groupVisibility: GroupVisibility,
   wizardState?: WizardState | null,
 ): boolean {
+  const node = findByControlPath(root, controlPath);
+  const intrinsic = node ? (node.properties.visible ?? true) : true;
+  const paths = ancestorGroupPaths(root, controlPath);
   const activeStepPath = wizardState?.stepPaths[wizardState.currentStepIndex];
 
-  for (const path of control.ancestorGroupPaths) {
-    if (activeStepPath && path === activeStepPath) {
+  for (const p of paths) {
+    if (activeStepPath && p === activeStepPath) {
       // We crossed into the active wizard step's subtree. Outer ancestors
       // already passed (we got here). Inner ancestors and the control's own
       // Visible flag are not authoritative — BC's web client renders the
@@ -44,7 +45,7 @@ export function isEffectivelyVisible(
     }
     // Untracked paths default to visible — only paths the parser saw as gc are
     // recorded; unknown ancestors must not fail-closed and hide everything.
-    if (groupVisibility.has(path) && !groupVisibility.get(path)) return false;
+    if (groupVisibility.has(p) && !groupVisibility.get(p)) return false;
   }
-  return control.visible;
+  return intrinsic;
 }

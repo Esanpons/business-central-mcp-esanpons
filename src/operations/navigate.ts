@@ -45,7 +45,7 @@ export class NavigateOperation {
           pageType: r.targetPageContext.pageType,
           sections,
           fields: (form?.controlTree ?? [])
-            .filter(f => f.caption && isEffectivelyVisible(f, form?.groupVisibility ?? new Map(), r.targetPageContext.wizardState))
+            .filter(f => f.caption && form && isEffectivelyVisible(form.root, f.controlPath, form.groupVisibility, r.targetPageContext.wizardState))
             .map(f => ({ name: f.caption, value: f.stringValue, editable: f.editable })),
           changedSections: [],
           dialogsOpened: [],
