@@ -177,3 +177,32 @@ describe('buildFormTree — repeaters', () => {
     expect(rep!.columns.length).toBe(1);
   });
 });
+
+import { isFormHostNode } from '../../src/protocol/form-node.js';
+
+describe('buildFormTree — fhc + filc', () => {
+  it('captures hosted form ServerId without descending into the lf subtree', () => {
+    const raw = { t: 'lf', ServerId: 'F1', PageType: 0, Children: [
+      { t: 'fhc', Caption: 'Factbox', Children: [
+        { t: 'lf', ServerId: 'CHILD1', Caption: 'Customer Stats', PageType: 3, IsSubForm: false, IsPart: true, Children: [] },
+      ] },
+    ] };
+    const root = buildFormTree(raw);
+    if (!('children' in root)) throw new Error();
+    const fhc = root.children.find(isFormHostNode);
+    expect(fhc).toBeDefined();
+    expect(fhc!.hostedFormServerId).toBe('CHILD1');
+    expect(fhc!.hostedFormCaption).toBe('Customer Stats');
+    expect(fhc!.hostedFormIsPart).toBe(true);
+  });
+
+  it('builds a FilterNode for filc', () => {
+    const raw = { t: 'lf', ServerId: 'F1', PageType: 1, Children: [
+      { t: 'filc', Caption: 'Filter' },
+    ] };
+    const root = buildFormTree(raw);
+    if (!('children' in root)) throw new Error();
+    const filter = root.children[0]!;
+    expect(filter.type).toBe('filc');
+  });
+});

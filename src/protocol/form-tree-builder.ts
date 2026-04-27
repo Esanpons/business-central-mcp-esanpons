@@ -8,7 +8,7 @@
 
 import type {
   FormNode, LogicalFormNode, GroupNode, FieldNode, ActionNode, RepeaterNode,
-  RepeaterColumnNode, UnknownNode, NodeProperties, FieldType,
+  RepeaterColumnNode, FormHostNode, FilterNode, UnknownNode, NodeProperties, FieldType,
 } from './form-node.js';
 import { FIELD_TYPES } from './form-node.js';
 import type { PageType } from './types.js';
@@ -86,6 +86,8 @@ function buildNode(obj: Record<string, unknown>, controlPath: string, insideRepe
   if (t === 'gc') return buildGroup(obj, controlPath, insideRepeater);
   if (t === 'ac') return buildAction(obj, controlPath, insideRepeater);
   if (t === 'rc') return buildRepeater(obj, controlPath);
+  if (t === 'fhc') return buildFormHost(obj, controlPath);
+  if (t === 'filc') return buildFilter(obj, controlPath);
   if (FIELD_TYPES.has(t as FieldType)) return buildField(obj, t as FieldType, controlPath);
   return makeUnknown(controlPath, t, readProperties(obj), buildChildren(obj.Children, controlPath, insideRepeater));
 }
@@ -176,6 +178,32 @@ function buildRepeater(obj: Record<string, unknown>, controlPath: string): Repea
     properties: readProperties(obj),
     columns,
     children: buildChildren(obj.Children, controlPath, true),
+  };
+}
+
+function buildFormHost(obj: Record<string, unknown>, controlPath: string): FormHostNode {
+  const children = obj.Children as unknown[] | undefined;
+  const lf = (Array.isArray(children) && children[0] && typeof children[0] === 'object')
+    ? children[0] as Record<string, unknown>
+    : undefined;
+  return {
+    type: 'fhc',
+    controlPath,
+    properties: readProperties(obj),
+    hostedFormServerId: (lf?.ServerId as string) ?? '',
+    hostedFormCaption: (lf?.Caption as string) ?? (obj.Caption as string) ?? '',
+    hostedFormIsSubForm: (lf?.IsSubForm as boolean) ?? false,
+    hostedFormIsPart: (lf?.IsPart as boolean) ?? false,
+    hostedFormControlTree: lf,
+  };
+}
+
+function buildFilter(obj: Record<string, unknown>, controlPath: string): FilterNode {
+  return {
+    type: 'filc',
+    controlPath,
+    properties: readProperties(obj),
+    children: buildChildren(obj.Children, controlPath, false),
   };
 }
 
