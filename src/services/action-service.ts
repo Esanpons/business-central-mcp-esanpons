@@ -1,4 +1,4 @@
-import { ok, err, isErr, type Result } from '../core/result.js';
+import { ok, err, isOk, isErr, type Result } from '../core/result.js';
 import { ProtocolError } from '../core/errors.js';
 import type { BCSession } from '../session/bc-session.js';
 import type { PageContextRepository } from '../protocol/page-context-repo.js';
@@ -7,6 +7,7 @@ import type { BCEvent, InvokeActionInteraction } from '../protocol/types.js';
 import { SystemAction } from '../protocol/types.js';
 import { resolveSection } from '../protocol/section-resolver.js';
 import type { FormState } from '../protocol/form-state.js';
+import { isEffectivelyVisible } from '../protocol/visibility.js';
 import type { Logger } from '../core/logger.js';
 
 /** System actions that target a specific row via the repeater control. */
@@ -72,7 +73,10 @@ export class ActionService {
         }
       }
       return err(new ProtocolError(`Action not found: ${actionName}`, {
-        availableActions: form.actions.filter(a => a.visible && a.enabled).map(a => a.caption).filter(Boolean),
+        availableActions: form.actions
+          .filter(a => a.enabled && isEffectivelyVisible(a, form.groupVisibility))
+          .map(a => a.caption)
+          .filter(Boolean),
       }));
     }
 
@@ -112,7 +116,29 @@ export class ActionService {
       return err(new ProtocolError(`Wizard action '${nav}' is disabled at this step`));
     }
 
-    return this.invokeAction(pageContextId, root, action.controlPath, action.systemAction);
+    const result = await this.invokeAction(pageContextId, root, action.controlPath, action.systemAction);
+
+    // BC's web client owns the step variable client-side and emits no
+    // PropertyChanged events when Next/Back fires. Mirror the step transition
+    // ourselves so subsequent reads see the right step's fields. Only nudge on
+    // forward/back; finish & cancel close the wizard server-side.
+    if (isOk(result) && (nav === 'next' || nav === 'back')) {
+      const ws = this.repo.get(pageContextId)?.wizardState;
+      if (ws) {
+        const delta = nav === 'next' ? 1 : -1;
+        const target = ws.currentStepIndex + delta;
+        if (target >= 0 && target < ws.stepPaths.length) {
+          this.repo.advanceWizardStep(pageContextId, target);
+          // Refresh updatedState so the caller sees post-bump visibility.
+          const refreshed = this.repo.get(pageContextId);
+          if (refreshed) {
+            return ok({ ...result.value, updatedState: refreshed });
+          }
+        }
+      }
+    }
+
+    return result;
   }
 
   async executeSystemAction(pageContextId: string, systemAction: number, sectionId?: string): Promise<Result<ActionResult, ProtocolError>> {

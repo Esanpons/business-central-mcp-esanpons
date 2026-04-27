@@ -8,6 +8,13 @@ export interface DiscoveredChildForm {
   readonly isPart: boolean;           // true for factboxes and parts
 }
 
+export interface ParsedDynamicStep {
+  /** controlPath of the step's gc container. */
+  readonly controlPath: string;
+  /** Whether the gc was published with `Visible: true` (current evaluated state). */
+  readonly initiallyVisible: boolean;
+}
+
 export interface ParsedControlTree {
   caption: string;
   pageType: PageType;
@@ -18,6 +25,22 @@ export interface ParsedControlTree {
   actions: ActionInfo[];
   childForms: DiscoveredChildForm[];  // fhc -> lf nodes found in the tree
   metadata?: { id: number; sourceTableId: number };
+  /**
+   * Initial published `Visible` value of every gc encountered, keyed by
+   * controlPath. PropertyChanged events on a gc path mutate this in
+   * FormProjection. Default-true gcs (no explicit `Visible`) are still recorded
+   * so downstream lookups can distinguish "tracked but visible" from "untracked".
+   */
+  groupVisibility: ReadonlyMap<string, boolean>;
+  /**
+   * Top-level gcs that participate in dynamic visibility — those whose
+   * `ExpressionProperties` set includes `Visible`. On a NavigatePage these are
+   * the wizard's step containers in document order. Empty for non-wizard pages.
+   *
+   * Reference: `ExpressionPatternHelper.HasExpression` /
+   * `LogicalControlSerializer.WriteExpressionProperty` in decompiled BC source.
+   */
+  dynamicSteps: ParsedDynamicStep[];
 }
 
 const FIELD_TYPES = new Set([
@@ -67,6 +90,7 @@ const PAGE_TYPE_MAP: Record<number, PageType> = {
  * and extract fields, repeater columns, actions, and page metadata.
  */
 export function parseControlTree(controlTree: unknown): ParsedControlTree {
+  const groupVisibility = new Map<string, boolean>();
   const result: ParsedControlTree = {
     caption: '',
     pageType: 'Unknown',
@@ -75,6 +99,8 @@ export function parseControlTree(controlTree: unknown): ParsedControlTree {
     filterControlPath: null,
     actions: [],
     childForms: [],
+    groupVisibility,
+    dynamicSteps: [],
   };
 
   if (!controlTree || typeof controlTree !== 'object') return result;
@@ -100,7 +126,7 @@ export function parseControlTree(controlTree: unknown): ParsedControlTree {
   // (not server:c[0]/c[0], server:c[0]/c[1] — the lf node is implicit)
   const children = root.Children as unknown[] | undefined;
   if (Array.isArray(children)) {
-    walkChildren(children, 'server', result, false);
+    walkChildren(children, 'server', result, false, []);
 
     // Extract tab groups from top-level gc nodes.
     // Tab gc nodes have a Caption and no MappingHint (excludes TOOLBAR, ACTIONBAR, PromptActions, etc.)
@@ -108,9 +134,43 @@ export function parseControlTree(controlTree: unknown): ParsedControlTree {
     if (tabs.length > 0) {
       result.tabs = tabs;
     }
+
+    // Top-level gcs that have an ExpressionProperty bound to `Visible` AND a
+    // wizard-step-shaped DesignName are the participating step containers.
+    // BC's AL compiler emits step groups with `DesignName` starting with the
+    // literal "Step" (e.g., `StepVelcome`, `Step0`, `StepFinish`); banner /
+    // chrome groups use names like "StandardBanner" / "FinishedBanner" which
+    // also have ExpressionProperties.Visible but are not steps. DesignName is
+    // the AL source identifier and isn't localised.
+    for (let i = 0; i < children.length; i++) {
+      const node = children[i] as Record<string, unknown> | undefined;
+      if (!node || node.t !== 'gc') continue;
+      if (!hasVisibleExpression(node)) continue;
+      if (!isWizardStepDesign(node)) continue;
+      const path = `server:c[${i}]`;
+      result.dynamicSteps.push({
+        controlPath: path,
+        initiallyVisible: groupVisibility.get(path) ?? true,
+      });
+    }
   }
 
   return result;
+}
+
+function isWizardStepDesign(node: Record<string, unknown>): boolean {
+  const designName = node.DesignName as string | undefined;
+  return typeof designName === 'string' && /^Step/i.test(designName);
+}
+
+/**
+ * BC marks a control's `Visible` as expression-driven by including it in the
+ * `ExpressionProperties` set. The set value (always `true` per
+ * LogicalControlSerializer.cs:95) is just a membership marker.
+ */
+function hasVisibleExpression(node: Record<string, unknown>): boolean {
+  const expr = node.ExpressionProperties;
+  return !!expr && typeof expr === 'object' && 'Visible' in (expr as Record<string, unknown>);
 }
 
 function walkChildren(
@@ -118,6 +178,7 @@ function walkChildren(
   parentPath: string,
   result: ParsedControlTree,
   insideRepeater: boolean,
+  ancestorGroups: readonly string[],
 ): void {
   for (let i = 0; i < children.length; i++) {
     const child = children[i];
@@ -131,16 +192,18 @@ function walkChildren(
     const controlPath = `${parentPath}${separator}c[${i}]`;
 
     if (FIELD_TYPES.has(t)) {
-      extractField(node, t, controlPath, result);
+      extractField(node, t, controlPath, result, ancestorGroups);
     } else if (t === 'ac') {
-      extractAction(node, controlPath, result, insideRepeater);
+      extractAction(node, controlPath, result, insideRepeater, ancestorGroups);
     } else if (t === 'rc') {
       // Collect ALL repeaters (not just the first)
       extractRepeater(node, controlPath, result);
-      // Recurse into repeater's children with insideRepeater = true
+      // Recurse into repeater's children with insideRepeater = true.
+      // Repeater rows aren't gated by group visibility, so the ancestor stack
+      // resets to whatever scope brought us here — we don't add the rc to it.
       const subChildren = node.Children as unknown[] | undefined;
       if (Array.isArray(subChildren)) {
-        walkChildren(subChildren, controlPath, result, true);
+        walkChildren(subChildren, controlPath, result, true, ancestorGroups);
       }
       continue; // skip the general recursion below
     } else if (t === 'fhc') {
@@ -151,12 +214,25 @@ function walkChildren(
     } else if (t === 'filc' && result.filterControlPath === null) {
       // FilterLogicalControl — used for Filter(AddLine) interactions
       result.filterControlPath = controlPath;
+    } else if (t === 'gc') {
+      // Group container — record its current Visible (default true), then
+      // descend with the group pushed onto the ancestor stack so descendants
+      // can be filtered against it.
+      const visible = typeof node.Visible === 'boolean' ? node.Visible : true;
+      (result.groupVisibility as Map<string, boolean>).set(controlPath, visible);
+
+      const subChildren = node.Children as unknown[] | undefined;
+      if (Array.isArray(subChildren)) {
+        walkChildren(subChildren, controlPath, result, insideRepeater, [...ancestorGroups, controlPath]);
+      }
+      continue; // we already recursed with the extended ancestor stack
     }
 
-    // Recurse into Children (gc groups, etc.)
+    // Recurse into Children for any other container nodes that don't otherwise
+    // get handled (rare; defensive).
     const subChildren = node.Children as unknown[] | undefined;
     if (Array.isArray(subChildren)) {
-      walkChildren(subChildren, controlPath, result, insideRepeater);
+      walkChildren(subChildren, controlPath, result, insideRepeater, ancestorGroups);
     }
   }
 }
@@ -166,6 +242,7 @@ function extractField(
   t: string,
   controlPath: string,
   result: ParsedControlTree,
+  ancestorGroupPaths: readonly string[],
 ): void {
   // Skip placeholder fields
   if (node.MappingHint === 'PlaceholderField') return;
@@ -201,6 +278,7 @@ function extractField(
     columnBinderName: binder?.Name || undefined,
     ...(hasLookup ? { isLookup: true } : {}),
     ...(showMandatory !== undefined ? { showMandatory } : {}),
+    ancestorGroupPaths: [...ancestorGroupPaths],
   });
 }
 
@@ -209,6 +287,7 @@ function extractAction(
   controlPath: string,
   result: ParsedControlTree,
   isLineScoped = false,
+  ancestorGroupPaths: readonly string[] = [],
 ): void {
   const icon = node.Icon as { Identifier?: string } | undefined;
   const iconIdentifier = icon?.Identifier;
@@ -223,6 +302,7 @@ function extractAction(
     isLineScoped,
     ...(iconIdentifier ? { iconIdentifier } : {}),
     ...(wizardNav ? { wizardNav } : {}),
+    ancestorGroupPaths: [...ancestorGroupPaths],
   });
 }
 

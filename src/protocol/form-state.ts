@@ -13,6 +13,12 @@ export interface FormState {
   readonly actions: ActionInfo[];
   readonly filterControlPath: string | null;
   readonly containerType?: ControlContainerType;
+  /**
+   * Per-form record of every group container's current `Visible` value, keyed
+   * by controlPath. Seeded from the parsed control tree and updated by
+   * PropertyChanged events. Empty for forms with no group containers.
+   */
+  readonly groupVisibility: ReadonlyMap<string, boolean>;
 }
 
 /** Returns the first (and usually only) repeater, or null. */
@@ -37,6 +43,7 @@ export class FormProjection {
       repeaters: new Map(),
       actions: [],
       filterControlPath: null,
+      groupVisibility: new Map(),
     };
   }
 
@@ -93,6 +100,20 @@ export class FormProjection {
       return { ...form, repeaters: newRepeaters };
     }
 
+    // If the controlPath targets a tracked group container, update its
+    // visibility — descendants' effective visibility is derived from this map
+    // via isEffectivelyVisible(). Group updates land *before* the action /
+    // field branches so a gc that happens to share a path with an action
+    // doesn't get mis-routed.
+    if (form.groupVisibility.has(event.controlPath)) {
+      const { Visible: GroupVisible } = event.changes as Record<string, unknown>;
+      if (typeof GroupVisible === 'boolean') {
+        const newGroupVisibility = new Map(form.groupVisibility);
+        newGroupVisibility.set(event.controlPath, GroupVisible);
+        return { ...form, groupVisibility: newGroupVisibility };
+      }
+    }
+
     // Update action Enabled/Visible state if the controlPath matches an action.
     // BC sends PropertyChanged events for action controls after page load.
     const { Enabled, Visible: VisibleProp } = event.changes as Record<string, unknown>;
@@ -135,12 +156,15 @@ export class FormProjection {
         ...form.controlTree.slice(existingIndex + 1),
       ];
     } else {
+      // Synthesised from a PropertyChanged whose controlPath the parser never
+      // saw — leave ancestorGroupPaths empty so it inherits no group filter.
       const newField: ControlField = {
         controlPath: event.controlPath,
         caption: (Caption as string | undefined) ?? '',
         type: '',
         editable: (Editable as boolean | undefined) ?? false,
         visible: (Visible as boolean | undefined) ?? true,
+        ancestorGroupPaths: [],
         ...(StringValue !== undefined ? { stringValue: StringValue as string } : {}),
       };
       updatedTree = [...form.controlTree, newField];

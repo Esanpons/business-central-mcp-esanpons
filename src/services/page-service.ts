@@ -7,10 +7,31 @@ import type { PageContext } from '../protocol/page-context.js';
 import type {
   BCEvent, OpenFormInteraction, LoadFormInteraction, CloseFormInteraction, InvokeActionInteraction, SetCurrentRowInteraction,
 } from '../protocol/types.js';
-import { parseControlTree } from '../protocol/control-tree-parser.js';
+import { parseControlTree, type ParsedControlTree } from '../protocol/control-tree-parser.js';
 // DiscoveredChildForm is used by repo.registerDiscoveredChildForm, not directly here
 import type { Logger } from '../core/logger.js';
 import type { SectionKind } from '../protocol/section-resolver.js';
+import type { WizardState } from '../protocol/types.js';
+
+/**
+ * Recognise the NavigatePage / multi-step wizard pattern. Returns null for
+ * pages that don't qualify — non-wizard PageType, fewer than two participating
+ * step gcs, or no initially-visible step (parser malformation).
+ *
+ * The detection is anchored on the wire-published `ExpressionProperties.Visible`
+ * membership flag, not on caption naming, so localisation and custom step names
+ * don't break it.
+ */
+function buildWizardState(parsed: ParsedControlTree): WizardState | null {
+  if (parsed.dynamicSteps.length < 2) return null;
+  if (parsed.pageType !== 'NavigatePage' && parsed.pageType !== 'StandardDialog') return null;
+
+  const stepPaths = parsed.dynamicSteps.map(s => s.controlPath);
+  const initialIndex = parsed.dynamicSteps.findIndex(s => s.initiallyVisible);
+  if (initialIndex < 0) return null;
+
+  return { stepPaths, currentStepIndex: initialIndex };
+}
 
 export interface ClosePageResult {
   events: BCEvent[];
@@ -72,10 +93,17 @@ export class PageService {
     const formId = root.formId;
     const isModal = root.type === 'DialogOpened';
 
+    // Inspect the root tree once now to decide whether this is a wizard
+    // (NavigatePage with ≥2 dynamic-visibility step gcs). The repo's
+    // applyRootControlTree will re-parse the same tree internally; that's
+    // fine — parsing is cheap and stateless.
+    const parsedRoot = parseControlTree(root.controlTree);
+    const wizardState = buildWizardState(parsedRoot);
+
     // Create page context and apply all events. The repo recognises a
     // DialogOpened whose formId equals rootFormId and treats it as the root
     // layout (see applyRootControlTree).
-    this.repo.create(pageContextId, formId, { isModal });
+    this.repo.create(pageContextId, formId, { isModal, wizardState });
     this.repo.applyToPage(pageContextId, events);
 
     // Discover child forms embedded in the root form's control tree (fhc -> lf nodes)

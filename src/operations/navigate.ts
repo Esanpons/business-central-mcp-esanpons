@@ -2,6 +2,7 @@ import { isErr, mapResult, type Result } from '../core/result.js';
 import type { ProtocolError } from '../core/errors.js';
 import type { NavigationService } from '../services/navigation-service.js';
 import { resolveSection } from '../protocol/section-resolver.js';
+import { isEffectivelyVisible } from '../protocol/visibility.js';
 
 export interface NavigateInput {
   pageContextId: string;
@@ -44,7 +45,7 @@ export class NavigateOperation {
           pageType: r.targetPageContext.pageType,
           sections,
           fields: (form?.controlTree ?? [])
-            .filter(f => f.visible && f.caption)
+            .filter(f => f.caption && isEffectivelyVisible(f, form?.groupVisibility ?? new Map(), r.targetPageContext.wizardState))
             .map(f => ({ name: f.caption, value: f.stringValue, editable: f.editable })),
           changedSections: [],
           dialogsOpened: [],

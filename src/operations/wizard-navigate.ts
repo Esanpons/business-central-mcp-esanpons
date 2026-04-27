@@ -4,6 +4,7 @@ import type { ActionService } from '../services/action-service.js';
 import type { PageContextRepository } from '../protocol/page-context-repo.js';
 import { resolveSection } from '../protocol/section-resolver.js';
 import { detectChangedSections, detectDialogs } from '../protocol/mutation-result.js';
+import { isEffectivelyVisible } from '../protocol/visibility.js';
 import type { ControlField } from '../protocol/types.js';
 
 export type WizardNav = 'back' | 'next' | 'finish' | 'cancel';
@@ -51,12 +52,14 @@ export class WizardNavigateOperation {
       if (ctx) {
         const resolved = resolveSection(ctx, 'header');
         const root = 'error' in resolved ? undefined : resolved.form;
+        const groupVis = root?.groupVisibility ?? new Map();
+        const ws = ctx.wizardState;
         caption = ctx.caption || caption;
         fields = (root?.controlTree ?? [])
-          .filter(f => f.visible && f.caption)
+          .filter(f => f.caption && isEffectivelyVisible(f, groupVis, ws))
           .map(f => ({ name: f.caption, value: f.stringValue, editable: f.editable }));
         availableNav = (root?.actions ?? [])
-          .filter(a => a.wizardNav && a.enabled && a.visible)
+          .filter(a => a.wizardNav && a.enabled && isEffectivelyVisible(a, groupVis, ws))
           .map(a => a.wizardNav!) as WizardNav[];
         closed = (input.action === 'finish' || input.action === 'cancel') && availableNav.length === 0;
       } else {

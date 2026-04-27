@@ -1,7 +1,7 @@
 // src/protocol/page-context.ts
 import type { FormState } from './form-state.js';
 import type { SectionDescriptor } from './section-resolver.js';
-import type { DialogInfo, PageType } from './types.js';
+import type { DialogInfo, PageType, WizardState } from './types.js';
 
 export interface PageContext {
   readonly pageContextId: string;
@@ -19,4 +19,12 @@ export interface PageContext {
    * LogicalModalityViolation if other modals layered on top.
    */
   readonly isModal: boolean;
+  /**
+   * Set on NavigatePage / wizard pages where the parser found ≥2 top-level gcs
+   * with `ExpressionProperties.Visible`. ActionService.executeWizardNav advances
+   * `currentStepIndex` after each successful Next/Back; the repo mirrors the
+   * change into the root form's groupVisibility map. `null` for non-wizard
+   * pages — leave it untouched.
+   */
+  readonly wizardState: WizardState | null;
 }

@@ -10,6 +10,7 @@ function makeForm(overrides: Partial<FormState> = {}): FormState {
     repeaters: new Map(),
     actions: [],
     filterControlPath: null,
+    groupVisibility: new Map(),
     ...overrides,
   };
 }

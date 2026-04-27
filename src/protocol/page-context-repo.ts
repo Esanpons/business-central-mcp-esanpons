@@ -22,7 +22,11 @@ export class PageContextRepository {
     return id ? this.pages.get(id) : undefined;
   }
 
-  create(pageContextId: string, rootFormId: string, options?: { isModal?: boolean }): PageContext {
+  create(
+    pageContextId: string,
+    rootFormId: string,
+    options?: { isModal?: boolean; wizardState?: PageContext['wizardState'] },
+  ): PageContext {
     const rootForm = this.formProjection.createInitial(rootFormId);
     const headerSection = this.sectionResolver.createHeaderSection(rootFormId);
 
@@ -36,11 +40,47 @@ export class PageContextRepository {
       dialogs: [],
       ownedFormIds: [rootFormId],
       isModal: options?.isModal ?? false,
+      wizardState: options?.wizardState ?? null,
     };
 
     this.pages.set(pageContextId, ctx);
     this.formIdIndex.set(rootFormId, pageContextId);
     return ctx;
+  }
+
+  /**
+   * Mirror a NavigatePage step transition into the root form's groupVisibility
+   * map. Hides every step participating in the wizard except the new active
+   * one. Updates the page's wizardState pointer.
+   *
+   * BC's web client owns the step variable client-side and does not emit
+   * PropertyChanged events when Next/Back is invoked — this method is the
+   * authoritative source of step state on bc-mcp's side.
+   */
+  advanceWizardStep(pageContextId: string, newIndex: number): void {
+    const page = this.pages.get(pageContextId);
+    if (!page || !page.wizardState) return;
+    const ws = page.wizardState;
+    if (newIndex < 0 || newIndex >= ws.stepPaths.length) return;
+    if (newIndex === ws.currentStepIndex) return;
+
+    const root = page.forms.get(page.rootFormId);
+    if (!root) return;
+
+    const newGroupVisibility = new Map(root.groupVisibility);
+    for (let i = 0; i < ws.stepPaths.length; i++) {
+      newGroupVisibility.set(ws.stepPaths[i]!, i === newIndex);
+    }
+
+    const updatedRoot: FormState = { ...root, groupVisibility: newGroupVisibility };
+    const forms = new Map(page.forms);
+    forms.set(page.rootFormId, updatedRoot);
+
+    this.pages.set(pageContextId, {
+      ...page,
+      forms,
+      wizardState: { stepPaths: ws.stepPaths, currentStepIndex: newIndex },
+    });
   }
 
   applyEvents(events: BCEvent[]): void {
@@ -175,6 +215,7 @@ export class PageContextRepository {
       repeaters: parsed.repeaters,
       actions: parsed.actions,
       filterControlPath: parsed.filterControlPath,
+      groupVisibility: new Map(parsed.groupVisibility),
     };
 
     // Derive section
@@ -227,6 +268,14 @@ export class PageContextRepository {
       repeaters: parsed.repeaters.size > 0 ? parsed.repeaters : (existingForm?.repeaters ?? new Map()),
       actions: parsed.actions.length > 0 ? parsed.actions : (existingForm?.actions ?? []),
       filterControlPath: parsed.filterControlPath ?? existingForm?.filterControlPath ?? null,
+      // Replace groupVisibility wholesale on a re-parse — the new tree is the
+      // authoritative source. Existing per-step overrides from
+      // advanceWizardStep are intentionally NOT preserved here because a
+      // root-tree replay only happens on FormCreated/DialogOpened, which
+      // implies BC has rebuilt the form from scratch.
+      groupVisibility: parsed.groupVisibility.size > 0
+        ? new Map(parsed.groupVisibility)
+        : (existingForm?.groupVisibility ?? new Map()),
     };
 
     const forms = new Map(page.forms);

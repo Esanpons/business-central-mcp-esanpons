@@ -5,6 +5,7 @@ import type { PageContextRepository } from '../protocol/page-context-repo.js';
 import type { ControlField } from '../protocol/types.js';
 import { resolveSection } from '../protocol/section-resolver.js';
 import { detectChangedSections, detectDialogs } from '../protocol/mutation-result.js';
+import { isEffectivelyVisible } from '../protocol/visibility.js';
 
 export interface ExecuteActionInput {
   pageContextId: string;
@@ -37,8 +38,9 @@ export class ExecuteActionOperation {
       if (ar.updatedState) {
         const resolved = resolveSection(ar.updatedState, 'header');
         if (!('error' in resolved)) {
+          const groupVis = resolved.form.groupVisibility;
           updatedFields = resolved.form.controlTree
-            .filter(f => f.visible && f.caption)
+            .filter(f => f.caption && isEffectivelyVisible(f, groupVis, ar.updatedState!.wizardState))
             .map(f => ({ name: f.caption, value: f.stringValue }));
         }
       }

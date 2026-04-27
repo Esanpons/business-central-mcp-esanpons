@@ -219,12 +219,23 @@ export interface ControlField {
   readonly caption: string;
   readonly type: string;
   readonly editable: boolean;
+  /**
+   * The control's own published `Visible` state. The user-visible filter must
+   * combine this with every ancestor group's visibility — see
+   * `isEffectivelyVisible` in protocol/visibility.ts.
+   */
   readonly visible: boolean;
   readonly value?: unknown;
   readonly stringValue?: string;
   readonly columnBinderName?: string; // e.g., "1165569367_c2" — key in row cells
   readonly isLookup?: boolean;        // true if field has AssistEditAction or LookupAction
   readonly showMandatory?: boolean;   // true if field is marked as mandatory in BC
+  /**
+   * controlPaths of every gc ancestor between the form root (`server:`) and
+   * this field's immediate parent gc, in root → leaf order. Empty for fields
+   * that hang directly off the form root with no group container.
+   */
+  readonly ancestorGroupPaths: readonly string[];
 }
 
 export interface RepeaterState {
@@ -262,6 +273,34 @@ export interface ActionInfo {
   readonly isLineScoped: boolean;       // true if defined inside a repeater subtree
   readonly iconIdentifier?: string;     // raw icon resource path, e.g. "Actions/NextRecord/16.png"
   readonly wizardNav?: 'back' | 'next' | 'finish' | 'cancel'; // semantic role on a NavigatePage
+  /** Ancestor gc paths — same shape and intent as on `ControlField`. */
+  readonly ancestorGroupPaths: readonly string[];
+}
+
+/**
+ * Per-form record of every group container's current `Visible` value, keyed by
+ * controlPath. Maintained by FormProjection: seeded from the parsed control
+ * tree and updated from `PropertyChanged` events whose target is a gc path.
+ *
+ * Groups not in the map are treated as visible (default-true) — only groups
+ * the parser saw are tracked. Empty for forms with no group containers.
+ */
+export type GroupVisibility = ReadonlyMap<string, boolean>;
+
+/**
+ * Tracks the active step on a NavigatePage / wizard. BC's web client owns the
+ * step variable entirely client-side; the wire only carries the initial
+ * visibility and the `ExpressionProperties.Visible` membership flag that marks
+ * which groups participate. We mirror the same state machine here.
+ */
+export interface WizardState {
+  /**
+   * controlPaths of the participating step groups in document order. Always
+   * length ≥ 2; otherwise the page isn't treated as a wizard.
+   */
+  readonly stepPaths: readonly string[];
+  /** Index into `stepPaths` of the currently visible step. */
+  readonly currentStepIndex: number;
 }
 
 export enum ControlContainerType {
