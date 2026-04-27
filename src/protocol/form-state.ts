@@ -82,31 +82,30 @@ export class FormProjection {
   }
 
   private applyDataLoaded(form: FormState, event: DataLoadedEvent): FormState {
-    const repeater = form.repeaters.get(event.controlPath);
-    if (!repeater) return form;
+    // Look up the RepeaterNode in the tree; if absent, this is a no-op.
+    const repeaterNode = treeRepeaters(form.root).get(event.controlPath);
+    if (!repeaterNode) return form;
 
     const extractedRows = this.extractRows(event.rows);
 
-    let newRows: RepeaterRow[];
+    let newRows: readonly RepeaterRow[];
     if (event.currentRowOnly) {
-      // Merge by bookmark -- replace matching rows, keep others
-      newRows = form.repeaters.get(event.controlPath)!.rows.map(existing => {
-        const updated = extractedRows.find(r => r.bookmark === existing.bookmark);
-        return updated ?? existing;
-      });
+      const existing = form.rows.get(event.controlPath) ?? [];
+      newRows = existing.map(r => extractedRows.find(x => x.bookmark === r.bookmark) ?? r);
     } else {
       newRows = extractedRows;
     }
 
-    const updatedRepeater: RepeaterState = {
-      ...repeater,
-      rows: newRows,
-      // totalRowCount is NOT inferred from rows.length -- stays null unless set by PropertyChanged
-    };
+    const newRowsMap = new Map(form.rows);
+    newRowsMap.set(event.controlPath, newRows);
 
-    const newRepeaters = new Map(form.repeaters);
-    newRepeaters.set(event.controlPath, updatedRepeater);
-    return { ...form, repeaters: newRepeaters };
+    return {
+      ...form,
+      rows: newRowsMap,
+      // Re-derive repeaters using the new rows map. Tree didn't mutate, so views
+      // are cache-hit; only the rows map matters here.
+      repeaters: deriveRepeaterStates(form.root, newRowsMap),
+    };
   }
 
   private applyPropertyChanged(form: FormState, event: PropertyChangedEvent): FormState {
@@ -141,13 +140,14 @@ export class FormProjection {
   }
 
   private applyBookmarkChanged(form: FormState, event: BookmarkChangedEvent): FormState {
-    const repeater = form.repeaters.get(event.controlPath);
-    if (!repeater) return form;
-
-    const updatedRepeater: RepeaterState = { ...repeater, currentBookmark: event.bookmark };
-    const newRepeaters = new Map(form.repeaters);
-    newRepeaters.set(event.controlPath, updatedRepeater);
-    return { ...form, repeaters: newRepeaters };
+    // Bookmark lives on the repeater's NodeProperties — route through the mutator.
+    const newRoot = applyPropertyChange(form.root, event.controlPath, { bookmark: event.bookmark });
+    if (newRoot === form.root) return form; // path unknown
+    return {
+      ...form,
+      root: newRoot,
+      repeaters: deriveRepeaterStates(newRoot, form.rows),
+    };
   }
 
   private extractRows(rawRows: unknown[]): RepeaterRow[] {

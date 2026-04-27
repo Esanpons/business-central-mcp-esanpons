@@ -83,12 +83,18 @@ describe('FormProjection', () => {
   });
 
   it('merges currentRowOnly DataLoaded by bookmark', () => {
-    const form = makeForm({
-      repeaters: new Map([['server:c[1]', {
-        controlPath: 'server:c[1]', columns: [], totalRowCount: null, currentBookmark: null,
-        rows: [{ bookmark: 'bm1', cells: { 'No.': '10000' } }, { bookmark: 'bm2', cells: { 'No.': '20000' } }],
-      }]]),
-    });
+    // makeRepeaterForm() provides the rc node at server:c[1] that applyDataLoaded
+    // now requires (it looks up the repeater in the tree, not form.repeaters).
+    // Pre-seed form.rows with the initial rows so the currentRowOnly merge path
+    // finds the existing entries to merge against.
+    const base = makeRepeaterForm();
+    const form: FormState = {
+      ...base,
+      rows: new Map([['server:c[1]', [
+        { bookmark: 'bm1', cells: { 'No.': '10000' } },
+        { bookmark: 'bm2', cells: { 'No.': '20000' } },
+      ]]]),
+    };
     const event: BCEvent = {
       type: 'DataLoaded', formId: 'f1', controlPath: 'server:c[1]',
       currentRowOnly: true,
