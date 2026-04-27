@@ -6,6 +6,8 @@ import { resolveSection } from '../protocol/section-resolver.js';
 import { detectChangedSections, detectDialogs } from '../protocol/mutation-result.js';
 import { isEffectivelyVisible } from '../protocol/visibility.js';
 import type { ControlField } from '../protocol/types.js';
+import { fields as treeFields, actions as treeActions, groupVisibility as treeGroupVisibility } from '../protocol/form-views.js';
+import type { ActionNode } from '../protocol/form-node.js';
 
 export type WizardNav = 'back' | 'next' | 'finish' | 'cancel';
 
@@ -28,6 +30,17 @@ export interface WizardNavigateOutput {
   dialogsOpened: Array<{ formId: string; message?: string; fields?: ControlField[] }>;
 }
 
+function classifyWizardNav(a: ActionNode): WizardNav | undefined {
+  const id = a.iconIdentifier;
+  if (id) {
+    if (/PreviousRecord/i.test(id)) return 'back';
+    if (/NextRecord|Action_Start/i.test(id)) return 'next';
+    if (/Approve/i.test(id)) return 'finish';
+  }
+  if (a.systemAction === 310 || a.systemAction === 320 || a.systemAction === 350) return 'cancel';
+  return undefined;
+}
+
 export class WizardNavigateOperation {
   constructor(
     private readonly actionService: ActionService,
@@ -41,27 +54,30 @@ export class WizardNavigateOperation {
       const dialogsOpened = detectDialogs(ar.events);
       const changedSections = ctx ? detectChangedSections(ctx, ar.events) : [];
 
-      // After Finish/Cancel the wizard closes — the form may be gone from the
-      // repo, or only carry an empty action set. We detect "closed" by checking
-      // whether the rootForm still exposes any wizardNav actions.
       let caption = ctx?.caption ?? '';
-      let fields: WizardNavigateOutput['fields'] = [];
+      let fieldsOut: WizardNavigateOutput['fields'] = [];
       let availableNav: WizardNav[] = [];
       let closed = false;
 
       if (ctx) {
         const resolved = resolveSection(ctx, 'header');
-        const form = 'error' in resolved ? undefined : resolved.form;
-        const formRoot = form?.root;
-        const groupVis = form?.groupVisibility ?? new Map();
+        const root = 'error' in resolved ? undefined : resolved.form.root;
         const ws = ctx.wizardState;
         caption = ctx.caption || caption;
-        fields = (form?.controlTree ?? [])
-          .filter(f => f.caption && formRoot && isEffectivelyVisible(formRoot, f.controlPath, groupVis, ws))
-          .map(f => ({ name: f.caption, value: f.stringValue, editable: f.editable }));
-        availableNav = (form?.actions ?? [])
-          .filter(a => a.wizardNav && a.enabled && formRoot && isEffectivelyVisible(formRoot, a.controlPath, groupVis, ws))
-          .map(a => a.wizardNav!) as WizardNav[];
+        if (root) {
+          const groupVis = treeGroupVisibility(root);
+          fieldsOut = treeFields(root)
+            .filter(f => f.properties.caption && isEffectivelyVisible(root, f.controlPath, groupVis, ws))
+            .map(f => ({
+              name: f.properties.caption!,
+              value: f.properties.stringValue,
+              editable: f.properties.editable ?? false,
+            }));
+          availableNav = treeActions(root)
+            .filter(a => (a.properties.enabled ?? true) && isEffectivelyVisible(root, a.controlPath, groupVis, ws))
+            .map(a => classifyWizardNav(a))
+            .filter((v): v is WizardNav => !!v);
+        }
         closed = (input.action === 'finish' || input.action === 'cancel') && availableNav.length === 0;
       } else {
         closed = true;
@@ -70,7 +86,7 @@ export class WizardNavigateOperation {
       return {
         success: ar.success,
         caption,
-        fields,
+        fields: fieldsOut,
         availableNav,
         closed,
         changedSections,
