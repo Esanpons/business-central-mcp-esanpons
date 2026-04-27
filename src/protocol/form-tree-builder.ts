@@ -7,7 +7,8 @@
 // (sc/dc/bc/...) are emitted by Microsoft.Dynamics.Framework.UI.Client.LogicalControlSerializer.
 
 import type {
-  FormNode, LogicalFormNode, GroupNode, FieldNode, ActionNode, UnknownNode, NodeProperties, FieldType,
+  FormNode, LogicalFormNode, GroupNode, FieldNode, ActionNode, RepeaterNode,
+  RepeaterColumnNode, UnknownNode, NodeProperties, FieldType,
 } from './form-node.js';
 import { FIELD_TYPES } from './form-node.js';
 import type { PageType } from './types.js';
@@ -84,12 +85,8 @@ function buildNode(obj: Record<string, unknown>, controlPath: string, insideRepe
 
   if (t === 'gc') return buildGroup(obj, controlPath, insideRepeater);
   if (t === 'ac') return buildAction(obj, controlPath, insideRepeater);
+  if (t === 'rc') return buildRepeater(obj, controlPath);
   if (FIELD_TYPES.has(t as FieldType)) return buildField(obj, t as FieldType, controlPath);
-  if (t === 'rc') {
-    // Repeater nodes get full handling in T7. For now, treat as UnknownNode but
-    // propagate insideRepeater=true so descendant actions get correctly tagged.
-    return makeUnknown(controlPath, t, readProperties(obj), buildChildren(obj.Children, controlPath, true));
-  }
   return makeUnknown(controlPath, t, readProperties(obj), buildChildren(obj.Children, controlPath, insideRepeater));
 }
 
@@ -151,6 +148,34 @@ function buildAction(obj: Record<string, unknown>, controlPath: string, insideRe
     children: sub,
     isLineScoped: insideRepeater,
     ...(icon?.Identifier ? { iconIdentifier: icon.Identifier } : {}),
+  };
+}
+
+function buildRepeater(obj: Record<string, unknown>, controlPath: string): RepeaterNode {
+  const columns: RepeaterColumnNode[] = [];
+  const rawCols = obj.Columns;
+  if (Array.isArray(rawCols)) {
+    for (let j = 0; j < rawCols.length; j++) {
+      const col = rawCols[j];
+      if (!col || typeof col !== 'object') continue;
+      const c = col as Record<string, unknown>;
+      if (c.t !== 'rcc') continue;
+      if (c.MappingHint === 'PlaceholderField') continue;
+      const binder = c.ColumnBinder as { Name?: string; Path?: string } | undefined;
+      columns.push({
+        type: 'rcc',
+        controlPath: `${controlPath}/co[${j}]`,
+        properties: readProperties(c),
+        ...(binder?.Name ? { columnBinder: { name: binder.Name, ...(binder.Path ? { path: binder.Path } : {}) } } : {}),
+      });
+    }
+  }
+  return {
+    type: 'rc',
+    controlPath,
+    properties: readProperties(obj),
+    columns,
+    children: buildChildren(obj.Children, controlPath, true),
   };
 }
 

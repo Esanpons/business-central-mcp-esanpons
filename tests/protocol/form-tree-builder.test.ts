@@ -1,7 +1,7 @@
 // tests/protocol/form-tree-builder.test.ts
 import { describe, it, expect } from 'vitest';
 import { buildFormTree } from '../../src/protocol/form-tree-builder.js';
-import { isLogicalFormNode, isGroupNode, isFieldNode, isActionNode } from '../../src/protocol/form-node.js';
+import { isLogicalFormNode, isGroupNode, isFieldNode, isActionNode, isRepeaterNode } from '../../src/protocol/form-node.js';
 import type { FormNode } from '../../src/protocol/form-node.js';
 
 describe('buildFormTree — root + groups', () => {
@@ -143,5 +143,37 @@ describe('buildFormTree — actions', () => {
     if (rep.type !== 'rc' || !('children' in rep)) throw new Error('expected RepeaterNode');
     const action = rep.children.find(isActionNode);
     expect(action?.isLineScoped).toBe(true);
+  });
+});
+
+describe('buildFormTree — repeaters', () => {
+  it('builds RepeaterNode with columns', () => {
+    const raw = { t: 'lf', ServerId: 'F1', PageType: 1, Children: [
+      { t: 'rc', Columns: [
+        { t: 'rcc', Caption: 'No.', ColumnBinder: { Name: 'no' } },
+        { t: 'rcc', Caption: 'Name', ColumnBinder: { Name: 'name' } },
+      ], Children: [] },
+    ] };
+    const root = buildFormTree(raw);
+    if (!('children' in root)) throw new Error();
+    const rep = root.children.find(isRepeaterNode);
+    expect(rep).toBeDefined();
+    expect(rep!.columns.length).toBe(2);
+    expect(rep!.columns[0]!.controlPath).toBe('server:c[0]/co[0]');
+    expect(rep!.columns[0]!.properties.caption).toBe('No.');
+    expect(rep!.columns[0]!.columnBinder?.name).toBe('no');
+  });
+
+  it('skips placeholder columns (MappingHint=PlaceholderField)', () => {
+    const raw = { t: 'lf', ServerId: 'F1', PageType: 1, Children: [
+      { t: 'rc', Columns: [
+        { t: 'rcc', Caption: 'real', ColumnBinder: { Name: 'r' } },
+        { t: 'rcc', MappingHint: 'PlaceholderField' },
+      ], Children: [] },
+    ] };
+    const root = buildFormTree(raw);
+    if (!('children' in root)) throw new Error();
+    const rep = root.children.find(isRepeaterNode);
+    expect(rep!.columns.length).toBe(1);
   });
 });
