@@ -68,7 +68,7 @@ export function loadConfig(): AppConfig {
 
   return {
     bc: {
-      baseUrl: requireEnv('BC_BASE_URL'),
+      baseUrl: requireEnv('BC_BASE_URL').replace(/\/+$/, ''),
       username: requireEnv('BC_USERNAME'),
       password: requireEnv('BC_PASSWORD'),
       tenantId: optionalEnv('BC_TENANT_ID', 'default'),

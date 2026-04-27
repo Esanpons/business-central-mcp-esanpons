@@ -45,6 +45,16 @@ describe('loadConfig', () => {
     expect(config.logging.level).toBe('info');
   });
 
+  it('strips trailing slashes from BC_BASE_URL', () => {
+    process.env.BC_BASE_URL = 'https://demoportaldev.continiaonline.com/eae32d34-6603-4490-b967-0e064de52c3f/';
+    expect(loadConfig().bc.baseUrl).toBe('https://demoportaldev.continiaonline.com/eae32d34-6603-4490-b967-0e064de52c3f');
+  });
+
+  it('strips multiple trailing slashes from BC_BASE_URL', () => {
+    process.env.BC_BASE_URL = 'http://test/BC///';
+    expect(loadConfig().bc.baseUrl).toBe('http://test/BC');
+  });
+
   it('overrides optional values from env', () => {
     process.env.BC_TENANT_ID = 'custom';
     process.env.PORT = '4000';
