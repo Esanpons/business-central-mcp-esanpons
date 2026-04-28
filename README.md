@@ -40,17 +40,18 @@ That's it. The LLM can now open pages, read and write data, run actions, and nav
 
 | Tool | What it does |
 |---|---|
-| `bc_open_page` | Open any page by ID -- lists, cards, documents |
-| `bc_read_data` | Read fields, line items, factboxes with filters and paging |
-| `bc_write_data` | Write field values, BC validates and echoes confirmed values |
-| `bc_execute_action` | Post, Release, Delete, Copy Document, any page action |
+| `bc_open_page` | Open any page by ID -- lists, cards, documents, role centers. Returns the page as `sections[]` with header, lines, factboxes, and Role Center cuegroup tiles. |
+| `bc_read_data` | Refresh a single section: filter, paginate, slice, project tab/columns. Returns the same `Section` shape as `bc_open_page`. |
+| `bc_write_data` | Write field values; BC validates and echoes confirmed values. Section-aware (lines, factboxes, header). |
+| `bc_execute_action` | Run header / row / wizard actions, OR drill down on Role Center cue tiles via `cue` input. |
 | `bc_respond_dialog` | Handle confirmation prompts and request pages |
 | `bc_navigate` | Select rows, drill down into records, field lookups |
-| `bc_search_pages` | Find pages by name via Tell Me |
+| `bc_search_pages` | Tell Me search. Returns `{ name, objectType, runTarget, departmentPath, category, score }` per result. |
 | `bc_close_page` | Close a page and free server resources |
 | `bc_switch_company` | Switch to a different company mid-session |
 | `bc_list_companies` | Discover available companies |
 | `bc_run_report` | Execute reports and fill request page parameters |
+| `bc_wizard_navigate` | Drive NavigatePage / wizard flows (back / next / finish / cancel) |
 
 ## How it works
 
@@ -79,6 +80,7 @@ One WebSocket connection per session. All operations serialized through a promis
 Each section carries its own content shape:
 - **Card-style** (`header` on Card pages, `factbox`, `requestPage`): `fields[]` and (for `header`) `actions[]`
 - **List-style** (`lines` on Documents, `header` on List pages, repeater subpages): `rows[]` and `totalRowCount`
+- **Cue tiles** (Role Center hosted CardParts): `cues[]` with each tile's `name`, `value`, `groupCaption`, `synopsis`, `hasAction`. Drill down with `bc_execute_action { section, cue }`.
 
 `bc_read_data` returns a single `Section` for the requested `sectionId` (defaults to `"header"`). The section ID for a FactBox or subpage comes from the `bc_open_page` response.
 
@@ -91,6 +93,7 @@ Each section carries its own content shape:
 - Handles BC's ~15s NTLM auth slot hold after crashes
 - Auto-dismisses license popups on fresh databases
 - Invoke timeout kills hung sessions and triggers recovery
+- Auto-recovery from `LogicalModalityViolationException` mid-session: reconciles the modal stack and retries transparently; falls back to session reset when BC keeps a confirm dialog sticky
 
 </details>
 
@@ -103,6 +106,7 @@ Each section carries its own content shape:
 | `BC_USERNAME` | (required) | BC username |
 | `BC_PASSWORD` | (required) | BC password |
 | `BC_TENANT_ID` | `default` | Tenant ID |
+| `BC_PROFILE` | (empty) | BC profile id (e.g. `BUSINESS MANAGER`). Selects which Role Center loads and which pages Tell Me indexes. Empty = server default. |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `BC_INVOKE_TIMEOUT` | `30000` | Kill session if BC hangs (ms) |
 | `BC_RECONNECT_MAX_RETRIES` | `4` | Reconnect attempts |
@@ -117,8 +121,8 @@ git clone https://github.com/SShadowS/business-central-mcp
 cd business-central-mcp
 npm install
 npm run start:stdio-direct   # Run from source
-npm test                     # 128 unit tests
-npm run test:integration     # 103 integration tests against real BC
+npm test                     # 281 unit + protocol tests
+npm run test:integration     # 111 integration tests against real BC (requires running BC server)
 ```
 
 ## License
