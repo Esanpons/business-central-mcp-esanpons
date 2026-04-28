@@ -8,15 +8,17 @@
 // form-views.ts; this DTO is the shape exposed to MCP callers.
 
 import type { SectionKind } from './section-resolver.js';
+import type { FieldType } from './form-node.js';
+import type { RepeaterRow } from './types.js';
 
 export interface SectionField {
-  /** Field caption as shown in the BC client. Used as the cell key in row.cells. */
+  /** Field caption as shown in the BC client. Display label only. */
   readonly name: string;
   /** Display string. Undefined for fields that have no string projection (e.g. boolean tristate). */
   readonly value?: string;
   readonly editable: boolean;
-  /** Wire-level field type: sc, dc, bc, dtc, i32c, sec, pc, ssc. */
-  readonly type: string;
+  /** Wire-level BC field type. See FieldType union in protocol/form-node.ts. */
+  readonly type: FieldType;
   /** True if BC marked the field as mandatory. */
   readonly showMandatory?: boolean;
   /** True if the field has an AssistEdit/Lookup action attached. */
@@ -24,17 +26,22 @@ export interface SectionField {
 }
 
 export interface SectionAction {
+  /** Action caption as shown in the BC client. */
   readonly name: string;
+  /** SystemAction ordinal. See SystemAction enum in protocol/types.ts. 0 = no system role (custom AL action). */
   readonly systemAction: number;
+  /** True if BC marks the action as currently invokable. */
   readonly enabled: boolean;
   /** Wizard role on a NavigatePage / StandardDialog. */
   readonly wizardNav?: 'back' | 'next' | 'finish' | 'cancel';
 }
 
-export interface SectionRow {
-  readonly bookmark: string;
-  readonly cells: Record<string, unknown>;
-}
+/**
+ * Row inside a list-shape Section. Identical to the internal `RepeaterRow`
+ * type — cells keyed by `columnBinderName` (e.g. "1165569367_c2"), not by
+ * caption.
+ */
+export type SectionRow = RepeaterRow;
 
 export interface Section {
   readonly sectionId: string;

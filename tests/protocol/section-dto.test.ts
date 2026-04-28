@@ -15,7 +15,7 @@ describe('Section DTO shape', () => {
     expect(s.kind).toBe('header');
   });
 
-  it('SectionField carries caption, value, editable, type', () => {
+  it('SectionField carries name, value, editable, type', () => {
     const f: SectionField = { name: 'No.', value: '10000', editable: false, type: 'sc' };
     expect(f.name).toBe('No.');
   });
