@@ -1,11 +1,8 @@
 import { mapResult, type Result } from '../core/result.js';
 import type { ProtocolError } from '../core/errors.js';
 import type { PageService } from '../services/page-service.js';
-import { resolveSection, type ResolvedSection } from '../protocol/section-resolver.js';
-import { mapRowCellKeys } from '../protocol/row-mapping.js';
-import { isEffectivelyVisible } from '../protocol/visibility.js';
-import { fields as treeFields, actions as treeActions, groupVisibility as treeGroupVisibility } from '../protocol/form-views.js';
-import { classifyWizardNav } from '../protocol/wizard-classify.js';
+import { buildAllSections } from '../protocol/section-dto.js';
+import type { Section } from '../protocol/section-dto.js';
 
 export interface OpenPageInput {
   pageId: string;
@@ -19,15 +16,7 @@ export interface OpenPageOutput {
   caption: string;
   /** True when the page opened as a modal (wizard, request page, confirmation). */
   isModal: boolean;
-  fields: Array<{ name: string; value?: string; editable: boolean; type: string }>;
-  actions: Array<{
-    name: string;
-    systemAction: number;
-    enabled: boolean;
-    /** Set on NavigatePage actions; lets the caller drive the wizard without knowing controlPath. */
-    wizardNav?: 'back' | 'next' | 'finish' | 'cancel';
-  }>;
-  rows?: Array<{ bookmark: string; cells: Record<string, unknown> }>;
+  sections: Section[];
 }
 
 export class OpenPageOperation {
@@ -39,53 +28,12 @@ export class OpenPageOperation {
       tenantId: input.tenantId,
     });
 
-    return mapResult(result, (ctx) => {
-      const resolved = resolveSection(ctx, 'header');
-      const form = 'error' in resolved ? undefined : resolved.form;
-      const repeater = 'error' in resolved ? null : resolved.repeater;
-
-      const root = form?.root;
-      const groupVis = root ? treeGroupVisibility(root) : new Map<string, boolean>();
-      const ws = ctx.wizardState;
-      const fieldList = root ? treeFields(root) : [];
-      const actionList = root ? treeActions(root) : [];
-
-      return {
-        pageContextId: ctx.pageContextId,
-        pageType: ctx.pageType,
-        caption: ctx.caption || ctx.rootFormId,
-        isModal: ctx.isModal,
-        fields: fieldList
-          .filter(f => f.properties.caption && root && isEffectivelyVisible(root, f.controlPath, groupVis, ws))
-          .map(f => ({
-            name: f.properties.caption!,
-            value: f.properties.stringValue,
-            editable: f.properties.editable ?? false,
-            type: f.type,
-          })),
-        actions: actionList
-          .filter(a => (a.properties.enabled ?? true) && a.properties.caption && root && isEffectivelyVisible(root, a.controlPath, groupVis, ws))
-          .map(a => {
-            const wn = classifyWizardNav(a);
-            return {
-              name: a.properties.caption!,
-              systemAction: a.systemAction,
-              enabled: a.properties.enabled ?? true,
-              ...(wn ? { wizardNav: wn } : {}),
-            };
-          }),
-        // TODO(tier-2/T25): replace adapter with direct tree-node reads
-        rows: repeater ? mapRowCellKeys(
-          [...(resolved as ResolvedSection).rows],
-          repeater.columns.map(c => ({
-            controlPath: c.controlPath,
-            caption: c.properties.caption ?? '',
-            type: 'rcc' as const,
-            columnBinderName: c.columnBinder?.name,
-            columnBinderPath: c.columnBinder?.path,
-          })),
-        ).map(r => ({ bookmark: r.bookmark, cells: r.cells })) : undefined,
-      };
-    });
+    return mapResult(result, (ctx) => ({
+      pageContextId: ctx.pageContextId,
+      pageType: ctx.pageType,
+      caption: ctx.caption || ctx.rootFormId,
+      isModal: ctx.isModal,
+      sections: buildAllSections(ctx),
+    }));
   }
 }
