@@ -10,6 +10,16 @@
 import type { SectionKind } from './section-resolver.js';
 import type { FieldType } from './form-node.js';
 import type { RepeaterRow } from './types.js';
+import { resolveSection } from './section-resolver.js';
+import {
+  fields as treeFields,
+  actions as treeActions,
+  groupVisibility as treeGroupVisibility,
+} from './form-views.js';
+import { isEffectivelyVisible } from './visibility.js';
+import { mapRowCellKeys } from '../services/data-service.js';
+import type { ActionNode } from './form-node.js';
+import type { PageContext } from './page-context.js';
 
 export interface SectionField {
   /** Field caption as shown in the BC client. Display label only. */
@@ -59,4 +69,93 @@ export interface Section {
   readonly rows?: readonly SectionRow[];
   readonly totalRowCount?: number | null;
   readonly actions?: readonly SectionAction[];
+}
+
+function classifyWizardNav(a: ActionNode): 'back' | 'next' | 'finish' | 'cancel' | undefined {
+  const id = a.iconIdentifier;
+  if (id) {
+    if (/PreviousRecord/i.test(id)) return 'back';
+    if (/NextRecord|Action_Start/i.test(id)) return 'next';
+    if (/Approve/i.test(id)) return 'finish';
+  }
+  if (a.systemAction === 310 || a.systemAction === 320 || a.systemAction === 350) return 'cancel';
+  return undefined;
+}
+
+/**
+ * Build the Section DTO for `sectionId` in `ctx`. Returns `null` when the
+ * sectionId is unknown or the section has been invalidated.
+ *
+ * Card-shape sections emit `fields[]` (and `actions[]` for header sections);
+ * list-shape sections emit `rows[]` and `totalRowCount`. Header sections
+ * always include `actions[]` because actions are reachable only from the root
+ * form.
+ */
+export function buildSection(ctx: PageContext, sectionId: string): Section | null {
+  const resolved = resolveSection(ctx, sectionId);
+  if ('error' in resolved) return null;
+  const { section, form, repeater, rows } = resolved;
+
+  const isHeader = section.kind === 'header';
+  const isList = !!repeater;
+
+  const root = form.root;
+  const groupVis = treeGroupVisibility(root);
+  const ws = ctx.wizardState;
+
+  const out: {
+    sectionId: string;
+    kind: typeof section.kind;
+    caption: string;
+    fields?: SectionField[];
+    rows?: SectionRow[];
+    totalRowCount?: number | null;
+    actions?: SectionAction[];
+  } = {
+    sectionId: section.sectionId,
+    kind: section.kind,
+    caption: section.caption,
+  };
+
+  if (isList && repeater) {
+    out.rows = mapRowCellKeys(
+      [...rows],
+      repeater.columns.map(c => ({
+        controlPath: c.controlPath,
+        caption: c.properties.caption ?? '',
+        type: 'rcc' as const,
+        columnBinderName: c.columnBinder?.name,
+        columnBinderPath: c.columnBinder?.path,
+      })),
+    ).map(r => ({ bookmark: r.bookmark, cells: r.cells }));
+    out.totalRowCount = repeater.properties.totalRowCount ?? null;
+  } else {
+    out.fields = treeFields(root)
+      .filter(f => f.properties.caption && isEffectivelyVisible(root, f.controlPath, groupVis, ws))
+      .map(f => ({
+        name: f.properties.caption!,
+        value: f.properties.stringValue,
+        editable: f.properties.editable ?? false,
+        type: f.type,
+        ...(f.properties.showMandatory ? { showMandatory: true as const } : {}),
+        ...(f.hasLookup ? { isLookup: true as const } : {}),
+      }));
+  }
+
+  if (isHeader) {
+    out.actions = treeActions(root)
+      .filter(a => (a.properties.enabled ?? true) && a.properties.caption
+        && isEffectivelyVisible(root, a.controlPath, groupVis, ws))
+      .map(a => {
+        const wn = classifyWizardNav(a);
+        return {
+          name: a.properties.caption!,
+          systemAction: a.systemAction,
+          enabled: a.properties.enabled ?? true,
+          ...(wn ? { wizardNav: wn } : {}),
+        };
+      });
+  }
+
+  return out as Section;
 }
