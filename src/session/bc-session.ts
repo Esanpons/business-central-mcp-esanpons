@@ -301,6 +301,43 @@ export class BCSession {
   }
 
   /**
+   * Walk the modal stack from top to bottom, sending Abort (SystemAction=320)
+   * to each modal until the stack is empty or an Abort fails. After each
+   * successful Abort, BC's FormClosed event normally pops the stack via
+   * updateFormTracking. If FormClosed does not arrive, the loop force-pops
+   * to make progress.
+   *
+   * Used to clear stale modal state that produced a
+   * `LogicalModalityViolationException`.
+   *
+   * Reference: decompiled `LogicalModalityVerifier.IsUnderModalForm`, which
+   * inspects `LogicalDispatcher.Frames`. SystemAction.Abort=320 closes the
+   * topmost frame's ModalForm.
+   */
+  async reconcileModalStack(): Promise<Result<void, ProtocolError>> {
+    const MAX_ATTEMPTS = 10;
+    for (let i = 0; i < MAX_ATTEMPTS && this.modalStack.size > 0; i++) {
+      const top = this.modalStack.peek()!;
+      const result = await this.invoke(
+        { type: 'InvokeAction', formId: top, controlPath: 'server:', systemAction: 320 },
+        (event) => event.type === 'InvokeCompleted',
+      );
+      if (isErr(result)) {
+        return err(new ProtocolError(`reconcileModalStack: Abort on formId=${top} failed: ${result.error.message}`));
+      }
+      // If BC didn't emit FormClosed for this formId, force-pop to make progress.
+      if (this.modalStack.peek() === top) {
+        this.modalStack.pop();
+        this._openFormIds.delete(top);
+      }
+    }
+    if (this.modalStack.size > 0) {
+      return err(new ProtocolError(`reconcileModalStack: stack still has ${this.modalStack.size} entries after ${MAX_ATTEMPTS} attempts`));
+    }
+    return ok(undefined);
+  }
+
+  /**
    * Gracefully close the session by closing all open forms (dialogs first),
    * then closing the WebSocket. Without this, BC keeps modal dialog state
    * alive server-side, blocking new sessions for the same user.
