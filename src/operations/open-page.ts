@@ -2,10 +2,10 @@ import { mapResult, type Result } from '../core/result.js';
 import type { ProtocolError } from '../core/errors.js';
 import type { PageService } from '../services/page-service.js';
 import { resolveSection, type ResolvedSection } from '../protocol/section-resolver.js';
-import { mapRowCellKeys } from '../services/data-service.js';
+import { mapRowCellKeys } from '../protocol/row-mapping.js';
 import { isEffectivelyVisible } from '../protocol/visibility.js';
 import { fields as treeFields, actions as treeActions, groupVisibility as treeGroupVisibility } from '../protocol/form-views.js';
-import { type ActionNode } from '../protocol/form-node.js';
+import { classifyWizardNav } from '../protocol/wizard-classify.js';
 
 export interface OpenPageInput {
   pageId: string;
@@ -28,17 +28,6 @@ export interface OpenPageOutput {
     wizardNav?: 'back' | 'next' | 'finish' | 'cancel';
   }>;
   rows?: Array<{ bookmark: string; cells: Record<string, unknown> }>;
-}
-
-function classifyWizardNav(a: ActionNode): 'back' | 'next' | 'finish' | 'cancel' | undefined {
-  const id = a.iconIdentifier;
-  if (id) {
-    if (/PreviousRecord/i.test(id)) return 'back';
-    if (/NextRecord|Action_Start/i.test(id)) return 'next';
-    if (/Approve/i.test(id)) return 'finish';
-  }
-  if (a.systemAction === 310 || a.systemAction === 320 || a.systemAction === 350) return 'cancel';
-  return undefined;
 }
 
 export class OpenPageOperation {

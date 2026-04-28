@@ -132,6 +132,47 @@ describe('buildSection', () => {
     expect(buildSection(ctx, 'nonexistent')).toBeNull();
   });
 
+  it('rows section remaps columnBinderName keys to captions', () => {
+    const child = {
+      t: 'lf', ServerId: 'child', PageType: 1, Caption: 'Lines',
+      Children: [{
+        t: 'rc',
+        Columns: [
+          { t: 'rcc', Caption: 'No.', ColumnBinder: { Name: 'c1', Path: '37.1' } },
+          { t: 'rcc', Caption: 'Quantity', ColumnBinder: { Name: 'c2', Path: '37.5' } },
+        ],
+      }],
+    };
+    const childForm = makeFormState('child', child);
+    childForm.rows.set('server:c[0]', [
+      { bookmark: 'BMK1', cells: { c1: 'ITEM1', c2: '5' } },
+    ]);
+    const ctx = makeCtx({
+      rootFormId: 'root',
+      forms: new Map<string, FormState>([
+        ['root', makeFormState('root', { t: 'lf', ServerId: 'root', PageType: 5, Children: [] })],
+        ['child', childForm],
+      ]),
+      sections: new Map<string, SectionDescriptor>([
+        ['header', { sectionId: 'header', kind: 'header', caption: 'X', formId: 'root', valid: true }],
+        ['lines', { sectionId: 'lines', kind: 'lines', caption: 'Lines', formId: 'child', repeaterControlPath: 'server:c[0]', valid: true }],
+      ]),
+    });
+    const section = buildSection(ctx, 'lines');
+    expect(section!.rows![0].cells).toEqual({ 'No.': 'ITEM1', 'Quantity': '5' });
+  });
+
+  it('returns null for an invalid (valid:false) section', () => {
+    const ctx = makeCtx({
+      rootFormId: 'root',
+      forms: new Map([['root', makeFormState('root', { t: 'lf', ServerId: 'root', PageType: 0, Children: [] })]]),
+      sections: new Map([['stale', {
+        sectionId: 'stale', kind: 'subpage', caption: 'Old', formId: 'gone', valid: false,
+      }]]),
+    });
+    expect(buildSection(ctx, 'stale')).toBeNull();
+  });
+
   it('emits actions only on the header section', () => {
     const root = {
       t: 'lf', ServerId: 'root', PageType: 0, Caption: 'Customer',

@@ -18,7 +18,7 @@ import {
 } from './form-views.js';
 import { isEffectivelyVisible } from './visibility.js';
 import { mapRowCellKeys } from './row-mapping.js';
-import type { ActionNode } from './form-node.js';
+import { classifyWizardNav } from './wizard-classify.js';
 import type { PageContext } from './page-context.js';
 
 export interface SectionField {
@@ -71,17 +71,6 @@ export interface Section {
   readonly actions?: readonly SectionAction[];
 }
 
-function classifyWizardNav(a: ActionNode): 'back' | 'next' | 'finish' | 'cancel' | undefined {
-  const id = a.iconIdentifier;
-  if (id) {
-    if (/PreviousRecord/i.test(id)) return 'back';
-    if (/NextRecord|Action_Start/i.test(id)) return 'next';
-    if (/Approve/i.test(id)) return 'finish';
-  }
-  if (a.systemAction === 310 || a.systemAction === 320 || a.systemAction === 350) return 'cancel';
-  return undefined;
-}
-
 /**
  * Build the Section DTO for `sectionId` in `ctx`. Returns `null` when the
  * sectionId is unknown or the section has been invalidated.
@@ -97,7 +86,6 @@ export function buildSection(ctx: PageContext, sectionId: string): Section | nul
   const { section, form, repeater, rows } = resolved;
 
   const isHeader = section.kind === 'header';
-  const isList = !!repeater;
 
   const root = form.root;
   const groupVis = treeGroupVisibility(root);
@@ -117,7 +105,7 @@ export function buildSection(ctx: PageContext, sectionId: string): Section | nul
     caption: section.caption,
   };
 
-  if (isList && repeater) {
+  if (repeater) {
     out.rows = mapRowCellKeys(
       [...rows],
       repeater.columns.map(c => ({

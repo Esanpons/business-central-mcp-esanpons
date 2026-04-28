@@ -156,7 +156,13 @@ export const SystemAction = {
   AssistEdit: 100, Lookup: 110, DrillDown: 120,
   PageSearch: 220,
   Ok: 300, Cancel: 310, Abort: 320,
-  LookupOk: 330, LookupCancel: 340, Yes: 380, No: 390,
+  LookupOk: 330, LookupCancel: 340,
+  // Reference: decompiled `Microsoft.Dynamics.Framework.UI.Client.SystemAction.cs`
+  // (BC28). `CloseOk = 350` is the dialog-level "close as OK" terminator emitted
+  // alongside Cancel/Abort on wizard/standard-dialog forms; we treat it as a
+  // cancel-shaped wizard nav role.
+  CloseOk: 350,
+  Yes: 380, No: 390,
 } as const;
 
 export const FilterOperation = {
