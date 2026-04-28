@@ -45,7 +45,7 @@ describe.sequential('Phase 3 Feature Verification', () => {
     pageService = new PageService(session, repo, logger);
     dataService = new DataService(session, repo, logger);
     const filterService = new FilterService(session, repo, logger);
-    readData = new ReadDataOperation(dataService, filterService);
+    readData = new ReadDataOperation(dataService, filterService, repo);
   });
 
   afterAll(async () => {
@@ -133,15 +133,16 @@ describe.sequential('Phase 3 Feature Verification', () => {
       const output = unwrap(result);
 
       // General tab should include No. and Sell-to Customer No.
-      if (output.rows.length > 0) {
-        const cellKeys = Object.keys(output.rows[0]!.cells);
-        console.error('General tab fields:', cellKeys.slice(0, 10));
+      const tabFields = output.section.fields ?? [];
+      if (tabFields.length > 0) {
+        const fieldNames = tabFields.map(f => f.name);
+        console.error('General tab fields:', fieldNames.slice(0, 10));
         // Should have substantially fewer fields than all fields
         const allResult = await readData.execute({ pageContextId });
         if (isOk(allResult)) {
-          const allKeys = Object.keys(unwrap(allResult).rows[0]!.cells);
-          expect(cellKeys.length).toBeLessThan(allKeys.length);
-          console.error(`General tab: ${cellKeys.length} fields vs all: ${allKeys.length} fields`);
+          const allFields = unwrap(allResult).section.fields ?? [];
+          expect(tabFields.length).toBeLessThan(allFields.length);
+          console.error(`General tab: ${tabFields.length} fields vs all: ${allFields.length} fields`);
         }
       }
     });
@@ -167,38 +168,43 @@ describe.sequential('Phase 3 Feature Verification', () => {
       expect(isOk(result)).toBe(true);
       const output = unwrap(result);
 
-      console.error(`Customer List: ${output.totalCount} rows loaded, totalRowCount=${output.totalRowCount}`);
-      expect(output.totalCount).toBeGreaterThan(0);
+      const loadedRows = output.section.rows ?? [];
+      console.error(`Customer List: ${loadedRows.length} rows loaded, totalRowCount=${output.section.totalRowCount}`);
+      expect(loadedRows.length).toBeGreaterThan(0);
     });
 
     it('slices first 3 rows with range', async () => {
       const allResult = await readData.execute({ pageContextId });
       const all = unwrap(allResult);
+      const allRows = all.section.rows ?? [];
 
       const rangeResult = await readData.execute({ pageContextId, range: { offset: 0, limit: 3 } });
       expect(isOk(rangeResult)).toBe(true);
       const ranged = unwrap(rangeResult);
+      const rangedRows = ranged.section.rows ?? [];
 
-      expect(ranged.rows.length).toBe(3);
-      // totalCount should be the full count (before slicing)
-      expect(ranged.totalCount).toBe(all.totalCount);
+      expect(rangedRows.length).toBe(3);
+      // totalRowCount should be the full count (before slicing)
+      expect(ranged.section.totalRowCount).toBe(all.section.totalRowCount);
       // First 3 rows should match
-      expect(ranged.rows[0]!.bookmark).toBe(all.rows[0]!.bookmark);
-      expect(ranged.rows[2]!.bookmark).toBe(all.rows[2]!.bookmark);
+      expect(rangedRows[0]!.bookmark).toBe(allRows[0]!.bookmark);
+      expect(rangedRows[2]!.bookmark).toBe(allRows[2]!.bookmark);
     });
 
     it('slices with offset', async () => {
       const allResult = await readData.execute({ pageContextId });
       const all = unwrap(allResult);
+      const allRows = all.section.rows ?? [];
 
       const rangeResult = await readData.execute({ pageContextId, range: { offset: 2, limit: 2 } });
       expect(isOk(rangeResult)).toBe(true);
       const ranged = unwrap(rangeResult);
+      const rangedRows = ranged.section.rows ?? [];
 
-      expect(ranged.rows.length).toBe(2);
-      // Row at offset 2 should match all.rows[2]
-      expect(ranged.rows[0]!.bookmark).toBe(all.rows[2]!.bookmark);
-      expect(ranged.rows[1]!.bookmark).toBe(all.rows[3]!.bookmark);
+      expect(rangedRows.length).toBe(2);
+      // Row at offset 2 should match allRows[2]
+      expect(rangedRows[0]!.bookmark).toBe(allRows[2]!.bookmark);
+      expect(rangedRows[1]!.bookmark).toBe(allRows[3]!.bookmark);
     });
 
     it('closes page', async () => {
