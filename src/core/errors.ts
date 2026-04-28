@@ -71,6 +71,6 @@ export class InputValidationError extends BCError {
  */
 export class CardPartStubError extends ProtocolError {
   constructor(message: string, context: { pageId: string; hostHint: string }) {
-    super(message, context);
+    super(message, context, 'CARDPART_STUB');
   }
 }

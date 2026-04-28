@@ -1,4 +1,4 @@
-import { isOk, mapResult, err, type Result } from '../core/result.js';
+import { isOk, ok, err, type Result } from '../core/result.js';
 import { CardPartStubError, type ProtocolError } from '../core/errors.js';
 import type { PageService } from '../services/page-service.js';
 import { buildAllSections, type Section } from '../protocol/section-dto.js';
@@ -52,12 +52,12 @@ export class OpenPageOperation {
       }
     }
 
-    return mapResult(result, (c) => ({
-      pageContextId: c.pageContextId,
-      pageType: c.pageType,
-      caption: c.caption || c.rootFormId,
-      isModal: c.isModal,
-      sections: buildAllSections(c),
-    }));
+    return ok({
+      pageContextId: ctx.pageContextId,
+      pageType: ctx.pageType,
+      caption: ctx.caption || ctx.rootFormId,
+      isModal: ctx.isModal,
+      sections: buildAllSections(ctx),
+    });
   }
 }
