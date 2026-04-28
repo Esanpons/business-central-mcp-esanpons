@@ -1,0 +1,232 @@
+# bc-mcp Known Limitations
+
+Observed during real-use sessions against BC27 + BC28 DemoPortal envs (Continia Document Output, customer card + factbox + queue pages). Each item listed with concrete repro + suggested fix or workaround.
+
+## 1. `cuegroup` Card pages return placeholder field only
+
+**Symptom**
+
+`bc_open_page` against a Card page whose layout is built with `cuegroup` containers (cue tiles) returns:
+
+```json
+{
+  "pageType": "Card",
+  "caption": "Document Output",
+  "fields": [
+    { "name": "Document Output", "editable": false, "type": "" }
+  ],
+  "actions": []
+}
+```
+
+The single "field" is the page caption used as a placeholder. No tile values, no drill-down hooks, no actions.
+
+**Repro**
+
+Page 6175308 `CDO Document Output Queues` (CardPart with cuegroup `DocumentQueueCueGroup`, `PrintQueueCueGroup`, etc.). AL definition:
+
+```
+PageType = CardPart;
+SourceTable = Integer;
+layout {
+  area(Content) {
+    cuegroup(DocumentQueueCueGroup) {
+      field(FailedDocumentQueue; FailedDocumentQueue) { ... }
+      field(DocumentQueue;       DocumentQueue)       { ... }
+    }
+    cuegroup(PrintQueueCueGroup) { ... }
+  }
+}
+```
+
+**Workaround**
+
+Open the underlying list page that the cue's `OnDrillDown` would have opened (e.g. `CDO Queue Entry` = page 6175297) directly via `bc_open_page`. The data is reachable; the cue tile aggregation is not.
+
+**Fix candidate**
+
+Extend the page-payload parser to walk into `cuegroup` containers and either (a) emit each cue as a synthetic field with its computed value, or (b) emit each cue as an action whose drill-down opens the target list. Check `src/operations/open-page.ts` (or wherever Card layout flattening lives).
+
+## 2. FactBox parts on a parent page are invisible to `bc_open_page` / `bc_read_data`
+
+**Symptom**
+
+Opening Customer Card (page 21) returns `changedSections` including `factbox:CDO Customer FactBox` after an action, but `bc_open_page` does NOT include factbox part fields in the parent's `fields` array. Calling `bc_read_data` with `section: "factbox:CDO Customer FactBox"` returns `{ "rows": [], "totalCount": 0 }`.
+
+**Repro**
+
+```
+bc_open_page { pageId: 21, bookmark: <customer 10000> }
+  → fields[] omits CDO factbox controls (Output Profile, Email Recipients, Log)
+bc_read_data { pageContextId: <ctx>, section: "factbox:CDO Customer FactBox" }
+  → empty
+```
+
+**Workaround**
+
+Open the factbox page directly with its own `pageId` (e.g. `bc_open_page { pageId: 6175324, bookmark: <same customer bookmark> }`). FactBox pages are real Card / CardPart pages and render normally when opened standalone — `Output Profile` etc. appear as regular fields. Write through that context.
+
+**Fix candidate**
+
+Either (a) flatten attached factbox part contents into the parent page's response under `sections[]`, or (b) make `bc_read_data` with a `factbox:*` section actually fetch from the underlying part. Today the section name appears in `changedSections` (so the protocol exposes it) but the read pathway is missing.
+
+## 3. Page-extension fields gated by `ApplicationArea` are server-filtered
+
+**Symptom**
+
+A page extension adds a field with `ApplicationArea = CDOBasic` (or any non-`#All` area). `bc_open_page` does not return the field, and `bc_write_data` with the field's caption returns `Field not found: ...` even though the AL source clearly defines it.
+
+**Repro**
+
+Customer Card 21, page extension `CDOCustomerCardExt` adds:
+
+```
+addlast(General) {
+  field("CDO Send on Posting"; Rec."CDO Send on Posting") {
+    ApplicationArea = CDOBasic;
+  }
+}
+```
+
+Before activating Document Output in the company: field absent from `bc_open_page` response. After running the Document Output Setup Wizard (which flips Continia Online activation true): field appears with caption `Send on Posting`.
+
+**Cause**
+
+BC's web-client form binder honors the active user's Application Area and the company's app activation state when materializing the page metadata. bc-mcp receives only the controls BC chose to send. The filter is server-side.
+
+**Workaround**
+
+Activate any Continia app (or otherwise enable the relevant Application Area) in the target company before driving the page through bc-mcp. For Continia DemoPortal envs, activation runs from the Document Output Setup Wizard.
+
+**Fix candidate**
+
+- Add an env var (e.g. `BC_APPLICATION_AREA=#All`) that bc-mcp passes to BC during connect / page open so metadata returns under the broadest area.
+- Or document the activation requirement loudly in the README so users do not chase a phantom "page-extension didn't deploy" bug.
+- Verify whether BC accepts an Application Area override on the WS form-init message; if so, plumb it through.
+
+## 4. Modal dialog left open server-side persists across MCP calls
+
+**Symptom**
+
+A page action triggers a modal (request page, send-document dialog) that bc-mcp partially handles. If the dialog chain is abandoned (cancel, error, network blip) without fully closing, the BC server retains the modal state for the user session. Every subsequent bc-mcp tool call returns:
+
+```
+JSON-RPC error: errorType "Microsoft.Dynamics.Framework.UI.LogicalModalityViolationException",
+message "There is a dialog box open in another browser window. You must close that dialog box or sign out."
+```
+
+**Status (partially resolved 2026-04-28)**
+
+bc-mcp now auto-recovers in a two-stage process. Behavior depends on whether
+BC's server honors the close-modal request.
+
+**Stage 1 — transparent recovery (when BC honors Abort).** On
+`LogicalModalityViolationException` during an invoke, `BCSession.invokeUnqueued`
+calls `reconcileModalStack`, which walks the session's `modalStack`
+(DialogOpened-pushed, FormClosed-popped) top-down and sends
+`InvokeAction { systemAction: 320 (Abort) }` to each modal. After reconcile
+clears the stack, the original interaction is re-encoded with fresh sequence
+numbers and retried once. On retry success, the caller never sees the error.
+
+**Stage 2 — degraded recovery (when BC keeps the modal sticky).** Live
+testing on BC28 shows that for confirm dialogs (e.g. the "Delete the
+selected record?" confirm) BC does NOT emit `FormClosed` in response to
+`Abort=320` against `controlPath: 'server:'`. The local stack force-pops to
+maintain consistent client state, but the server-side dialog persists. When
+that happens the retry hits another `LogicalModalityViolationException`,
+`reconcileModalStack` returns `ModalReconcileError`, the session is marked
+dead, and `SessionManager` recreates it. The caller sees `SessionLostError`
+with the list of invalidated `pageContextId`s and re-opens any pages it
+needs. This is still strictly better than the original behavior (where the
+violation bubbled forever), but it is not "transparent" — page contexts are
+lost.
+
+**References**
+- `src/session/bc-session.ts` — `invokeUnqueued`'s LogicalModalityViolation
+  branch (queue-bypassing) and `reconcileModalStack`
+- `src/session/modal-stack.ts` — ordered stack with `peek` / `pop` / `remove`
+- `src/core/errors.ts` — `ModalReconcileError`
+- `tests/integration/modal-recovery.test.ts` — live BC28 verification of
+  tracking + reconcile-driven local cleanup
+- Decompiled `Microsoft.Dynamics.Framework.UI.LogicalModalityVerifier` and
+  `LogicalDispatcher.Frames` — server-side stack model that we mirror
+
+**Open follow-up**
+
+Closing a sticky confirm dialog server-side is non-trivial. Investigation
+candidates: (a) target the dialog's child controlPath (e.g. the No/Cancel
+button) instead of `server:` for `Abort`; (b) use `SystemAction.No=390`
+which the dialog's own actions map to `MessageFormActions.Cancel` per
+`LogicalDialog.cs`; (c) accept the degradation since session recreation is
+a clean fallback.
+
+**Repro of the original failure**
+
+Click `Send/Print` on a posted Sales Invoice; bc-mcp surfaces the Send
+Document dialog; user responds `ok`; BC chains another modal that bc-mcp
+doesn't surface; cancel out. Next `bc_list_companies` call previously bubbled
+`LogicalModalityViolation` forever; now it triggers stage-1 (transparent
+retry if BC closes) or stage-2 (session reset, `SessionLostError`).
+
+## 5. `bc_search_pages` (Tell Me) returns empty results in some envs
+
+**Symptom**
+
+`bc_search_pages { query: "customer" }` returns `{ "results": [] }` even though the BC web client's Tell Me box finds matches in the same env.
+
+**Repro**
+
+Continia DemoPortal BC28 env, super user. Searches that work in browser return empty from MCP.
+
+**Workaround**
+
+Use known page IDs directly with `bc_open_page`. For Continia / Document Output specifically, the common ones:
+
+| Page ID | Name |
+|---|---|
+| 6175277 | Document Output Log |
+| 6175280 | CDO Customer Card |
+| 6175286 | Unhandled Posted Sales Invoices |
+| 6175295 | CDO Setup Wizard |
+| 6175297 | CDO Queue Entry |
+| 6175308 | CDO Document Output Queues (cuegroup, see #1) |
+| 6175324 | CDO Customer FactBox |
+
+**Fix candidate**
+
+Confirm whether bc-mcp's Tell Me query is scoped to the same role center / profile as the user. If a default profile yields no Tell Me hits, document a `BC_PROFILE` override or default to a profile that includes the searched objects.
+
+## 6. URL parsing requires trailing slash
+
+**Symptom**
+
+`BC_BASE_URL=https://host/path` (no trailing slash) → bc-mcp's connect attempt fails before getting to NTLM. Sometimes manifests as silent hang, sometimes as `Session creation failed after all retry attempts`.
+
+**Workaround**
+
+Always end `BC_BASE_URL` with `/`. Verified working: `https://demoportaldev.continiaonline.com/<envGuid>/`.
+
+**Fix candidate**
+
+Normalize `BC_BASE_URL` in `src/connection/` — trim, then append `/` if missing, then validate. Surface a clear error early if the URL is malformed rather than letting it fail at WS upgrade.
+
+## 7. Queue / Job-Queue dispatcher is a separate concern
+
+**Symptom**
+
+A successful `bc_execute_action { action: "Post" }` on a Sales Invoice with auto-send configured produces an entry in `CDO Queue Entry` (table 6175341 / page 6175297), but no Document Output Log entry. Tester expects "log entry exists right after posting" and reports a bug.
+
+**Cause**
+
+This is not bc-mcp behavior — it is the AL implementation. `OnAfterFinalizePosting` calls `EmailHandler.DocHandle(UseQueue := true, ...)` which enqueues. The BC Job Queue (or manual `Start Dispatcher`) then drains the queue, sends emails, writes the log row.
+
+**Workaround / clarification**
+
+When using bc-mcp to drive a posting flow that should result in a log entry, either (a) assert against `CDO Queue Entry` instead, (b) trigger `Start Dispatcher` after posting and respond to its dialog chain (one prompt per entry — tedious), or (c) ensure Job Queue is running in the env to process automatically.
+
+Not a bc-mcp bug; documented here so it does not get filed against bc-mcp again.
+
+## See also
+
+- `BC28Repro.md` — initial session-death repro on BC28 DemoPortal (now fixed) plus the page-extension-fields-invisible follow-up bug.
+- `ContiniaEnvSupport.md` — investigation list for first-class Continia DemoPortal support (URL routing, auth, profiles, license popups).
