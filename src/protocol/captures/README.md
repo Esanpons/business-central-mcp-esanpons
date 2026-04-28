@@ -23,7 +23,8 @@ The search form's children are:
 ```
 server:c[0]   gc (container)
 server:c[0]/c[0]   sc (text input, the actual search field)   <-- SaveValue here
-server:c[1]   rc (results repeater)
+server:c[1]   rc (primary results repeater — pages and lists)
+server:c[2]   rc (secondary results repeater — reports and other run-targets)
 ```
 
 **Critical:** the search input is at `server:c[0]/c[0]`, NOT `server:c[0]`.
@@ -33,11 +34,19 @@ default-profile env: the SearchService was sending against the wrong path.
 
 ### Result row shape
 
-After SaveValue with the actual query, BC emits:
+After SaveValue with the actual query, BC emits TWO DataLoaded streams (one
+per repeater) plus surrounding PropertyChanged events:
 
 1. `PropertyChanged { controlPath: server:c[0]/c[0], changes: { StringValue: <query> } }` — echoes the search input.
-2. `PropertyChanged { controlPath: server:c[1], changes: { 'Data.CurrentBookmark': <uuid> } }` — selects the first hit.
-3. `DataLoaded { controlPath: server:c[1], rows: [...] }` — the search results.
+2. `PropertyChanged { controlPath: server:c[1], changes: { 'Data.CurrentBookmark': <uuid> } }` — selects the first hit in the primary list.
+3. `DataLoaded { controlPath: server:c[1], rows: [...] }` — primary results (typically pages/lists).
+4. `DataLoaded { controlPath: server:c[2], rows: [...] }` — secondary results (reports and other categories).
+
+Both DataLoaded events use the same row schema (named cells, see below). The
+extractor walks every DataLoaded in the response and merges results — the
+caller doesn't need to know about the two-stream split. In the captured
+fixture, c[1] yields 23 rows and c[2] yields 32 rows for query `customer`,
+totaling 55 results.
 
 Each row follows the standard wire shape (`DataRowInserted: [index, payload]`)
 with these named cells:
