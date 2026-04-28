@@ -8,7 +8,7 @@ import type {
   BCEvent, OpenFormInteraction, LoadFormInteraction, CloseFormInteraction, InvokeActionInteraction, SetCurrentRowInteraction,
 } from '../protocol/types.js';
 import { buildFormTree } from '../protocol/form-tree-builder.js';
-import { fields as treeFields, repeaters as treeRepeaters } from '../protocol/form-views.js';
+import { fields as treeFields, repeaters as treeRepeaters, cues as treeCues } from '../protocol/form-views.js';
 import { walkTree } from '../protocol/form-tree-walk.js';
 import { isFormHostNode, isGroupNode, isLogicalFormNode } from '../protocol/form-node.js';
 import type { Logger } from '../core/logger.js';
@@ -193,8 +193,16 @@ export class PageService {
       // Role Center hosted CardParts (cuegroups) follow the same pattern: BC won't
       // populate cue StringValues without openForm:true, since the form was already
       // opened during root-tree parsing.
+      // Role Center hosted CardParts arrive on the wire as IsSubForm=false /
+      // IsPart=true, which page-context-repo classifies as `factbox` -- the
+      // same bucket used for genuine FactBoxes on Card pages. They aren't
+      // really factboxes but the wire shape doesn't distinguish, so we key
+      // off `pageType === 'RoleCenter'` and treat any non-lines child as a
+      // role-center child (subpage OR factbox).
       const ctxForKind = this.repo.get(pageContextId);
-      const isRoleCenterChild = ctxForKind?.pageType === 'RoleCenter' && section.kind === 'subpage';
+      const isRoleCenterChild =
+        ctxForKind?.pageType === 'RoleCenter' &&
+        (section.kind === 'subpage' || section.kind === 'factbox');
       const isFactbox = section.kind === 'factbox';
       const loadInteraction: LoadFormInteraction = {
         type: 'LoadForm',
@@ -265,13 +273,18 @@ export class PageService {
     // MappingHint='PlaceholderField' nodes (form-tree-builder.ts), so a
     // genuinely populated factbox always has at least one FieldNode here.
     // Mark empty ones invalid so Section DTO builders skip them.
+    //
+    // Exception: Role Center hosted CardParts whose entire content is a
+    // cuegroup (stackgc -> stackc tiles) yield zero FieldNodes -- stackc is
+    // a separate node type, not a member of FIELD_TYPES. Those sections must
+    // stay valid so their `cues[]` projection survives into the output.
     const finalCtx = this.repo.get(pageContextId);
     if (finalCtx) {
       for (const [sectionId, sec] of finalCtx.sections) {
         if (sec.kind !== 'factbox') continue;
         const f = finalCtx.forms.get(sec.formId);
         if (!f) continue;
-        if (treeFields(f.root).length === 0) {
+        if (treeFields(f.root).length === 0 && treeCues(f.root).length === 0) {
           this.repo.invalidateSection(pageContextId, sectionId);
         }
       }

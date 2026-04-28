@@ -1,3 +1,4 @@
+import { v4 as uuid } from 'uuid';
 import { ok, err, isOk, isErr, type Result } from '../core/result.js';
 import { ProtocolError } from '../core/errors.js';
 import type { BCSession } from '../session/bc-session.js';
@@ -124,7 +125,27 @@ export class ActionService {
       return err(new ProtocolError(`Cue '${cueName}' is not drill-downable (HasAction=false).`));
     }
 
-    return this.invokeAction(pageContextId, form, cue.controlPath, SystemAction.DrillDown);
+    const result = await this.invokeAction(pageContextId, form, cue.controlPath, SystemAction.DrillDown);
+    if (isErr(result)) return result;
+
+    // Cue drill-down opens an underlying list page as a top-level FormCreated
+    // event (no parentFormId). The page-context-repo's applyEvent treats
+    // ownerless FormCreated as "update existing form" -- so without an
+    // explicit registration here, the new list page never gets a
+    // pageContextId, and ExecuteActionOperation.openedPages stays empty.
+    // Mirror NavigationService.drillDown: create a new page context for
+    // each ownerless FormCreated whose formId is unknown to the repo.
+    for (const event of result.value.events) {
+      if (event.type !== 'FormCreated') continue;
+      if (event.parentFormId) continue;
+      if (event.formId === form.formId) continue;
+      if (this.repo.getByFormId(event.formId)) continue;
+      const newPcId = `session:page:cue:${uuid().substring(0, 8)}`;
+      this.repo.create(newPcId, event.formId);
+      this.repo.applyToPage(newPcId, result.value.events);
+    }
+
+    return result;
   }
 
   /**
