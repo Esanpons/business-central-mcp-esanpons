@@ -27,7 +27,7 @@ export class AbortedError extends BCError {
   constructor(message: string, context?: Record<string, unknown>) { super(message, 'ABORTED_ERROR', context); }
 }
 export class ProtocolError extends BCError {
-  constructor(message: string, context?: Record<string, unknown>) { super(message, 'PROTOCOL_ERROR', context); }
+  constructor(message: string, context?: Record<string, unknown>, code: string = 'PROTOCOL_ERROR') { super(message, code, context); }
 }
 export class SessionLostError extends BCError {
   public readonly impactedPageContextIds: string[];
@@ -45,9 +45,9 @@ export class SessionLostError extends BCError {
  * by the SessionManager -- page contexts are invalidated, callers must re-open
  * any pages.
  */
-export class ModalReconcileError extends BCError {
+export class ModalReconcileError extends ProtocolError {
   constructor(message: string, context?: Record<string, unknown>) {
-    super(message, 'MODAL_RECONCILE_ERROR', context);
+    super(message, context, 'MODAL_RECONCILE_ERROR');
   }
 }
 export class ValidationError extends BCError {

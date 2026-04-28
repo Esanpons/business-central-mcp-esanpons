@@ -358,10 +358,13 @@ export class BCSession {
    * to make progress.
    *
    * Used to clear stale modal state that produced a
-   * `LogicalModalityViolationException`. This method MUST be called from
-   * within an already-enqueued task (the modal-violation retry path inside
-   * `invokeUnqueued`); it uses `invokeUnqueued` for sub-invokes to avoid
-   * deadlocking on its own outer task in the promise queue.
+   * `LogicalModalityViolationException`. Calls `invokeUnqueued` directly
+   * (queue-bypassing) so it works when triggered from inside the modal-violation
+   * retry path in `invokeUnqueued` itself — calling `invoke` from there would
+   * self-deadlock on the promise queue. External callers may invoke it
+   * outside the queue; in that case behaviour is well-defined as long as no
+   * other invoke is in flight on the same session (BC's wire protocol is
+   * stateful and concurrent sends corrupt sequence numbers).
    *
    * Reference: decompiled `LogicalModalityVerifier.IsUnderModalForm`, which
    * inspects `LogicalDispatcher.Frames`. SystemAction.Abort=320 closes the
@@ -380,7 +383,13 @@ export class BCSession {
         return err(new ProtocolError(`reconcileModalStack: Abort on formId=${top} failed: ${result.error.message}`));
       }
       // If BC didn't emit FormClosed for this formId, force-pop to make progress.
+      // Live observation (BC28): confirm dialogs do NOT emit FormClosed on
+      // Abort=320 against controlPath:'server:'. The local stack is force-popped
+      // here for client-state consistency, but BC may still consider the
+      // dialog open server-side -- in that case the next invoke triggers
+      // another LogicalModalityViolation and falls back to session reset.
       if (this.modalStack.peek() === top) {
+        this.logger.warn(`reconcileModalStack: BC did not emit FormClosed for formId=${top} after Abort -- force-popping local stack (server-side dialog may still be open)`);
         this.modalStack.pop();
         this._openFormIds.delete(top);
       }
