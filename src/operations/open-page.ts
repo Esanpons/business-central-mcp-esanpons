@@ -1,8 +1,7 @@
 import { mapResult, type Result } from '../core/result.js';
 import type { ProtocolError } from '../core/errors.js';
 import type { PageService } from '../services/page-service.js';
-import { buildAllSections } from '../protocol/section-dto.js';
-import type { Section } from '../protocol/section-dto.js';
+import { buildAllSections, type Section } from '../protocol/section-dto.js';
 
 export interface OpenPageInput {
   pageId: string;
@@ -12,10 +11,15 @@ export interface OpenPageInput {
 
 export interface OpenPageOutput {
   pageContextId: string;
+  /** PageType enum string from BC; see PageType in protocol/types.ts. */
   pageType: string;
   caption: string;
   /** True when the page opened as a modal (wizard, request page, confirmation). */
   isModal: boolean;
+  /**
+   * Every visible page section in canonical order: header, lines, subpages,
+   * factboxes, requestPage. See `Section` in protocol/section-dto.ts.
+   */
   sections: Section[];
 }
 

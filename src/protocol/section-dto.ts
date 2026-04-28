@@ -106,6 +106,7 @@ export function buildSection(ctx: PageContext, sectionId: string): Section | nul
   };
 
   if (repeater) {
+    // TODO(tier-2/T25): replace mapRowCellKeys adapter with direct tree-node reads
     out.rows = mapRowCellKeys(
       [...rows],
       repeater.columns.map(c => ({
