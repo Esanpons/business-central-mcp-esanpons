@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [1.0.0] - 2026-04-28
+
+First stable release. Declares the MCP tool output shapes (`Section[]`) and
+env var contract as the public API surface — subsequent breaking changes
+require a major version bump per semver.
+
+### Added
+
 - `Section`-based MCP output shape: `bc_open_page` and `bc_navigate` now return
   a uniform `sections: Section[]` array. Each section carries its own
   `fields[]`, `rows[]`, `actions[]`, `cues[]`, `totalRowCount` as appropriate
