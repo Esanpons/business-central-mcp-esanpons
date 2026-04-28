@@ -7,6 +7,7 @@ import { EventDecoder } from '../protocol/event-decoder.js';
 import { InteractionEncoder, type EncodeContext } from '../protocol/interaction-encoder.js';
 import { decompressPayload } from '../protocol/decompression.js';
 import type { Logger } from '../core/logger.js';
+import { ModalStack } from './modal-stack.js';
 
 const DEFAULT_TIMEOUT_MS = 30000;
 const QUIESCENCE_MS = 150; // Trailing window for async Message bursts
@@ -14,6 +15,7 @@ const QUIESCENCE_MS = 150; // Trailing window for async Message bursts
 export class BCSession {
   private queue: Promise<void> = Promise.resolve();
   private readonly _openFormIds = new Set<string>();
+  private readonly modalStack = new ModalStack();
   private dead = false;
 
   private sessionId = '';
@@ -265,8 +267,17 @@ export class BCSession {
 
   private updateFormTracking(events: BCEvent[]): void {
     for (const event of events) {
-      if ((event.type === 'FormCreated' || event.type === 'DialogOpened') && event.formId) {
+      if (event.type === 'FormCreated' && event.formId) {
         this._openFormIds.add(event.formId);
+        // Non-modal -- do not push onto modalStack
+      }
+      if (event.type === 'DialogOpened' && event.formId) {
+        this._openFormIds.add(event.formId);
+        this.modalStack.push(event.formId);
+      }
+      if (event.type === 'FormClosed' && event.formId) {
+        this._openFormIds.delete(event.formId);
+        this.modalStack.remove(event.formId);
       }
     }
   }
@@ -277,6 +288,12 @@ export class BCSession {
 
   removeOpenForm(formId: string): void {
     this._openFormIds.delete(formId);
+    this.modalStack.remove(formId);
+  }
+
+  /** Test seam: snapshot of the current modal stack (top-most last). */
+  modalStackSnapshot(): string[] {
+    return this.modalStack.snapshot();
   }
 
   markDead(): void {
