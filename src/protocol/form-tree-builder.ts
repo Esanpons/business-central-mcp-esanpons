@@ -8,7 +8,8 @@
 
 import type {
   FormNode, LogicalFormNode, GroupNode, FieldNode, ActionNode, RepeaterNode,
-  RepeaterColumnNode, FormHostNode, FilterNode, UnknownNode, NodeProperties, FieldType,
+  RepeaterColumnNode, FormHostNode, FilterNode, StackGroupNode, CueFieldNode,
+  UnknownNode, NodeProperties, FieldType,
 } from './form-node.js';
 import { FIELD_TYPES } from './form-node.js';
 import type { PageType } from './types.js';
@@ -88,6 +89,8 @@ function buildNode(obj: Record<string, unknown>, controlPath: string, insideRepe
   if (t === 'rc') return buildRepeater(obj, controlPath);
   if (t === 'fhc') return buildFormHost(obj, controlPath);
   if (t === 'filc') return buildFilter(obj, controlPath);
+  if (t === 'stackgc') return buildStackGroup(obj, controlPath, insideRepeater);
+  if (t === 'stackc') return buildCueField(obj, controlPath);
   if (FIELD_TYPES.has(t as FieldType)) return buildField(obj, t as FieldType, controlPath);
   return makeUnknown(controlPath, t, readProperties(obj), buildChildren(obj.Children, controlPath, insideRepeater));
 }
@@ -204,6 +207,32 @@ function buildFilter(obj: Record<string, unknown>, controlPath: string): FilterN
     controlPath,
     properties: readProperties(obj),
     children: buildChildren(obj.Children, controlPath, false),
+  };
+}
+
+function buildStackGroup(obj: Record<string, unknown>, controlPath: string, insideRepeater: boolean): StackGroupNode {
+  const designName = typeof obj.DesignName === 'string' ? obj.DesignName : undefined;
+  return {
+    type: 'stackgc',
+    controlPath,
+    properties: readProperties(obj),
+    children: buildChildren(obj.Children, controlPath, insideRepeater),
+    ...(designName ? { designName } : {}),
+  };
+}
+
+function buildCueField(obj: Record<string, unknown>, controlPath: string): CueFieldNode {
+  const props = readProperties(obj);
+  const binder = obj.ColumnBinder as { Name?: string; Path?: string } | undefined;
+  const hasAction = obj.HasAction === true;
+  const synopsis = typeof obj.Synopsis === 'string' ? obj.Synopsis : undefined;
+  return {
+    type: 'stackc',
+    controlPath,
+    properties: props,
+    ...(binder?.Name ? { columnBinder: { name: binder.Name, ...(binder.Path ? { path: binder.Path } : {}) } } : {}),
+    ...(hasAction ? { hasAction: true as const } : {}),
+    ...(synopsis ? { synopsis } : {}),
   };
 }
 

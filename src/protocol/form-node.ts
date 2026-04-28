@@ -110,6 +110,38 @@ export interface FilterNode extends NodeBase<'filc'> {
 }
 
 /**
+ * Wire type `stackgc` -- the AL `cuegroup` container. Holds an inner gc with
+ * MappingHint='STACKGROUP' that wraps cue tiles, optionally followed by an
+ * inner gc with MappingHint='LAYOUTGROUP' for cue-level link actions.
+ *
+ * Reference: live wire fixture at
+ * src/protocol/captures/cuegroup-rolecenter-2026-04-28.json. Discriminator
+ * is the wire `t` tag, not a MappingHint.
+ */
+export interface StackGroupNode extends NodeBase<'stackgc'> {
+  /** DesignName from the AL source (e.g. "Ongoing Sales"). */
+  readonly designName?: string;
+  readonly children: readonly FormNode[];
+}
+
+/**
+ * Wire type `stackc` -- a single cue tile. Initial `StringValue` is typically
+ * "0"; the real count arrives via PropertyChanged events on the cue's
+ * controlPath after LoadForm(loadData:true).
+ *
+ * Reference: live wire fixture; cue field shape at
+ * `Microsoft.Dynamics.Framework.UI.Client.LogicalControlSerializer.cs` for
+ * column-binder serialization.
+ */
+export interface CueFieldNode extends NodeBase<'stackc'> {
+  readonly columnBinder?: { readonly name: string; readonly path?: string };
+  /** True when BC marked the cue as drill-downable (HasAction = true on the wire). */
+  readonly hasAction?: boolean;
+  /** Tooltip text from the AL source. */
+  readonly synopsis?: string;
+}
+
+/**
  * Catch-all for protocol nodes the parser does not specifically model. The
  * `__unknown` brand keeps the discriminated union disjoint from the named
  * node types, so `switch (node.type)` statements get exhaustive narrowing
@@ -130,6 +162,8 @@ export type FormNode =
   | RepeaterColumnNode
   | FormHostNode
   | FilterNode
+  | StackGroupNode
+  | CueFieldNode
   | UnknownNode;
 
 export const FIELD_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
@@ -162,6 +196,14 @@ export function isLogicalFormNode(node: FormNode): node is LogicalFormNode {
 
 export function isFormHostNode(node: FormNode): node is FormHostNode {
   return node.type === 'fhc';
+}
+
+export function isStackGroupNode(node: FormNode): node is StackGroupNode {
+  return node.type === 'stackgc';
+}
+
+export function isCueFieldNode(node: FormNode): node is CueFieldNode {
+  return node.type === 'stackc';
 }
 
 /**
