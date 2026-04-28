@@ -158,6 +158,32 @@ Wire format is identical: same handler types, type abbreviations (~50 aliases), 
 
 Reference: `ResponseManager.cs`, `VersionCompatibility.cs`, `BrowserLogicalChangeTypeIds.cs` compared between versions.
 
+### Reactive control tree (FormState shape)
+
+`FormState.root` is the canonical tree representation of a BC form, built once
+from the `lf` JSON via `buildFormTree` and mutated in place by `PropertyChanged`
+events via `applyPropertyChange` (`src/protocol/form-tree-mutator.ts`). Off-path
+nodes are reused by reference (structural sharing); on-path nodes get a fresh
+copy with merged properties.
+
+Repeater rows live separately in `FormState.rows: Map<repeaterPath, RepeaterRow[]>`
+because `DataLoaded` events don't fit the publish-then-mutate model.
+
+Derived views (`fields`, `actions`, `tabs`, `repeaters`, `groupVisibility`,
+`filterControlPath`) are memoised pure functions over the root via WeakMap
+(`src/protocol/form-views.ts`). Same root reference returns the same array
+reference; tree mutation produces a new root and invalidates the cache
+automatically.
+
+`ControlField` and `ActionInfo` (`src/protocol/types.ts`) are now MCP output
+DTOs only -- internal code reads `FieldNode`/`ActionNode` from `form-node.ts`
+via the views. Adapters (`fieldNodeToControlField`) translate at the MCP
+boundary for output JSON stability.
+
+Reference: `Microsoft.Dynamics.Framework.UI.Client.LogicalControlSerializer.cs`
+for wire-format property names; `Microsoft.Dynamics.Nav.Types.Metadata.PageType.cs`
+for the PageType enum.
+
 ## SystemAction Enum (Complete)
 
 ```
