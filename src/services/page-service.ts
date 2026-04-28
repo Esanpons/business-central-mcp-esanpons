@@ -8,7 +8,7 @@ import type {
   BCEvent, OpenFormInteraction, LoadFormInteraction, CloseFormInteraction, InvokeActionInteraction, SetCurrentRowInteraction,
 } from '../protocol/types.js';
 import { buildFormTree } from '../protocol/form-tree-builder.js';
-import { repeaters as treeRepeaters } from '../protocol/form-views.js';
+import { fields as treeFields, repeaters as treeRepeaters } from '../protocol/form-views.js';
 import { walkTree } from '../protocol/form-tree-walk.js';
 import { isFormHostNode, isGroupNode, isLogicalFormNode } from '../protocol/form-node.js';
 import type { Logger } from '../core/logger.js';
@@ -235,6 +235,23 @@ export class PageService {
     // parent repeater. Without this, factbox forms have field metadata but empty values.
     // Verified from decompiled WebLogicalFormObserver.cs and live WebSocket capture.
     await this.triggerFactboxRefresh(pageContextId);
+
+    // After factbox refresh: any factbox section whose form yielded no field
+    // nodes is dead (BC returned a stub). buildFormTree already skips
+    // MappingHint='PlaceholderField' nodes (form-tree-builder.ts), so a
+    // genuinely populated factbox always has at least one FieldNode here.
+    // Mark empty ones invalid so Section DTO builders skip them.
+    const finalCtx = this.repo.get(pageContextId);
+    if (finalCtx) {
+      for (const [sectionId, sec] of finalCtx.sections) {
+        if (sec.kind !== 'factbox') continue;
+        const f = finalCtx.forms.get(sec.formId);
+        if (!f) continue;
+        if (treeFields(f.root).length === 0) {
+          this.repo.invalidateSection(pageContextId, sectionId);
+        }
+      }
+    }
   }
 
   private async triggerFactboxRefresh(pageContextId: string): Promise<void> {

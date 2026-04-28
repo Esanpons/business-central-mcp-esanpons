@@ -9,7 +9,7 @@ import { resolveSection } from '../protocol/section-resolver.js';
 import type { FormState } from '../protocol/form-state.js';
 import { isEffectivelyVisible } from '../protocol/visibility.js';
 import { actions as treeActions, groupVisibility as treeGroupVisibility } from '../protocol/form-views.js';
-import type { ActionNode } from '../protocol/form-node.js';
+import { classifyWizardNav } from '../protocol/wizard-classify.js';
 import type { Logger } from '../core/logger.js';
 
 /** System actions that target a specific row via the repeater control. */
@@ -26,17 +26,6 @@ const SYSTEM_ACTION_NAMES: Map<string, number> = new Map([
   ['edit', SystemAction.Edit],
   ['view', SystemAction.View],
 ]);
-
-function classifyWizardNav(a: ActionNode): 'back' | 'next' | 'finish' | 'cancel' | undefined {
-  const id = a.iconIdentifier;
-  if (id) {
-    if (/PreviousRecord/i.test(id)) return 'back';
-    if (/NextRecord|Action_Start/i.test(id)) return 'next';
-    if (/Approve/i.test(id)) return 'finish';
-  }
-  if (a.systemAction === 310 || a.systemAction === 320 || a.systemAction === 350) return 'cancel';
-  return undefined;
-}
 
 export interface ActionResult {
   success: boolean;

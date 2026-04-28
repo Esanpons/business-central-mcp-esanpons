@@ -89,4 +89,33 @@ describe('PageContextRepository — modal-rooted pages', () => {
     repo.create('pc1', 'F1');
     expect(repo.get('pc1')!.isModal).toBe(false);
   });
+
+  it('invalidateSection marks the named section invalid', () => {
+    const repo = new PageContextRepository();
+    repo.create('pc:1', 'F1', { isModal: false, wizardState: null });
+    // Use the repo's existing factbox-section path -- simulate a discovered child form
+    repo.registerDiscoveredChildForm('pc:1', {
+      serverId: 'fb1',
+      caption: 'Customer Statistics',
+      controlTree: { t: 'lf', ServerId: 'fb1', PageType: 3, Children: [] },
+      isSubForm: false,
+      isPart: true,
+    });
+    const before = repo.get('pc:1');
+    const fbSectionId = Array.from(before!.sections.keys()).find(k => k.startsWith('factbox:'))!;
+    expect(before!.sections.get(fbSectionId)!.valid).toBe(true);
+
+    repo.invalidateSection('pc:1', fbSectionId);
+
+    const after = repo.get('pc:1');
+    expect(after!.sections.get(fbSectionId)!.valid).toBe(false);
+  });
+
+  it('invalidateSection is a no-op for an unknown section', () => {
+    const repo = new PageContextRepository();
+    repo.create('pc:1', 'F1', { isModal: false, wizardState: null });
+    // Should not throw
+    expect(() => repo.invalidateSection('pc:1', 'nonexistent')).not.toThrow();
+    expect(() => repo.invalidateSection('nonexistent-page', 'header')).not.toThrow();
+  });
 });

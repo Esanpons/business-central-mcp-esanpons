@@ -14,7 +14,7 @@ export const OpenPageSchema = z.object({
 
 export const ReadDataSchema = z.object({
   pageContextId: z.string().min(1).describe('Page context ID returned by bc_open_page.'),
-  section: z.string().optional().describe('Section to read from (e.g., "lines" for document line items). Omit for header/default section. Available sections listed in bc_open_page response.'),
+  section: z.string().optional().describe('sectionId to refresh. Defaults to "header". Examples: "lines" (document line items), "factbox:Customer Statistics" (FactBox). Listed in the bc_open_page sections array.'),
   tab: z.string().optional().describe('Tab name to filter header fields by (e.g., "General", "Invoice Details", "Shipping and Billing"). Omit to return all header fields.'),
   filters: z.array(z.object({
     column: z.string().describe('Column caption name to filter on (e.g., "City", "No.").'),

@@ -125,15 +125,14 @@ describe('MCP Endpoint (integration)', () => {
     expect(data.pageContextId).toBeTruthy();
     expect(data.pageContextId).toContain('page:22');
 
-    // Should have fields metadata
-    expect(data.fields).toBeDefined();
-    expect(Array.isArray(data.fields) || typeof data.fields === 'object').toBe(true);
+    // Should have sections array with a header section
+    expect(Array.isArray(data.sections)).toBe(true);
+    const header = data.sections.find((s: any) => s.kind === 'header');
+    expect(header).toBeDefined();
 
-    // Should have rows for a list page
-    expect(data.rows).toBeDefined();
-    if (Array.isArray(data.rows)) {
-      expect(data.rows.length).toBeGreaterThan(0);
-      console.error(`Got ${data.rows.length} rows`);
-    }
+    // Customer List is a list page -- header section carries rows
+    expect(Array.isArray(header.rows)).toBe(true);
+    expect(header.rows.length).toBeGreaterThan(0);
+    console.error(`Got ${header.rows.length} rows`);
   }, 60_000);
 });

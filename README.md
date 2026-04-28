@@ -59,6 +59,32 @@ This server speaks BC's internal WebSocket protocol directly -- the same protoco
 One WebSocket connection per session. All operations serialized through a promise queue. BC27 and BC28 are wire-compatible.
 
 <details>
+<summary><strong>Page output shape</strong></summary>
+
+`bc_open_page` returns the page as a flat list of sections:
+
+```json
+{
+  "pageContextId": "session:page:21:abc",
+  "pageType": "Card",
+  "caption": "Customer Card",
+  "isModal": false,
+  "sections": [
+    { "sectionId": "header",                       "kind": "header",  "fields": [...], "actions": [...] },
+    { "sectionId": "factbox:Customer Statistics",  "kind": "factbox", "fields": [...] }
+  ]
+}
+```
+
+Each section carries its own content shape:
+- **Card-style** (`header` on Card pages, `factbox`, `requestPage`): `fields[]` and (for `header`) `actions[]`
+- **List-style** (`lines` on Documents, `header` on List pages, repeater subpages): `rows[]` and `totalRowCount`
+
+`bc_read_data` returns a single `Section` for the requested `sectionId` (defaults to `"header"`). The section ID for a FactBox or subpage comes from the `bc_open_page` response.
+
+</details>
+
+<details>
 <summary><strong>Session resilience</strong></summary>
 
 - Automatic reconnect with exponential backoff after session death

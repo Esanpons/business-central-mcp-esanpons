@@ -45,7 +45,7 @@ describe.sequential('Phase 4: FactBox Data & Full Paging', () => {
     pageService = new PageService(session, repo, logger);
     dataService = new DataService(session, repo, logger);
     const filterService = new FilterService(session, repo, logger);
-    readData = new ReadDataOperation(dataService, filterService);
+    readData = new ReadDataOperation(dataService, filterService, repo);
   });
 
   afterAll(async () => {
@@ -155,14 +155,15 @@ describe.sequential('Phase 4: FactBox Data & Full Paging', () => {
       const result = await readData.execute({ pageContextId });
       expect(isOk(result)).toBe(true);
       const output = unwrap(result);
-      console.error(`Initial: ${output.totalCount} rows loaded, totalRowCount=${output.totalRowCount}`);
-      expect(output.totalCount).toBeGreaterThanOrEqual(20);
+      const loaded = output.section.rows ?? [];
+      console.error(`Initial: ${loaded.length} rows loaded, totalRowCount=${output.section.totalRowCount}`);
+      expect(loaded.length).toBeGreaterThanOrEqual(20);
     });
 
     it('scrolls to load more rows beyond initial viewport', async () => {
       const beforeResult = await readData.execute({ pageContextId });
       const before = unwrap(beforeResult);
-      const initialCount = before.totalCount;
+      const initialCount = (before.section.rows ?? []).length;
 
       // Scroll down multiple times
       for (let i = 0; i < 3; i++) {
@@ -172,14 +173,16 @@ describe.sequential('Phase 4: FactBox Data & Full Paging', () => {
 
       const afterResult = await readData.execute({ pageContextId });
       const after = unwrap(afterResult);
-      console.error(`After 3 scrolls: ${after.totalCount} rows (was ${initialCount})`);
+      const afterCount = (after.section.rows ?? []).length;
+      console.error(`After 3 scrolls: ${afterCount} rows (was ${initialCount})`);
       // G/L Entries should have many rows; scrolling should load more
-      expect(after.totalCount).toBeGreaterThanOrEqual(initialCount);
+      expect(afterCount).toBeGreaterThanOrEqual(initialCount);
     });
 
     it('range query slices correctly', async () => {
       const allResult = await readData.execute({ pageContextId });
       const all = unwrap(allResult);
+      const allRows = all.section.rows ?? [];
 
       // Slice first 10
       const rangeResult = await readData.execute({
@@ -188,9 +191,10 @@ describe.sequential('Phase 4: FactBox Data & Full Paging', () => {
       });
       expect(isOk(rangeResult)).toBe(true);
       const ranged = unwrap(rangeResult);
-      expect(ranged.rows.length).toBe(10);
-      expect(ranged.totalCount).toBe(all.totalCount);
-      expect(ranged.rows[0]!.bookmark).toBe(all.rows[0]!.bookmark);
+      const rangedRows = ranged.section.rows ?? [];
+      expect(rangedRows.length).toBe(10);
+      expect(ranged.section.totalRowCount).toBe(all.section.totalRowCount);
+      expect(rangedRows[0]!.bookmark).toBe(allRows[0]!.bookmark);
 
       // Slice with offset
       const offsetResult = await readData.execute({
@@ -199,10 +203,11 @@ describe.sequential('Phase 4: FactBox Data & Full Paging', () => {
       });
       expect(isOk(offsetResult)).toBe(true);
       const offset = unwrap(offsetResult);
-      expect(offset.rows.length).toBe(10);
-      expect(offset.rows[0]!.bookmark).toBe(all.rows[20]!.bookmark);
+      const offsetRows = offset.section.rows ?? [];
+      expect(offsetRows.length).toBe(10);
+      expect(offsetRows[0]!.bookmark).toBe(allRows[20]!.bookmark);
 
-      console.error(`Paging verified: ${all.totalCount} total rows, slicing works at offset 0 and 20`);
+      console.error(`Paging verified: ${allRows.length} total rows, slicing works at offset 0 and 20`);
     });
 
     it('closes page', async () => {

@@ -191,7 +191,8 @@ None=0, New=10, Delete=20, Refresh=30, Edit=40,
 EditList=50, View=60, ViewList=70, OpenFullList=80,
 AssistEdit=100, Lookup=110, DrillDown=120,
 Ok=300, Cancel=310, Abort=320,
-LookupOk=330, LookupCancel=340, Yes=380, No=390,
+LookupOk=330, LookupCancel=340, CloseOk=350,
+Yes=380, No=390,
 PageSearch=220, RunReport=210, ChangeCompany=500
 ```
 

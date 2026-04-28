@@ -1,7 +1,9 @@
-import { isOk, isErr, ok, type Result } from '../core/result.js';
-import type { ProtocolError } from '../core/errors.js';
+import { isOk, isErr, ok, err, type Result } from '../core/result.js';
+import { ProtocolError } from '../core/errors.js';
 import type { DataService } from '../services/data-service.js';
 import type { FilterService } from '../services/filter-service.js';
+import type { PageContextRepository } from '../protocol/page-context-repo.js';
+import { buildSection, type Section } from '../protocol/section-dto.js';
 
 export interface ReadDataInput {
   pageContextId: string;
@@ -13,86 +15,105 @@ export interface ReadDataInput {
 }
 
 export interface ReadDataOutput {
-  rows: Array<{ bookmark: string; cells: Record<string, unknown> }>;
-  totalCount: number;
-  totalRowCount?: number;
+  section: Section;
 }
 
 export class ReadDataOperation {
   constructor(
     private readonly dataService: DataService,
     private readonly filterService: FilterService,
+    private readonly repo: PageContextRepository,
   ) {}
 
   async execute(input: ReadDataInput): Promise<Result<ReadDataOutput, ProtocolError>> {
-    // Apply filters if provided
+    const sectionId = input.section ?? 'header';
+
+    // Fast-fail for unknown pageContextId before any service calls.
+    if (!this.repo.get(input.pageContextId)) {
+      return err(new ProtocolError(`Page context not found: ${input.pageContextId}`));
+    }
+
     if (input.filters && input.filters.length > 0) {
       const filterResult = await this.filterService.applyFilters(input.pageContextId, input.filters, input.section);
       if (isErr(filterResult)) return filterResult;
     }
 
-    // Read rows (synchronous)
-    const rowsResult = this.dataService.readRows(input.pageContextId, input.section);
-    if (!isOk(rowsResult)) return rowsResult;
-
-    let rows = rowsResult.value.map(r => ({ bookmark: r.bookmark, cells: r.cells }));
-
-    // Tab filtering: when tab is specified, only include fields belonging to that tab group
-    if (input.tab) {
-      const tabsResult = this.dataService.getTabs(input.pageContextId, input.section);
-      if (isOk(tabsResult) && tabsResult.value) {
-        const tabLower = input.tab.toLowerCase();
-        const matchingTab = tabsResult.value.find(t => t.caption.toLowerCase() === tabLower);
-        if (matchingTab) {
-          const tabFieldCaptions = new Set(matchingTab.fields.map(f => f.caption.toLowerCase()));
-          rows = rows.map(r => ({
-            bookmark: r.bookmark,
-            cells: Object.fromEntries(
-              Object.entries(r.cells).filter(([k]) => tabFieldCaptions.has(k.toLowerCase()))
-            ),
-          }));
+    // For repeater-bearing sections, materialize rows up to the requested range
+    // so the resulting Section.rows reflects the slice the caller asked for.
+    if (input.range) {
+      const totalRowCount = this.dataService.getRepeaterTotalRowCount(input.pageContextId, input.section);
+      const needed = input.range.offset + input.range.limit;
+      // readRows err is benign here -- buildSection below produces a clearer
+      // "Section '<id>' not found" diagnostic for the same root causes.
+      const loaded = this.dataService.readRows(input.pageContextId, input.section);
+      if (isOk(loaded)) {
+        let rowsLen = loaded.value.length;
+        while (rowsLen < needed && rowsLen < (totalRowCount ?? Infinity)) {
+          const scrollResult = await this.dataService.scrollRepeater(input.pageContextId, 1, input.section);
+          if (!isOk(scrollResult)) break;
+          if (scrollResult.value.length <= rowsLen) break;
+          rowsLen = scrollResult.value.length;
         }
       }
     }
 
-    // Column selection
-    if (input.columns && input.columns.length > 0) {
-      const colSet = new Set(input.columns.map(c => c.toLowerCase()));
-      rows = rows.map(r => ({
-        bookmark: r.bookmark,
-        cells: Object.fromEntries(
-          Object.entries(r.cells).filter(([k]) => colSet.has(k.toLowerCase()))
-        ),
+    // Re-fetch the context AFTER applyFilters / scrollRepeater. The repo
+    // replaces the PageContext entry on every event-induced update (immutable
+    // updates with structural sharing), so a context captured before those
+    // calls is stale and would cause buildSection to project pre-filter /
+    // pre-scroll state.
+    const ctx = this.repo.get(input.pageContextId);
+    if (!ctx) return err(new ProtocolError(`Page context not found: ${input.pageContextId}`));
+
+    const section = buildSection(ctx, sectionId);
+    if (!section) {
+      return err(new ProtocolError(`Section '${sectionId}' not found.`, {
+        availableSections: Array.from(ctx.sections.keys()),
       }));
     }
 
-    // Total row count from repeater state (before slicing)
-    let totalRowCount = this.dataService.getRepeaterTotalRowCount(input.pageContextId, input.section);
+    let materialized: Section = section;
 
-    // Full paging: if range requests rows beyond what's loaded, scroll to load more
-    if (input.range && totalRowCount !== null) {
-      const needed = input.range.offset + input.range.limit;
-      while (rows.length < needed && rows.length < (totalRowCount ?? Infinity)) {
-        const scrollResult = await this.dataService.scrollRepeater(input.pageContextId, 1, input.section);
-        if (!isOk(scrollResult)) break;
-        const newRows = scrollResult.value.map(r => ({ bookmark: r.bookmark, cells: r.cells }));
-        if (newRows.length <= rows.length) break; // No new rows loaded
-        rows = newRows;
-        totalRowCount = this.dataService.getRepeaterTotalRowCount(input.pageContextId, input.section);
+    if (input.tab && materialized.fields) {
+      const tabsResult = this.dataService.getTabs(input.pageContextId, input.section);
+      if (isOk(tabsResult) && tabsResult.value) {
+        const matchingTab = tabsResult.value.find(t => t.caption.toLowerCase() === input.tab!.toLowerCase());
+        if (matchingTab) {
+          const tabFieldCaptions = new Set(matchingTab.fields.map(f => f.caption.toLowerCase()));
+          materialized = {
+            ...materialized,
+            fields: materialized.fields.filter(f => tabFieldCaptions.has(f.name.toLowerCase())),
+          };
+        }
       }
     }
 
-    const totalCount = rows.length;
-
-    // Range slicing
-    if (input.range) {
-      rows = rows.slice(input.range.offset, input.range.offset + input.range.limit);
+    if (input.columns && input.columns.length > 0) {
+      const wanted = new Set(input.columns.map(c => c.toLowerCase()));
+      if (materialized.rows) {
+        materialized = {
+          ...materialized,
+          rows: materialized.rows.map(r => ({
+            bookmark: r.bookmark,
+            cells: Object.fromEntries(Object.entries(r.cells).filter(([k]) => wanted.has(k.toLowerCase()))),
+          })),
+        };
+      }
+      if (materialized.fields) {
+        materialized = {
+          ...materialized,
+          fields: materialized.fields.filter(f => wanted.has(f.name.toLowerCase())),
+        };
+      }
     }
 
-    return ok({
-      rows,
-      totalCount,
-      ...(totalRowCount !== null ? { totalRowCount } : {}),
-    });
+    if (input.range && materialized.rows) {
+      materialized = {
+        ...materialized,
+        rows: materialized.rows.slice(input.range.offset, input.range.offset + input.range.limit),
+      };
+    }
+
+    return ok({ section: materialized });
   }
 }

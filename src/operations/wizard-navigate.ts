@@ -7,9 +7,9 @@ import { detectChangedSections, detectDialogs } from '../protocol/mutation-resul
 import { isEffectivelyVisible } from '../protocol/visibility.js';
 import type { ControlField } from '../protocol/types.js';
 import { fields as treeFields, actions as treeActions, groupVisibility as treeGroupVisibility } from '../protocol/form-views.js';
-import type { ActionNode } from '../protocol/form-node.js';
+import { classifyWizardNav, type WizardNav } from '../protocol/wizard-classify.js';
 
-export type WizardNav = 'back' | 'next' | 'finish' | 'cancel';
+export type { WizardNav };
 
 export interface WizardNavigateInput {
   pageContextId: string;
@@ -28,17 +28,6 @@ export interface WizardNavigateOutput {
   closed: boolean;
   changedSections: string[];
   dialogsOpened: Array<{ formId: string; message?: string; fields?: ControlField[] }>;
-}
-
-function classifyWizardNav(a: ActionNode): WizardNav | undefined {
-  const id = a.iconIdentifier;
-  if (id) {
-    if (/PreviousRecord/i.test(id)) return 'back';
-    if (/NextRecord|Action_Start/i.test(id)) return 'next';
-    if (/Approve/i.test(id)) return 'finish';
-  }
-  if (a.systemAction === 310 || a.systemAction === 320 || a.systemAction === 350) return 'cancel';
-  return undefined;
 }
 
 export class WizardNavigateOperation {
