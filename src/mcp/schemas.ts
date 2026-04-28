@@ -37,11 +37,12 @@ export const WriteDataSchema = z.object({
 
 export const ExecuteActionSchema = z.object({
   pageContextId: z.string().min(1).describe('Page context ID returned by bc_open_page.'),
-  action: z.string().min(1).describe('Action caption name to execute (case-insensitive). Must match a visible, enabled action from bc_open_page response (e.g., "New", "Delete", "Post", "Release").'),
-  section: z.string().optional().describe('Section context for the action (e.g., "lines"). Use to disambiguate when the same action exists on header and lines.'),
-  rowIndex: z.number().optional().describe('0-based row position for row-scoped actions. Use for targeting a specific row on a list.'),
-  bookmark: z.string().optional().describe('Stable row identifier for row-scoped actions. Preferred over rowIndex for stability.'),
-});
+  action: z.string().min(1).optional().describe('Action caption name to execute (case-insensitive). Use action OR cue, not both. Must match a visible, enabled action from bc_open_page response.'),
+  cue: z.string().min(1).optional().describe('Cue tile name to drill down on (e.g. "Sales Quotes", "Pending Approvals"). Use with section pointing at the subpage that owns the cuegroup. Use action OR cue, not both.'),
+  section: z.string().optional().describe('Section context. Required when using cue; optional for action. Examples: "lines", "subpage:Activities".'),
+  rowIndex: z.number().optional().describe('0-based row position for row-scoped actions.'),
+  bookmark: z.string().optional().describe('Stable row identifier for row-scoped actions.'),
+}).refine(d => !!d.action !== !!d.cue, { message: 'Provide exactly one of: action, cue' });
 
 export const ClosePageSchema = z.object({
   pageContextId: z.string().min(1).describe('Page context ID returned by bc_open_page. Becomes invalid after closing.'),
