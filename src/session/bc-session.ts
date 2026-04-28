@@ -1,6 +1,6 @@
 import { v4 as uuid } from 'uuid';
 import { ok, err, isOk, isErr, type Result } from '../core/result.js';
-import { ProtocolError, TimeoutError } from '../core/errors.js';
+import { ProtocolError, TimeoutError, ModalReconcileError } from '../core/errors.js';
 import type { BCWebSocket } from '../connection/bc-websocket.js';
 import type { BCEvent, BCInteraction, EventPredicate } from '../protocol/types.js';
 import { EventDecoder } from '../protocol/event-decoder.js';
@@ -200,20 +200,57 @@ export class BCSession {
       // Send and wait for synchronous response
       const rpcResult = await this.ws.sendRpc(encoded.method, encoded.params, timeoutMs);
       if (isErr(rpcResult)) {
-        // Check for fatal session errors:
-        // - InvalidSessionException in the message text
-        // - JSON-RPC error code 1 (InvalidSession) regardless of exception type
         const msg = rpcResult.error.message;
         if (msg.includes('InvalidSessionException') || msg.includes('"code":1')) {
           this.markDead();
+          return rpcResult;
         }
-        return rpcResult;
-      }
-
-      // Decode synchronous response handlers
-      const responseData = rpcResult.value;
-      if (Array.isArray(responseData)) {
-        allEvents.push(...this.decoder.decode(responseData));
+        if (msg.includes('LogicalModalityViolationException')) {
+          // Stale modal state -- try to reconcile, then retry the original
+          // interaction once. The reconciler walks the modal stack top-down
+          // sending Abort. If it succeeds, BC's FormClosed events arrive in
+          // the reconcile invokes' responses (already merged into our state
+          // via updateFormTracking). On retry success we fall through to the
+          // normal decode path with the retry's events appended.
+          this.logger.warn(`LogicalModalityViolation detected, reconciling modal stack (size=${this.modalStack.size})`);
+          const reconcile = await this.reconcileModalStack();
+          if (isErr(reconcile)) {
+            this.markDead();
+            return err(new ModalReconcileError(`Modal reconciliation failed: ${reconcile.error.message}`, { originalError: msg }));
+          }
+          // Re-encode -- sequence numbers / openFormIds may have advanced.
+          const retryContext: EncodeContext = {
+            callbackId,
+            sequenceNo: this.ws.nextSequenceNo,
+            lastClientAckSequenceNumber: this.ws.lastClientAckSequenceNumber,
+            openFormIds: this._openFormIds,
+            session: {
+              sessionId: this.sessionId,
+              sessionKey: this.sessionKey,
+              company: this.company,
+              tenantId: this.tenantId,
+              spaInstanceId: this.ws.spaInstanceId,
+            },
+          };
+          const retryEncoded = this.encoder.encode(interaction, retryContext);
+          const retryRpc = await this.ws.sendRpc(retryEncoded.method, retryEncoded.params, timeoutMs);
+          if (isErr(retryRpc)) {
+            this.markDead();
+            return err(new ModalReconcileError(`Retry after modal reconcile still failed: ${retryRpc.error.message}`, { originalError: msg }));
+          }
+          if (Array.isArray(retryRpc.value)) {
+            allEvents.push(...this.decoder.decode(retryRpc.value));
+          }
+          // Fall through to the normal post-success path
+        } else {
+          return rpcResult;
+        }
+      } else {
+        // Normal success path
+        const responseData = rpcResult.value;
+        if (Array.isArray(responseData)) {
+          allEvents.push(...this.decoder.decode(responseData));
+        }
       }
 
       // Quiescence window — wait for trailing async Messages

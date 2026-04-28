@@ -159,3 +159,87 @@ describe('BCSession.reconcileModalStack', () => {
     expect((s as any).invoke).not.toHaveBeenCalled();
   });
 });
+
+describe('BCSession invoke with auto-recovery', () => {
+  it('retries once after reconcileModalStack on LogicalModalityViolation', async () => {
+    const s = new ReconcileProbe();
+    s.feed([{ type: 'DialogOpened', formId: 'M1', controlTree: {} }]);
+
+    let callCount = 0;
+    (s as any).ws.sendRpc = vi.fn(async () => {
+      callCount += 1;
+      if (callCount === 1) {
+        return { ok: false, error: { message: 'LogicalModalityViolationException: There is a dialog open' } };
+      }
+      return { ok: true, value: [] };
+    });
+
+    (s as any).reconcileModalStack = vi.fn(async () => {
+      s.feed([{ type: 'FormClosed', formId: 'M1' }]);
+      return ok(undefined);
+    });
+
+    const result = await s.invoke(
+      { type: 'OpenForm', query: 'page=22&tenant=default' } as any,
+      () => true,
+    );
+    expect(result.ok).toBe(true);
+    expect(callCount).toBe(2);
+    expect((s as any).reconcileModalStack).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks session dead and returns ModalReconcileError when retry fails again', async () => {
+    const s = new ReconcileProbe();
+    s.feed([{ type: 'DialogOpened', formId: 'M1', controlTree: {} }]);
+
+    (s as any).ws.sendRpc = vi.fn(async () => ({
+      ok: false, error: { message: 'LogicalModalityViolationException: persistent' },
+    }));
+    (s as any).reconcileModalStack = vi.fn(async () => ok(undefined));
+
+    const result = await s.invoke(
+      { type: 'OpenForm', query: 'page=22&tenant=default' } as any,
+      () => true,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.name).toBe('ModalReconcileError');
+    }
+    expect((s as any).dead).toBe(true);
+  });
+
+  it('marks session dead with ModalReconcileError when reconciliation itself fails', async () => {
+    const s = new ReconcileProbe();
+    s.feed([{ type: 'DialogOpened', formId: 'M1', controlTree: {} }]);
+
+    (s as any).ws.sendRpc = vi.fn(async () => ({
+      ok: false, error: { message: 'LogicalModalityViolationException: stuck' },
+    }));
+    (s as any).reconcileModalStack = vi.fn(async () => ({ ok: false, error: { message: 'Abort failed' } }));
+
+    const result = await s.invoke(
+      { type: 'OpenForm', query: 'page=22&tenant=default' } as any,
+      () => true,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.name).toBe('ModalReconcileError');
+    }
+    expect((s as any).dead).toBe(true);
+  });
+
+  it('non-modal-violation errors continue to bubble unchanged', async () => {
+    const s = new ReconcileProbe();
+    (s as any).ws.sendRpc = vi.fn(async () => ({
+      ok: false, error: { message: 'SomeOtherError: random' },
+    }));
+    (s as any).reconcileModalStack = vi.fn();
+
+    const result = await s.invoke(
+      { type: 'OpenForm', query: 'page=22&tenant=default' } as any,
+      () => true,
+    );
+    expect(result.ok).toBe(false);
+    expect((s as any).reconcileModalStack).not.toHaveBeenCalled();
+  });
+});
