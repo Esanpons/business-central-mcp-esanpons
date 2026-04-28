@@ -236,17 +236,18 @@ export class PageService {
     // Verified from decompiled WebLogicalFormObserver.cs and live WebSocket capture.
     await this.triggerFactboxRefresh(pageContextId);
 
-    // After factbox refresh: any factbox section whose form has no captioned
-    // fields is dead (BC returned a stub). Mark it invalid so Section DTO
-    // builders skip it.
+    // After factbox refresh: any factbox section whose form yielded no field
+    // nodes is dead (BC returned a stub). buildFormTree already skips
+    // MappingHint='PlaceholderField' nodes (form-tree-builder.ts), so a
+    // genuinely populated factbox always has at least one FieldNode here.
+    // Mark empty ones invalid so Section DTO builders skip them.
     const finalCtx = this.repo.get(pageContextId);
     if (finalCtx) {
       for (const [sectionId, sec] of finalCtx.sections) {
         if (sec.kind !== 'factbox') continue;
         const f = finalCtx.forms.get(sec.formId);
         if (!f) continue;
-        const captioned = treeFields(f.root).filter(fn => fn.properties.caption);
-        if (captioned.length === 0) {
+        if (treeFields(f.root).length === 0) {
           this.repo.invalidateSection(pageContextId, sectionId);
         }
       }
