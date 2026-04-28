@@ -136,15 +136,55 @@ Before activating Document Output in the company: field absent from `bc_open_pag
 
 BC's web-client form binder honors the active user's Application Area and the company's app activation state when materializing the page metadata. bc-mcp receives only the controls BC chose to send. The filter is server-side.
 
+**Status (documented 2026-04-28)**
+
+This is **server-side BC behavior with no client override**. Verified against
+decompiled `Microsoft.Dynamics.Nav.Ncl/NavSession.cs` (`ApplicationAreas`
+property, `IsApplicationAreaEnabled` predicate) and
+`Microsoft.Dynamics.Nav.Service/NSService.cs:OpenConnection`: BC's
+`session.ApplicationAreas` is set by AL code (typically the
+`ApplicationAreaSetup` table per company, or app-activation wizards). No
+client wire-level override exists — the existing OpenSession `profile`
+parameter selects the Role Center but NOT the Application Area set.
+
+**How to diagnose with existing tools**
+
+To check the active areas:
+```
+bc_open_page { pageId: 9178 }   # Application Area Setup
+bc_read_data { pageContextId, section: "header" }
+```
+
+To enable a specific area (e.g. `Suite`, `Manufacturing`, `CDOBasic`):
+```
+bc_write_data { pageContextId, fields: { "Suite": "Yes" } }
+```
+
+For vertical apps (Continia Document Output, etc.) where the area is
+typically activated by the app's setup wizard rather than the standard
+setup page, drive the wizard via `bc_open_page` + `bc_wizard_navigate`.
+
 **Workaround**
 
-Activate any Continia app (or otherwise enable the relevant Application Area) in the target company before driving the page through bc-mcp. For Continia DemoPortal envs, activation runs from the Document Output Setup Wizard.
+Activate the relevant Application Area in the target company before driving
+the page through bc-mcp. For Continia DemoPortal envs, activation runs from
+the Document Output Setup Wizard. After activation, re-open any pages —
+fields gated by the now-active area will appear in the `bc_open_page`
+response.
 
-**Fix candidate**
+**Why no dedicated bc_get_application_areas / bc_set_application_area tools**
 
-- Add an env var (e.g. `BC_APPLICATION_AREA=#All`) that bc-mcp passes to BC during connect / page open so metadata returns under the broadest area.
-- Or document the activation requirement loudly in the README so users do not chase a phantom "page-extension didn't deploy" bug.
-- Verify whether BC accepts an Application Area override on the WS form-init message; if so, plumb it through.
+Considered and rejected: the existing `bc_open_page` + `bc_read_data` +
+`bc_write_data` against page 9178 already cover both reading and writing
+the area state. Dedicated wrappers would add tool surface without new
+capability. The honest diagnostic + remediation path is the standard MCP
+flow.
+
+**Reference**
+- decompiled `Microsoft.Dynamics.Nav.Ncl/NavSession.cs:1111-1135` (setter)
+  and `:3291-3308` (`IsApplicationAreaEnabled`)
+- decompiled `Microsoft.Dynamics.Nav.Service/NSService.cs:OpenConnection`
+  (no Application Area parameter on the wire)
 
 ## 4. Modal dialog left open server-side persists across MCP calls
 
