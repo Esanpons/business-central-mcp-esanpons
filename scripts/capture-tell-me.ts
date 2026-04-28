@@ -1,8 +1,13 @@
 // scripts/capture-tell-me.ts
 //
-// One-shot capture: open Tell Me on live BC28, save the actual query, dump
+// One-shot capture: open Tell Me on live BC, save the actual query, dump
 // every event from the response to src/protocol/captures/tell-me-result-2026-04-28.json.
-// Run with: npx tsx scripts/capture-tell-me.ts
+// Run with: npx tsx scripts/capture-tell-me.ts (set BC_PROFILE in .env if
+// the default profile has an empty Tell Me index; e.g. BC_PROFILE=BUSINESS MANAGER).
+//
+// SaveValue against server:c[0]/c[0] (the actual sc text input), NOT
+// server:c[0] (the gc container). The wrong path returns InvokeCompleted
+// with no DataLoaded events. See limits.md #5 + src/protocol/captures/README.md.
 
 import { config as dotenvConfig } from 'dotenv';
 import { writeFileSync, mkdirSync } from 'node:fs';
@@ -55,7 +60,7 @@ async function runQuery(
   const initSave: SaveValueInteraction = {
     type: 'SaveValue',
     formId,
-    controlPath: 'server:c[0]',
+    controlPath: 'server:c[0]/c[0]',
     newValue: '',
   };
   const initResult = await session.invoke(initSave, (e) => e.type === 'InvokeCompleted');
@@ -68,7 +73,7 @@ async function runQuery(
   const querySave: SaveValueInteraction = {
     type: 'SaveValue',
     formId,
-    controlPath: 'server:c[0]',
+    controlPath: 'server:c[0]/c[0]',
     newValue: query,
   };
   const queryResult = await session.invoke(
@@ -107,6 +112,8 @@ async function main() {
     encoder,
     logger,
     appConfig.bc.tenantId,
+    appConfig.bc.invokeTimeoutMs,
+    appConfig.bc.profile,
   );
 
   console.error('Connecting to BC...');
@@ -152,14 +159,10 @@ async function main() {
     mkdirSync(outDir, { recursive: true });
     const outPath = resolve(outDir, 'tell-me-result-2026-04-28.json');
 
-    // Wrap with metadata (query, capture date) for fixture self-description.
-    const dump = {
-      capturedAt: new Date().toISOString(),
-      query: final.query,
-      formId: final.formId,
-      events: final.events,
-    };
-    writeFileSync(outPath, JSON.stringify(dump, null, 2));
+    // Tests load the fixture as a raw BCEvent[] — write the events array
+    // directly. Capture metadata (query, date, formId) is in the README.
+    writeFileSync(outPath, JSON.stringify(final.events, null, 2));
+    console.error(`Captured at ${new Date().toISOString()}, query "${final.query}", formId ${final.formId}`);
     console.error(`Saved ${outPath}`);
 
     const dataLoaded = final.events.find((e) => e.type === 'DataLoaded');
