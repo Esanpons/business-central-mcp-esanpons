@@ -5,6 +5,7 @@
 
 import {
   isFieldNode, isActionNode, isRepeaterNode, isGroupNode, isLogicalFormNode,
+  isStackGroupNode, isCueFieldNode,
   type ActionNode, type FieldNode, type FormNode, type RepeaterNode,
 } from './form-node.js';
 import { walkTree } from './form-tree-walk.js';
@@ -16,6 +17,7 @@ const actionsCache = new WeakMap<FormNode, ActionNode[]>();
 const repeatersCache = new WeakMap<FormNode, ReadonlyMap<string, RepeaterNode>>();
 const tabsCache = new WeakMap<FormNode, TabView[]>();
 const groupVisibilityCache = new WeakMap<FormNode, ReadonlyMap<string, boolean>>();
+const cuesCache = new WeakMap<FormNode, CueView[]>();
 
 export interface TabView {
   readonly caption: string;
@@ -88,4 +90,71 @@ export function filterControlPath(root: FormNode): string | null {
     if (n.type === 'filc') return n.controlPath;
   }
   return null;
+}
+
+export interface CueView {
+  /** Caption of the parent stackgc (e.g. "Ongoing Sales"). May be empty. */
+  readonly groupCaption: string;
+  /** controlPath of the parent stackgc — useful for grouping in MCP output. */
+  readonly groupControlPath: string;
+  /** Caption of the cue tile (e.g. "Sales Quotes"). */
+  readonly caption: string;
+  /** controlPath of the cue tile; pass to InvokeAction(DrillDown=120). */
+  readonly controlPath: string;
+  /** Display value (the count). Initially "0"; populated by PropertyChanged after LoadForm. */
+  readonly value: string;
+  /** True when the cue supports drill-down (HasAction on the wire). */
+  readonly hasAction: boolean;
+  /** Tooltip text from the AL source. */
+  readonly synopsis?: string;
+}
+
+/**
+ * Collect every cue tile (stackc) reachable under any cuegroup container
+ * (stackgc) in the tree. Cuegroups can be nested arbitrarily deep — for
+ * example a Role Center hosts CardParts via fhc → lf → stackgc → ... — so
+ * the walk is recursive and does NOT stop at the first stackgc.
+ *
+ * Each CueView records the parent stackgc's caption + controlPath so that
+ * MCP output can group cues by their visual cluster. Orphan stackc nodes
+ * (not enclosed in a stackgc) are skipped.
+ */
+export function cues(root: FormNode): readonly CueView[] {
+  const cached = cuesCache.get(root);
+  if (cached) return cached;
+
+  const result: CueView[] = [];
+
+  function visit(node: FormNode, parentGroup: { caption: string; controlPath: string } | null): void {
+    if (isStackGroupNode(node)) {
+      const newGroup = { caption: node.properties.caption ?? '', controlPath: node.controlPath };
+      for (const child of node.children) visit(child, newGroup);
+      return;
+    }
+    if (isCueFieldNode(node) && parentGroup) {
+      result.push({
+        groupCaption: parentGroup.caption,
+        groupControlPath: parentGroup.controlPath,
+        caption: node.properties.caption ?? '',
+        controlPath: node.controlPath,
+        value: node.properties.stringValue ?? '',
+        hasAction: node.hasAction === true,
+        ...(node.synopsis ? { synopsis: node.synopsis } : {}),
+      });
+      return;
+    }
+    // Recurse into other container kinds (gc, lf, fhc, etc.). FormHostNode's
+    // hosted form lives in `hostedFormControlTree` (raw lf JSON), NOT in
+    // `children` — page-context-repo builds a separate FormState for it,
+    // so this view does not need to walk into hostedFormControlTree.
+    if ('children' in node && Array.isArray(node.children)) {
+      for (const child of node.children) visit(child, parentGroup);
+    }
+    // Repeater columns (rcc) are leaves and cannot host stackgcs — no need
+    // to recurse into RepeaterNode.columns.
+  }
+
+  visit(root, null);
+  cuesCache.set(root, result);
+  return result;
 }

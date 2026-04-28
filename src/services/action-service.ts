@@ -1,3 +1,4 @@
+import { v4 as uuid } from 'uuid';
 import { ok, err, isOk, isErr, type Result } from '../core/result.js';
 import { ProtocolError } from '../core/errors.js';
 import type { BCSession } from '../session/bc-session.js';
@@ -8,7 +9,7 @@ import { SystemAction } from '../protocol/types.js';
 import { resolveSection } from '../protocol/section-resolver.js';
 import type { FormState } from '../protocol/form-state.js';
 import { isEffectivelyVisible } from '../protocol/visibility.js';
-import { actions as treeActions, groupVisibility as treeGroupVisibility } from '../protocol/form-views.js';
+import { actions as treeActions, groupVisibility as treeGroupVisibility, cues as treeCues } from '../protocol/form-views.js';
 import { classifyWizardNav } from '../protocol/wizard-classify.js';
 import type { Logger } from '../core/logger.js';
 
@@ -84,6 +85,67 @@ export class ActionService {
       return err(new ProtocolError(`Action is disabled: ${actionName}`));
     }
     return this.invokeAction(pageContextId, form, actionNode.controlPath, actionNode.systemAction);
+  }
+
+  /**
+   * Drill down on a cue tile (stackc) inside a Role Center / CardPart cuegroup
+   * (stackgc). Sends `InvokeAction(DrillDown=120)` against the cue's
+   * controlPath; BC opens the underlying list page as a `FormCreated` event.
+   *
+   * Reference: `RepeaterControl` / cue tile drill-down protocol — cues use
+   * the same DrillDown SystemAction as repeater rows.
+   */
+  async executeOnCue(
+    pageContextId: string,
+    sectionId: string,
+    cueName: string,
+  ): Promise<Result<ActionResult, ProtocolError>> {
+    const ctx = this.repo.get(pageContextId);
+    if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
+
+    const section = ctx.sections.get(sectionId);
+    if (!section || !section.valid) {
+      return err(new ProtocolError(`Section '${sectionId}' not found.`, {
+        availableSections: Array.from(ctx.sections.keys()),
+      }));
+    }
+
+    const form = ctx.forms.get(section.formId);
+    if (!form) return err(new ProtocolError(`Form for section '${sectionId}' not loaded.`));
+
+    const want = cueName.toLowerCase();
+    const cueList = treeCues(form.root);
+    const cue = cueList.find((c) => c.caption.toLowerCase() === want);
+    if (!cue) {
+      return err(new ProtocolError(`Cue '${cueName}' not found in section '${sectionId}'.`, {
+        availableCues: cueList.map((c) => c.caption),
+      }));
+    }
+    if (!cue.hasAction) {
+      return err(new ProtocolError(`Cue '${cueName}' is not drill-downable (HasAction=false).`));
+    }
+
+    const result = await this.invokeAction(pageContextId, form, cue.controlPath, SystemAction.DrillDown);
+    if (isErr(result)) return result;
+
+    // Cue drill-down opens an underlying list page as a top-level FormCreated
+    // event (no parentFormId). The page-context-repo's applyEvent treats
+    // ownerless FormCreated as "update existing form" -- so without an
+    // explicit registration here, the new list page never gets a
+    // pageContextId, and ExecuteActionOperation.openedPages stays empty.
+    // Mirror NavigationService.drillDown: create a new page context for
+    // each ownerless FormCreated whose formId is unknown to the repo.
+    for (const event of result.value.events) {
+      if (event.type !== 'FormCreated') continue;
+      if (event.parentFormId) continue;
+      if (event.formId === form.formId) continue;
+      if (this.repo.getByFormId(event.formId)) continue;
+      const newPcId = `session:page:cue:${uuid().substring(0, 8)}`;
+      this.repo.create(newPcId, event.formId);
+      this.repo.applyToPage(newPcId, result.value.events);
+    }
+
+    return result;
   }
 
   /**

@@ -15,6 +15,7 @@ import {
   fields as treeFields,
   actions as treeActions,
   groupVisibility as treeGroupVisibility,
+  cues as treeCues,
 } from './form-views.js';
 import { isEffectivelyVisible } from './visibility.js';
 import { mapRowCellKeys } from './row-mapping.js';
@@ -46,6 +47,19 @@ export interface SectionAction {
   readonly wizardNav?: 'back' | 'next' | 'finish' | 'cancel';
 }
 
+export interface SectionCue {
+  /** Cue tile caption — used as the cue identifier for bc_execute_action. */
+  readonly name: string;
+  /** Display value (the count). May be empty initially before LoadForm populates StringValue. */
+  readonly value: string;
+  /** Group caption (e.g. "Ongoing Sales"). Helps the LLM frame the cue. */
+  readonly groupCaption?: string;
+  /** Tooltip text from the AL source. */
+  readonly synopsis?: string;
+  /** True when the cue supports drill-down (HasAction on the wire). */
+  readonly hasAction: boolean;
+}
+
 /**
  * Row inside a list-shape Section. Identical to the internal `RepeaterRow`
  * type — cells keyed by `columnBinderName` (e.g. "1165569367_c2"), not by
@@ -69,6 +83,8 @@ export interface Section {
   readonly rows?: readonly SectionRow[];
   readonly totalRowCount?: number | null;
   readonly actions?: readonly SectionAction[];
+  /** Populated when the section's form contains cuegroup tiles. */
+  readonly cues?: readonly SectionCue[];
 }
 
 /**
@@ -99,6 +115,7 @@ export function buildSection(ctx: PageContext, sectionId: string): Section | nul
     rows?: SectionRow[];
     totalRowCount?: number | null;
     actions?: SectionAction[];
+    cues?: SectionCue[];
   } = {
     sectionId: section.sectionId,
     kind: section.kind,
@@ -144,6 +161,17 @@ export function buildSection(ctx: PageContext, sectionId: string): Section | nul
           ...(wn ? { wizardNav: wn } : {}),
         };
       });
+  }
+
+  const cueList = treeCues(root);
+  if (cueList.length > 0) {
+    out.cues = cueList.map(c => ({
+      name: c.caption,
+      value: c.value,
+      ...(c.groupCaption ? { groupCaption: c.groupCaption } : {}),
+      ...(c.synopsis ? { synopsis: c.synopsis } : {}),
+      hasAction: c.hasAction,
+    }));
   }
 
   return out as Section;
