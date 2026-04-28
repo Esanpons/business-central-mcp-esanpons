@@ -605,7 +605,7 @@ describe('Workflow Smoke Tests (all 7 MCP tools)', () => {
           const results = unwrap(result);
           console.error(`[W8] "${query}": ${results.length} results`);
           for (const r of results.slice(0, 5)) {
-            console.error(`[W8]   name="${r.name}", pageId="${r.pageId}", type="${r.type}"`);
+            console.error(`[W8]   name="${r.name}", objectType="${r.objectType}", runTarget="${r.runTarget}", category="${r.category ?? ''}", score=${r.score ?? ''}`);
           }
           if (query === 'customer') {
             expect(results.length).toBeGreaterThan(0);

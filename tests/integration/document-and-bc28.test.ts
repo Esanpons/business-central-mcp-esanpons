@@ -756,7 +756,7 @@ describe('BC28 Cross-Version Tests', () => {
         const results = unwrap(result);
         console.error(`[B3] Search returned ${results.length} results`);
         for (const r of results.slice(0, 10)) {
-          console.error(`[B3]   name="${r.name}", pageId="${r.pageId}", type="${r.type}"`);
+          console.error(`[B3]   name="${r.name}", objectType="${r.objectType}", runTarget="${r.runTarget}", category="${r.category ?? ''}", score=${r.score ?? ''}`);
         }
         expect(results.length).toBeGreaterThan(0);
       } else {

@@ -260,24 +260,19 @@ describe('Edge Case & Stress Tests', () => {
       console.error(`[EC9] Search returned ${results.length} results`);
 
       for (const r of results.slice(0, 10)) {
-        console.error(`[EC9]   name="${r.name}", pageId="${r.pageId}", type="${r.type}"`);
+        console.error(`[EC9]   name="${r.name}", objectType="${r.objectType}", runTarget="${r.runTarget}", category="${r.category ?? ''}"`);
       }
 
-      const openable = results.find(r => r.pageId && /^\d+$/.test(r.pageId));
-      if (openable) {
-        console.error(`[EC9] Opening search result: "${openable.name}" (page ${openable.pageId})...`);
-        const openResult = await openAndTrack(openable.pageId);
-        if (isOk(openResult)) {
-          const state = derivePageState(unwrap(openResult));
-          console.error(`[EC9] Opened successfully: pageType=${state.pageType}, fields=${state.controlTree.length}`);
-          console.error(`[EC9] repeater: ${state.repeater ? `${state.repeater.rows.length} rows` : 'NONE'}`);
-          await closeAndUntrack(state.pageContextId);
-          console.error('[EC9] VERIFIED: Search -> Open works end-to-end');
-        } else {
-          console.error(`[EC9] Open FAILED: ${openResult.error.message}`);
-        }
+      // Tell Me identifies pages by AL name, not numeric id. The runTarget is
+      // e.g. "Customer List" — opening by name is not supported by bc_open_page
+      // today (which takes a numeric pageId). Verify the result shape instead.
+      const pageHit = results.find(r => r.objectType === 'page');
+      if (pageHit) {
+        expect(pageHit.runTarget).toBeTruthy();
+        expect(pageHit.name).toBeTruthy();
+        console.error(`[EC9] Picked openable: "${pageHit.name}" (runTarget="${pageHit.runTarget}", objectType="${pageHit.objectType}")`);
       } else {
-        console.error('[EC9] No openable result with numeric pageId found');
+        console.error('[EC9] No page-typed results in this profile/env');
       }
     } catch (e: unknown) {
       console.error(`[EC9] THREW: ${e instanceof Error ? e.message : String(e)}`);
