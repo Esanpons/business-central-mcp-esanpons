@@ -190,13 +190,18 @@ export class PageService {
       // because the form was already opened during control tree parsing. openForm resets
       // the form state so LoadData() can populate field values.
       // Verified from decompiled LoadFormInteraction.cs: OpenForm -> LoadData chain.
+      // Role Center hosted CardParts (cuegroups) follow the same pattern: BC won't
+      // populate cue StringValues without openForm:true, since the form was already
+      // opened during root-tree parsing.
+      const ctxForKind = this.repo.get(pageContextId);
+      const isRoleCenterChild = ctxForKind?.pageType === 'RoleCenter' && section.kind === 'subpage';
       const isFactbox = section.kind === 'factbox';
       const loadInteraction: LoadFormInteraction = {
         type: 'LoadForm',
         formId: childFormId,
         loadData: true,
         delayed: false,
-        openForm: isFactbox,
+        openForm: isFactbox || isRoleCenterChild,
       };
 
       const loadResult = await this.session.invoke(
@@ -206,6 +211,25 @@ export class PageService {
 
       if (isOk(loadResult)) {
         this.repo.applyToPage(pageContextId, loadResult.value);
+      }
+
+      if (isRoleCenterChild) {
+        // Cue StringValues are computed server-side in response to a refresh
+        // on the hosted CardPart. Without this, cue tiles parse correctly
+        // but their values stay at the initial "0" stub.
+        const refreshInteraction: InvokeActionInteraction = {
+          type: 'InvokeAction',
+          formId: childFormId,
+          controlPath: 'server:',
+          systemAction: 30, // SystemAction.Refresh
+        };
+        const refreshResult = await this.session.invoke(
+          refreshInteraction,
+          (event) => event.type === 'InvokeCompleted' || event.type === 'PropertyChanged',
+        );
+        if (isOk(refreshResult)) {
+          this.repo.applyToPage(pageContextId, refreshResult.value);
+        }
       }
 
       // Step 2: Refresh the child form's repeater to trigger DataLoaded.
