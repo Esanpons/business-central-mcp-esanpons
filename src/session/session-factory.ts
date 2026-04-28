@@ -14,6 +14,7 @@ export class SessionFactory {
     private readonly logger: Logger,
     private readonly tenantId: string,
     private readonly timeoutMs: number = 30000,
+    private readonly profile: string = '',
   ) {}
 
   async create(): Promise<Result<BCSession, ConnectionError>> {
@@ -27,6 +28,7 @@ export class SessionFactory {
       this.logger,
       this.tenantId,
       this.timeoutMs,
+      this.profile,
     );
 
     const initResult = await session.initialize(this.tenantId);

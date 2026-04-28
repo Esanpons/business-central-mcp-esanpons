@@ -63,7 +63,19 @@ export class InteractionEncoder {
     };
   }
 
-  encodeOpenSession(tenantId: string, spaInstanceId: string): EncodedRpcCall {
+  /**
+   * OpenSession login parameters (verified against decompiled BC):
+   * - tenantId: tenant to connect to
+   * - profile: BC profile id (e.g. "BUSINESS MANAGER"). Server uppercases and trims.
+   *   Unknown ids silently fall back to the user's default profile, with a
+   *   `ConnectionWarning.MissingProfile` returned in UserSettings. Empty string
+   *   = use server default.
+   *
+   * Reference: `Microsoft.Dynamics.Framework.UI.Web/CallbackRequestData.cs`
+   * Profile field; `Microsoft.Dynamics.Nav.Service/NSService.cs:OpenConnection`
+   * resolution logic.
+   */
+  encodeOpenSession(tenantId: string, spaInstanceId: string, profile?: string): EncodedRpcCall {
     return {
       method: 'OpenSession',
       params: [{
@@ -91,7 +103,7 @@ export class InteractionEncoder {
         company: null,
         telemetryClientSessionId: null,
         features: BC_FEATURES,
-        profile: '',
+        profile: profile ?? '',
         rememberCompany: false,
         timeZoneInformation: this.getTimezoneInfo(),
         profileDescription: { Id: null, Caption: null, Description: null },

@@ -1,13 +1,23 @@
 import { ok, err, isErr, type Result } from '../core/result.js';
 import { ProtocolError } from '../core/errors.js';
 import type { BCSession } from '../session/bc-session.js';
-import type { BCEvent, SessionActionInteraction, SaveValueInteraction } from '../protocol/types.js';
+import type { SessionActionInteraction, SaveValueInteraction } from '../protocol/types.js';
 import type { Logger } from '../core/logger.js';
+import { extractTellMeResults } from './tell-me-extractor.js';
 
 export interface SearchResult {
+  /** Display name of the page/report/etc. -- what the BC web client shows. */
   name: string;
-  pageId: string;
-  type: string;
+  /** Object kind: 'page' | 'report' | 'codeunit' | etc. Lowercase per BC's wire format. */
+  objectType: string;
+  /** AL object name BC uses to run the target. Pass to OpenForm or its equivalent. */
+  runTarget: string;
+  /** Department path (e.g. "Departments/Financial Management/Receivables"). Optional. */
+  departmentPath?: string;
+  /** Category label ("Lists", "Tasks", "Reports", ...). Optional. */
+  category?: string;
+  /** Search relevance score from BC. Higher = better match. Optional. */
+  score?: number;
 }
 
 export class SearchService {
@@ -39,11 +49,16 @@ export class SearchService {
 
     const tellMeFormId = tellMeForm.formId;
 
+    // SaveValue against the actual sc input at server:c[0]/c[0], NOT the gc
+    // container at server:c[0]. Verified via live capture (BC28): only the
+    // nested path triggers the DataLoaded result stream. The root cause of
+    // limits.md #5's empty-result symptom on certain envs.
+
     // Step 2: SaveValue with empty string (initialize)
     const initSave: SaveValueInteraction = {
       type: 'SaveValue',
       formId: tellMeFormId,
-      controlPath: 'server:c[0]',
+      controlPath: 'server:c[0]/c[0]',
       newValue: '',
     };
 
@@ -58,7 +73,7 @@ export class SearchService {
     const querySave: SaveValueInteraction = {
       type: 'SaveValue',
       formId: tellMeFormId,
-      controlPath: 'server:c[0]',
+      controlPath: 'server:c[0]/c[0]',
       newValue: query,
     };
 
@@ -70,36 +85,9 @@ export class SearchService {
     if (isErr(queryResult)) return queryResult;
 
     // Extract search results from DataLoaded events
-    const results = this.extractSearchResults(queryResult.value);
+    const results = extractTellMeResults(queryResult.value);
 
     this.logger.info(`Search "${query}": ${results.length} results`);
     return ok(results);
-  }
-
-  private extractSearchResults(events: BCEvent[]): SearchResult[] {
-    const results: SearchResult[] = [];
-    for (const event of events) {
-      if (event.type !== 'DataLoaded') continue;
-      for (const row of event.rows) {
-        if (!row || typeof row !== 'object') continue;
-        const r = row as Record<string, unknown>;
-        const rowData = (r['DataRowInserted'] ?? r['DataRowUpdated']) as unknown[] | undefined;
-        if (!Array.isArray(rowData) || rowData.length < 2) continue;
-        const payload = rowData[1] as Record<string, unknown>;
-        const cells = (payload['cells'] ?? payload['Cells'] ?? {}) as Record<string, unknown>;
-
-        // Tell Me results have varying cell structures — extract what we can
-        // Try to find name/description/page info from cell values
-        const values = Object.values(cells).filter(v => typeof v === 'string') as string[];
-        if (values.length > 0) {
-          results.push({
-            name: values[0] ?? '',
-            pageId: '', // Page ID extraction needs refinement based on actual BC response
-            type: values[1] ?? '',
-          });
-        }
-      }
-    }
-    return results;
   }
 }

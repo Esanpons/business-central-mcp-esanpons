@@ -176,4 +176,27 @@ describe('InteractionEncoder', () => {
     expect(typeof tz.timeZoneBaseOffset).toBe('number');
     expect(typeof tz.dstPeriodStart).toBe('string');
   });
+
+  describe('encodeOpenSession profile', () => {
+    it('emits empty profile by default', () => {
+      const enc = new InteractionEncoder('27.0.0.0');
+      const call = enc.encodeOpenSession('default', 'spa-1');
+      const params = (call.params[0] as Record<string, unknown>);
+      expect(params.profile).toBe('');
+    });
+
+    it('emits the supplied profile string', () => {
+      const enc = new InteractionEncoder('27.0.0.0');
+      const call = enc.encodeOpenSession('default', 'spa-1', 'BUSINESS MANAGER');
+      const params = (call.params[0] as Record<string, unknown>);
+      expect(params.profile).toBe('BUSINESS MANAGER');
+    });
+
+    it('treats undefined profile as empty', () => {
+      const enc = new InteractionEncoder('27.0.0.0');
+      const call = enc.encodeOpenSession('default', 'spa-1', undefined);
+      const params = (call.params[0] as Record<string, unknown>);
+      expect(params.profile).toBe('');
+    });
+  });
 });
