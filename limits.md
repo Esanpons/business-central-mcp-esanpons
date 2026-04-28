@@ -178,9 +178,66 @@ retry if BC closes) or stage-2 (session reset, `SessionLostError`).
 
 Continia DemoPortal BC28 env, super user. Searches that work in browser return empty from MCP.
 
-**Workaround**
+**Status (resolved 2026-04-28)**
 
-Use known page IDs directly with `bc_open_page`. For Continia / Document Output specifically, the common ones:
+Two distinct issues, both fixed.
+
+**Primary root cause: wrong controlPath in SearchService.** The Tell Me search
+form has its sc input at `server:c[0]/c[0]` (inside a gc container at
+`server:c[0]`). bc-mcp was sending `SaveValue` against `server:c[0]` — the gc
+container itself — which BC accepts silently and returns `InvokeCompleted`
+with no `DataLoaded` events. No rows ever reached the extractor. Fixed by
+sending against the actual sc input path. Verified by live capture (BC28
+default profile, query "customer"): 23 page rows + 32 report rows now arrive.
+
+**Secondary issue: profile-scoped Tell Me index.** BC's Tell Me index is
+populated based on the active session's profile (which Role Center,
+which department menu). On envs where the default profile has a sparse
+index, queries that work in the BC web client (signed in to a specific
+profile like Business Manager) return empty from bc-mcp. Fixed by adding
+`BC_PROFILE` env var that's plumbed into OpenSession's `profile` field
+(verified against decompiled `Microsoft.Dynamics.Framework.UI.Web/CallbackRequestData.cs`
+and `Microsoft.Dynamics.Nav.Service/NSService.cs:OpenConnection`). Common
+values: `BUSINESS MANAGER`, `ACCOUNTANT`, `SALES ORDER PROCESSOR`. Server
+uppercases and trims; unknown ids silently fall back to user default.
+
+**Result extractor rewrite.** The original extractor returned
+`{ name, pageId, type }` with `pageId` always empty (the wire shape was
+never reverse-engineered). Live capture revealed BC's Tell Me row format
+uses NAMED cells (Name, Source, DepartmentPath, DepartmentCategory,
+SearchScore) and identifies pages by AL name (string), not numeric id, in
+`cells.Source.stringValue` JSON. The new shape:
+
+```ts
+SearchResult {
+  name: string;             // display caption (e.g. "Customers")
+  objectType: string;       // "page" | "report" | "codeunit" | ...
+  runTarget: string;        // BC AL name (e.g. "Customer List")
+  departmentPath?: string;  // e.g. "Departments/Financial Management/Receivables"
+  category?: string;        // "Lists" | "Tasks" | "Reports" | ...
+  score?: number;           // BC's relevance score
+}
+```
+
+**Empty-result diagnostic.** When `bc_search_pages` returns zero rows,
+`SearchPagesOutput.note` carries a hint string mentioning `BC_PROFILE` so
+the caller can disambiguate "search wasn't issued correctly" from "search
+ran but Tell Me index is empty for this profile".
+
+**Open follow-up: name-to-id resolution.**
+`bc_open_page` still takes a numeric `pageId`. Tell Me returns AL names
+(`runTarget: "Customer List"`). To open a search result, callers either
+have to know the numeric id by other means or invoke the page through a
+future enhancement that accepts a name.
+
+**References**
+- `src/services/search-service.ts` — fixed controlPath (`server:c[0]/c[0]`)
+- `src/services/tell-me-extractor.ts` — structured row decoding
+- `src/protocol/captures/tell-me-result-2026-04-28.json` — frozen wire fixture
+- `src/protocol/captures/README.md` — verified row shape
+- `tests/integration/search-pages.test.ts` — live verification
+
+**Continia / Document Output known page IDs (still useful for direct opens)**
 
 | Page ID | Name |
 |---|---|
@@ -191,10 +248,6 @@ Use known page IDs directly with `bc_open_page`. For Continia / Document Output 
 | 6175297 | CDO Queue Entry |
 | 6175308 | CDO Document Output Queues (cuegroup, see #1) |
 | 6175324 | CDO Customer FactBox |
-
-**Fix candidate**
-
-Confirm whether bc-mcp's Tell Me query is scoped to the same role center / profile as the user. If a default profile yields no Tell Me hits, document a `BC_PROFILE` override or default to a profile that includes the searched objects.
 
 ## 6. URL parsing requires trailing slash
 
