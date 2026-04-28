@@ -150,9 +150,8 @@ export function cues(root: FormNode): readonly CueView[] {
     if ('children' in node && Array.isArray(node.children)) {
       for (const child of node.children) visit(child, parentGroup);
     }
-    if ('columns' in node && Array.isArray(node.columns)) {
-      for (const col of node.columns) visit(col, parentGroup);
-    }
+    // Repeater columns (rcc) are leaves and cannot host stackgcs — no need
+    // to recurse into RepeaterNode.columns.
   }
 
   visit(root, null);

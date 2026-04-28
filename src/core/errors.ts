@@ -62,9 +62,11 @@ export class InputValidationError extends BCError {
 }
 /**
  * Returned by bc_open_page when the requested page is a CardPart that BC
- * delivers as a server stub when opened standalone (no fields, no children
- * other than placeholder hints). The caller should reach the part through
- * its host form (a Role Center or another page that embeds it).
+ * delivers as a server stub when opened standalone. Detection: pageType is
+ * `CardPart` AND the root form has zero captioned fields AND zero cuegroup
+ * tiles (cue-only CardParts like Activities are NOT stubs and pass through).
+ * The caller should reach the part through its host form (a Role Center or
+ * another page that embeds it).
  *
  * Verified-non-reproducing on stock BC28 (pages 1310, 9061, 9152 all return
  * full content). Reproduces on some vertical-app environments per limits.md #1.

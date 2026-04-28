@@ -225,6 +225,10 @@ export class PageService {
         // Cue StringValues are computed server-side in response to a refresh
         // on the hosted CardPart. Without this, cue tiles parse correctly
         // but their values stay at the initial "0" stub.
+        // controlPath: 'server:' targets the form root — cuegroup CardParts
+        // have no top-level repeater, and form-root Refresh triggers
+        // recomputation of the bound stackc StringValues via
+        // PropertyChanged events.
         const refreshInteraction: InvokeActionInteraction = {
           type: 'InvokeAction',
           formId: childFormId,
