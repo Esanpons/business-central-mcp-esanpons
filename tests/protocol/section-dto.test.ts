@@ -1,7 +1,7 @@
 // tests/protocol/section-dto.test.ts
 import { describe, it, expect } from 'vitest';
 import type { Section, SectionField, SectionAction, SectionRow } from '../../src/protocol/section-dto.js';
-import { buildSection } from '../../src/protocol/section-dto.js';
+import { buildSection, buildAllSections } from '../../src/protocol/section-dto.js';
 import { buildFormTree } from '../../src/protocol/form-tree-builder.js';
 import type { PageContext } from '../../src/protocol/page-context.js';
 import type { FormState } from '../../src/protocol/form-state.js';
@@ -191,5 +191,40 @@ describe('buildSection', () => {
     const section = buildSection(ctx, 'header');
     expect(section!.actions).toHaveLength(2);
     expect(section!.actions![0].name).toBe('New');
+  });
+});
+
+describe('buildAllSections', () => {
+  it('emits sections in canonical order: header, lines, subpages, factboxes', () => {
+    const rootForm = makeFormState('root', { t: 'lf', ServerId: 'root', PageType: 5, Children: [] });
+    const subForm = makeFormState('sub', { t: 'lf', ServerId: 'sub', PageType: 4, Children: [] });
+    const fbForm = makeFormState('fb', { t: 'lf', ServerId: 'fb', PageType: 3, Children: [] });
+
+    const ctx = makeCtx({
+      rootFormId: 'root',
+      forms: new Map([['root', rootForm], ['sub', subForm], ['fb', fbForm]]),
+      sections: new Map<string, SectionDescriptor>([
+        // Insertion order intentionally scrambled; output order must be canonical
+        ['factbox:Customer FactBox', { sectionId: 'factbox:Customer FactBox', kind: 'factbox', caption: 'FactBox', formId: 'fb', valid: true }],
+        ['lines', { sectionId: 'lines', kind: 'lines', caption: 'Lines', formId: 'sub', valid: true }],
+        ['header', { sectionId: 'header', kind: 'header', caption: 'Sales Order', formId: 'root', valid: true }],
+      ]),
+    });
+
+    const sections = buildAllSections(ctx);
+    expect(sections.map(s => s.kind)).toEqual(['header', 'lines', 'factbox']);
+  });
+
+  it('skips invalid sections', () => {
+    const ctx = makeCtx({
+      rootFormId: 'root',
+      forms: new Map([['root', makeFormState('root', { t: 'lf', ServerId: 'root', PageType: 0, Children: [] })]]),
+      sections: new Map<string, SectionDescriptor>([
+        ['header', { sectionId: 'header', kind: 'header', caption: 'Customer', formId: 'root', valid: true }],
+        ['stale', { sectionId: 'stale', kind: 'subpage', caption: 'Old', formId: 'gone', valid: false }],
+      ]),
+    });
+    const sections = buildAllSections(ctx);
+    expect(sections.map(s => s.sectionId)).toEqual(['header']);
   });
 });

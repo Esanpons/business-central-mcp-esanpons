@@ -147,3 +147,28 @@ export function buildSection(ctx: PageContext, sectionId: string): Section | nul
 
   return out as Section;
 }
+
+const SECTION_KIND_ORDER: Record<SectionKind, number> = {
+  header: 0,
+  lines: 1,
+  subpage: 2,
+  factbox: 3,
+  requestPage: 4,
+};
+
+/**
+ * Emit every valid section in `ctx` in canonical order: header, lines,
+ * subpages, factboxes, requestPage. Returns an empty array for a context
+ * with no sections (defensive — should not occur in practice).
+ */
+export function buildAllSections(ctx: PageContext): Section[] {
+  const out: Section[] = [];
+  const ordered = Array.from(ctx.sections.values())
+    .filter(s => s.valid)
+    .sort((a, b) => SECTION_KIND_ORDER[a.kind] - SECTION_KIND_ORDER[b.kind]);
+  for (const desc of ordered) {
+    const built = buildSection(ctx, desc.sectionId);
+    if (built !== null) out.push(built);
+  }
+  return out;
+}
