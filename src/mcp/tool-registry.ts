@@ -54,37 +54,36 @@ export function buildToolRegistry(ops: Operations): ToolDefinition[] {
   return [
     {
       name: 'bc_open_page',
-      description: `Opens a Business Central page by its numeric page ID and returns its complete state: fields with current values and editability, available actions, data rows with bookmarks, and section metadata. This is the entry point for all Business Central operations -- it returns a pageContextId that every other bc_ tool requires as input. Use bc_search_pages first if you do not know the page ID for an entity.
+      description: `Opens a Business Central page by its numeric page ID and returns its complete state as a list of sections. Each section has an id, kind (header / lines / factbox / subpage / requestPage), caption, and the appropriate content shape: card-style sections (header, factbox, requestPage) carry fields[] and (for header) actions[]; list-style sections (lines, subpages backed by a repeater) carry rows[] and totalRowCount. This is the entry point for all Business Central operations -- it returns a pageContextId that every other bc_ tool requires as input. Use bc_search_pages first if you do not know the page ID for an entity.
 
-Card pages (single-record views like Customer Card=21, Item Card=30) return header fields with values. List pages (multi-record views like Customer List=22, Item List=31) return repeater columns, data rows, and bookmarks for navigation. Document pages (Sales Order=42, Purchase Order=50) return both header fields and a "lines" section with line item rows.
+Card pages (single-record views like Customer Card=21) return one header section plus any FactBox sections attached to the page. List pages (Customer List=22) return a header section that is itself list-shaped (rows[] populated). Document pages (Sales Order=42) return a header card-section, a "lines" list-section with the document lines, and any FactBoxes.
 
-Typical workflow: bc_open_page -> bc_read_data (filter/refresh) -> bc_write_data (edit fields) -> bc_execute_action (post/release/delete) -> bc_close_page. Always call bc_close_page when done to free server resources. Do NOT call this if the page is already open -- reuse the existing pageContextId instead.
+Typical workflow: bc_open_page -> bc_read_data (refresh / filter / paginate a section) -> bc_write_data (edit fields in any section) -> bc_execute_action (post / release / delete) -> bc_close_page. Always call bc_close_page when done. Do NOT call this if the page is already open -- reuse the existing pageContextId.
 
-Optional bookmark parameter opens a Card page to a specific record (e.g., open Customer Card for customer "10000"). Bookmarks come from bc_read_data or bc_open_page list row results.
+Optional bookmark parameter opens a Card page to a specific record. Bookmarks come from list rows in any prior section.
 
-Example: { "pageId": 22 } opens Customer List. { "pageId": 21, "bookmark": "XXXX" } opens Customer Card for a specific customer.`,
+Example: { "pageId": 22 } opens Customer List. Returned sections: [{sectionId:"header", kind:"header", rows:[...], fields:undefined, actions:[...]}]. { "pageId": 21, "bookmark": "..." } opens Customer Card. Returned sections include the header card plus FactBoxes (e.g. {sectionId:"factbox:Customer Statistics", kind:"factbox", fields:[...]}).`,
       inputSchema: toMcpJsonSchema(OpenPageSchema),
       zodSchema: OpenPageSchema,
       execute: (input) => ops.openPage.execute(input as Parameters<typeof ops.openPage.execute>[0]),
     },
     {
       name: 'bc_read_data',
-      description: `Reads data rows from an already-open Business Central List or Document page. Returns repeater rows with cell values and bookmarks for navigation. Requires a pageContextId obtained from a prior bc_open_page call. Use this to refresh data after write/action operations, apply server-side filters, select specific columns, or read from a specific page section.
+      description: `Refreshes a single section on an already-open page. Returns one Section: { sectionId, kind, caption, fields?, rows?, actions?, totalRowCount? }. Card-shape sections (header, factbox, requestPage) refresh their fields[]; list-shape sections refresh rows[]. Requires a pageContextId from a prior bc_open_page call.
 
-Do NOT use this for Card pages (single-record views) -- Card field values are already returned by bc_open_page. Use this only for pages that have repeater sections (lists, document lines).
+Pass section: "header" (default) to refresh the page's header. Pass section: "lines" to refresh document line items. Pass a factbox sectionId (e.g. "factbox:Customer Statistics", as listed in the bc_open_page response) to refresh the FactBox card.
 
-Filtering: Pass an array of { column, value } objects in the filters parameter. Column names must match the displayed column caption. Values use BC filter syntax: exact match ("10000"), ranges ("10000..20000"), wildcards ("*consulting*"), or expressions (">1000"). Multiple filters combine with AND logic.
+Filtering applies to list-shape sections only. Pass an array of { column, value }; values use BC filter syntax (exact "10000", ranges "10000..20000", wildcards "*consulting*", expressions ">1000"). Multiple filters combine with AND.
 
-Column selection: Pass a columns array with column caption names to return only those columns, reducing output size. Omit to return all columns.
+Column selection: pass columns: ["No.", "Name"] to limit the cells in each row (or fields[] entries on a card section).
 
-Section targeting: For Document pages (Sales Order, Purchase Order), use section: "lines" to read line item rows instead of header data. Available section names are listed in the bc_open_page response under sections.
+Range slicing: { offset, limit } returns rows[offset..offset+limit] for list sections. Use with totalRowCount for pagination.
 
 Examples:
-- Read all customers: { "pageContextId": "abc" }
-- Filter by city: { "pageContextId": "abc", "filters": [{ "column": "City", "value": "London" }] }
-- Read only No. and Name: { "pageContextId": "abc", "columns": ["No.", "Name"] }
-- Read Sales Order lines: { "pageContextId": "abc", "section": "lines" }
-- Filter with range: { "pageContextId": "abc", "filters": [{ "column": "No.", "value": "10000..20000" }] }`,
+- Refresh header: { pageContextId: "abc" }
+- Filter customer list: { pageContextId: "abc", filters: [{ column: "City", value: "London" }] }
+- Read sales order lines: { pageContextId: "abc", section: "lines" }
+- Refresh a FactBox: { pageContextId: "abc", section: "factbox:Customer Statistics" }`,
       inputSchema: toMcpJsonSchema(ReadDataSchema),
       zodSchema: ReadDataSchema,
       execute: (input) => ops.readData.execute(input as Parameters<typeof ops.readData.execute>[0]),
