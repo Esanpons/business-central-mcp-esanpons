@@ -115,4 +115,54 @@ describe('ActionService.executeOnCue', () => {
       expect(result.error.message).toMatch(/not drill-downable/i);
     }
   });
+
+  it('registers a new pageContextId for the drill-down target form', async () => {
+    const repo = new PageContextRepository();
+    repo.create('pc:1', 'root', { isModal: false, wizardState: null });
+    repo.applyEvents([{
+      type: 'FormCreated', formId: 'root',
+      controlTree: { t: 'lf', ServerId: 'root', PageType: 2, Children: [] },
+    } as BCEvent]);
+    repo.registerDiscoveredChildForm('pc:1', {
+      serverId: 'cp', caption: 'Activities',
+      controlTree: {
+        t: 'lf', ServerId: 'cp', PageType: 3, Caption: 'Activities',
+        Children: [{
+          t: 'stackgc', Caption: 'Ongoing Sales',
+          Children: [{
+            t: 'gc', MappingHint: 'STACKGROUP',
+            Children: [{ t: 'stackc', Caption: 'Sales Quotes', StringValue: '5', HasAction: true, ColumnBinder: { Name: 'a' } }],
+          }],
+        }],
+      },
+      isSubForm: false, isPart: true,
+    });
+
+    // Mock the DrillDown response: BC echoes a FormCreated for the new list page
+    // (ownerless — not a child of any existing form), plus an InvokeCompleted.
+    const session: any = {
+      invoke: vi.fn(async () => ok([
+        {
+          type: 'FormCreated', formId: 'newList', isReload: false,
+          controlTree: { t: 'lf', ServerId: 'newList', PageType: 1, Caption: 'Sales Quotes', Children: [] },
+        },
+        {
+          type: 'InvokeCompleted', sequenceNumber: 1,
+          completedInteractions: [{ invocationId: 'cb1', durationMs: 0 }],
+        },
+      ] as BCEvent[])),
+    };
+    const logger: any = { info() {}, debug() {}, warn() {}, error() {} };
+    const svc = new ActionService(session, repo, logger);
+    const ctx = repo.get('pc:1')!;
+    const cueSectionId = Array.from(ctx.sections.keys()).find(k => k.includes('Activities'))!;
+
+    const result = await svc.executeOnCue('pc:1', cueSectionId, 'Sales Quotes');
+    expect(result.ok).toBe(true);
+    // The new formId should be indexed against a freshly-created pageContextId
+    const newPage = repo.getByFormId('newList');
+    expect(newPage).toBeDefined();
+    expect(newPage!.pageContextId).not.toBe('pc:1');
+    expect(newPage!.pageContextId.startsWith('session:page:cue:')).toBe(true);
+  });
 });
