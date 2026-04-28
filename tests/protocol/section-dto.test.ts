@@ -194,6 +194,61 @@ describe('buildSection', () => {
   });
 });
 
+describe('buildSection cues projection', () => {
+  it('subpage section with stackgc populates Section.cues', () => {
+    const childTree = {
+      t: 'lf', ServerId: 'cardPart', PageType: 3, Caption: 'Activities',
+      Children: [{
+        t: 'stackgc', Caption: 'Ongoing Sales', DesignName: 'OngoingSales',
+        Children: [{
+          t: 'gc', MappingHint: 'STACKGROUP',
+          Children: [
+            { t: 'stackc', Caption: 'Sales Quotes', StringValue: '5', HasAction: true, ColumnBinder: { Name: 'a' }, Synopsis: 'Quotes pending' },
+            { t: 'stackc', Caption: 'Sales Orders', StringValue: '12', HasAction: true, ColumnBinder: { Name: 'b' } },
+          ],
+        }],
+      }],
+    };
+    const childForm = makeFormState('cardPart', childTree);
+    const ctx = makeCtx({
+      rootFormId: 'root',
+      forms: new Map([
+        ['root', makeFormState('root', { t: 'lf', ServerId: 'root', PageType: 2, Children: [] })],
+        ['cardPart', childForm],
+      ]),
+      sections: new Map<string, SectionDescriptor>([
+        ['header', { sectionId: 'header', kind: 'header', caption: 'Role Center', formId: 'root', valid: true }],
+        ['subpage:Activities', {
+          sectionId: 'subpage:Activities', kind: 'subpage',
+          caption: 'Activities', formId: 'cardPart', valid: true,
+        }],
+      ]),
+    });
+    const section = buildSection(ctx, 'subpage:Activities');
+    expect(section).not.toBeNull();
+    expect(section!.cues).toBeDefined();
+    expect(section!.cues).toHaveLength(2);
+    expect(section!.cues![0]).toMatchObject({
+      name: 'Sales Quotes', value: '5', groupCaption: 'Ongoing Sales',
+      synopsis: 'Quotes pending', hasAction: true,
+    });
+    expect(section!.cues![1]).toMatchObject({
+      name: 'Sales Orders', value: '12', groupCaption: 'Ongoing Sales', hasAction: true,
+    });
+    expect(section!.cues![1].synopsis).toBeUndefined();
+  });
+
+  it('header section without cuegroups omits cues', () => {
+    const ctx = makeCtx({
+      rootFormId: 'root',
+      forms: new Map([['root', makeFormState('root', { t: 'lf', ServerId: 'root', PageType: 0, Children: [{ t: 'sc', Caption: 'Name', StringValue: 'X', Visible: true }] })]]),
+      sections: new Map([['header', { sectionId: 'header', kind: 'header', caption: 'X', formId: 'root', valid: true }]]),
+    });
+    const section = buildSection(ctx, 'header');
+    expect(section!.cues).toBeUndefined();
+  });
+});
+
 describe('buildAllSections', () => {
   it('emits sections in canonical order: header, lines, subpages, factboxes', () => {
     const rootForm = makeFormState('root', { t: 'lf', ServerId: 'root', PageType: 5, Children: [] });
