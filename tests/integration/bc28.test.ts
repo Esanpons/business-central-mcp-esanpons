@@ -6,6 +6,7 @@ import { EventDecoder } from '../../src/protocol/event-decoder.js';
 import { InteractionEncoder } from '../../src/protocol/interaction-encoder.js';
 import { PageContextRepository } from '../../src/protocol/page-context-repo.js';
 import { derivePageState } from '../../src/protocol/types.js';
+import { repeaters } from '../../src/protocol/form-views.js';
 import { SessionFactory } from '../../src/session/session-factory.js';
 import { BCSession } from '../../src/session/bc-session.js';
 import { PageService } from '../../src/services/page-service.js';
@@ -62,19 +63,32 @@ describe('BC28 Compatibility (integration)', () => {
   it('opens Customer List (page 22) with fields and rows', async () => {
     const result = await pageService.openPage('22', { tenantId: BC28_CONFIG.tenantId });
     expect(isOk(result)).toBe(true);
-    const state = derivePageState(unwrap(result));
+    const ctx = unwrap(result);
+    const state = derivePageState(ctx);
+
+    const headerForm = ctx.forms.get(ctx.rootFormId);
+    expect(headerForm).toBeDefined();
+    const headerRepeaters = repeaters(headerForm!.root);
+    const primaryRepeater = headerRepeaters.values().next().value;
+    const repeaterRows = primaryRepeater
+      ? (headerForm!.rows.get(primaryRepeater.controlPath) ?? [])
+      : [];
 
     console.error('[BC28] Page 22:', {
       pageType: state.pageType,
       fields: state.controlTree.length,
       actions: state.actions.length,
-      rows: state.repeater?.rows.length ?? 0,
-      columns: state.repeater?.columns.length ?? 0,
+      rows: repeaterRows.length,
+      columns: primaryRepeater?.columns.length ?? 0,
     });
 
     expect(state.formId).toBeTruthy();
     expect(state.pageType).toBe('List');
-    expect(state.controlTree.length).toBeGreaterThan(0);
+    // Customer List is a List page -- its primary content is rows in a repeater,
+    // not card fields. Verify the page has at least one repeater section.
+    expect(headerRepeaters.size).toBeGreaterThan(0);
+    expect(primaryRepeater).toBeDefined();
+    expect(primaryRepeater!.columns.length).toBeGreaterThan(0);
   }, 30000);
 
   it('opens Customer Card (page 21) with fields', async () => {

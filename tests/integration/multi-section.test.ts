@@ -14,6 +14,7 @@ import { DataService } from '../../src/services/data-service.js';
 import { ActionService } from '../../src/services/action-service.js';
 import { isOk, unwrap } from '../../src/core/result.js';
 import { RespondDialogOperation } from '../../src/operations/respond-dialog.js';
+import { repeaters as treeRepeaters } from '../../src/protocol/form-views.js';
 import type { PageContext } from '../../src/protocol/page-context.js';
 import type { BCConfig } from '../../src/core/config.js';
 
@@ -213,7 +214,7 @@ describe.sequential('Multi-Section: Sales Order (page 42)', () => {
     const bookmark = rowsResult.value[0]!.bookmark;
     const linesSection = ctx.sections.get(linesSectionId)!;
     const linesForm = ctx.forms.get(linesSection.formId)!;
-    const repeater = linesForm.repeaters.values().next().value!;
+    const repeater = treeRepeaters(linesForm.root).values().next().value!;
 
     // Select the row first
     await session.invoke(
@@ -222,7 +223,7 @@ describe.sequential('Multi-Section: Sales Order (page 42)', () => {
     );
 
     // Find "No." column index
-    const noCol = repeater.columns.find((c: any) => c.caption === 'No.');
+    const noCol = repeater.columns.find((c: any) => c.properties?.caption === 'No.');
     expect(noCol).toBeDefined();
     const colIdx = noCol!.controlPath.match(/co\[(\d+)\]/)![1];
 
@@ -264,8 +265,8 @@ describe.sequential('Multi-Section: Sales Order (page 42)', () => {
 
     const linesSection = ctx.sections.get(linesSectionId)!;
     const linesForm = ctx.forms.get(linesSection.formId)!;
-    const repeater = linesForm.repeaters.values().next().value!;
-    const rowsBefore = repeater.rows.length;
+    const repeater = treeRepeaters(linesForm.root).values().next().value!;
+    const rowsBefore = (linesForm.rows.get(repeater.controlPath) ?? []).length;
     console.error('Lines before New:', rowsBefore);
 
     // New line: SystemAction 10 on repeater cr/c[0] with child formId
