@@ -405,3 +405,8 @@ function primaryRepeaterFromCtx(form: FormState): RepeaterState | null {
     currentBookmark: node.properties.bookmark ?? null,
   };
 }
+
+// Section DTO re-export. New code should import from `protocol/section-dto.js`
+// directly; this re-export keeps `protocol/types.js` as the single barrel for
+// MCP DTOs.
+export type { Section, SectionField, SectionAction, SectionRow } from './section-dto.js';
