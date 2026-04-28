@@ -1,0 +1,17 @@
+{
+  "capturedAt": "2026-04-28T10:40:43.736Z",
+  "query": "customer",
+  "formId": "259E",
+  "events": [
+    {
+      "type": "InvokeCompleted",
+      "sequenceNumber": 2,
+      "completedInteractions": [
+        {
+          "invocationId": "fec0e450-ef18-4be8-a6cd-28448d57af9a",
+          "durationMs": 0
+        }
+      ]
+    }
+  ]
+}
