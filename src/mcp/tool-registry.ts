@@ -54,15 +54,17 @@ export function buildToolRegistry(ops: Operations): ToolDefinition[] {
   return [
     {
       name: 'bc_open_page',
-      description: `Opens a Business Central page by its numeric page ID and returns its complete state as a list of sections. Each section has an id, kind (header / lines / factbox / subpage / requestPage), caption, and the appropriate content shape: card-style sections (header, factbox, requestPage) carry fields[] and (for header) actions[]; list-style sections (lines, subpages backed by a repeater) carry rows[] and totalRowCount. This is the entry point for all Business Central operations -- it returns a pageContextId that every other bc_ tool requires as input. Use bc_search_pages first if you do not know the page ID for an entity.
+      description: `Opens a Business Central page by its numeric page ID and returns its complete state as a list of sections. Each section has a sectionId, kind (header / lines / factbox / subpage / requestPage), caption, and the appropriate content shape. Card-shape sections (most headers, factboxes, requestPages) carry fields[] (and headers also carry actions[]). List-shape sections (lines, list-bodied headers, repeater subpages) carry rows[] and totalRowCount. The header section adapts to its page: it is card-shape on Card pages and list-shape on List pages -- the kind stays "header" either way for path stability. This is the entry point for all Business Central operations -- it returns a pageContextId that every other bc_ tool requires as input. Use bc_search_pages first if you do not know the page ID for an entity.
 
-Card pages (single-record views like Customer Card=21) return one header section plus any FactBox sections attached to the page. List pages (Customer List=22) return a header section that is itself list-shaped (rows[] populated). Document pages (Sales Order=42) return a header card-section, a "lines" list-section with the document lines, and any FactBoxes.
+Card pages (single-record views like Customer Card=21) return one header (card-shape) plus any FactBox sections attached to the page. List pages (Customer List=22) return a header (list-shape, rows[] populated). Document pages (Sales Order=42) return a header (card-shape), a "lines" list-shape section with the document lines, and any FactBoxes.
 
 Typical workflow: bc_open_page -> bc_read_data (refresh / filter / paginate a section) -> bc_write_data (edit fields in any section) -> bc_execute_action (post / release / delete) -> bc_close_page. Always call bc_close_page when done. Do NOT call this if the page is already open -- reuse the existing pageContextId.
 
 Optional bookmark parameter opens a Card page to a specific record. Bookmarks come from list rows in any prior section.
 
-Example: { "pageId": 22 } opens Customer List. Returned sections: [{sectionId:"header", kind:"header", rows:[...], fields:undefined, actions:[...]}]. { "pageId": 21, "bookmark": "..." } opens Customer Card. Returned sections include the header card plus FactBoxes (e.g. {sectionId:"factbox:Customer Statistics", kind:"factbox", fields:[...]}).`,
+Examples:
+- { "pageId": 22 } opens Customer List. Sections: [{ "sectionId": "header", "kind": "header", "rows": [...], "actions": [...] }] (no fields[] on a list-shape header).
+- { "pageId": 21, "bookmark": "..." } opens Customer Card. Sections include the header card plus FactBoxes (e.g. { "sectionId": "factbox:Customer Statistics", "kind": "factbox", "fields": [...] }).`,
       inputSchema: toMcpJsonSchema(OpenPageSchema),
       zodSchema: OpenPageSchema,
       execute: (input) => ops.openPage.execute(input as Parameters<typeof ops.openPage.execute>[0]),
@@ -75,15 +77,15 @@ Pass section: "header" (default) to refresh the page's header. Pass section: "li
 
 Filtering applies to list-shape sections only. Pass an array of { column, value }; values use BC filter syntax (exact "10000", ranges "10000..20000", wildcards "*consulting*", expressions ">1000"). Multiple filters combine with AND.
 
-Column selection: pass columns: ["No.", "Name"] to limit the cells in each row (or fields[] entries on a card section).
+Column selection: pass columns: ["No.", "Name"] to limit the cells in each row, or the fields[] entries on a card section.
 
 Range slicing: { offset, limit } returns rows[offset..offset+limit] for list sections. Use with totalRowCount for pagination.
 
 Examples:
-- Refresh header: { pageContextId: "abc" }
-- Filter customer list: { pageContextId: "abc", filters: [{ column: "City", value: "London" }] }
-- Read sales order lines: { pageContextId: "abc", section: "lines" }
-- Refresh a FactBox: { pageContextId: "abc", section: "factbox:Customer Statistics" }`,
+- Refresh header: { "pageContextId": "abc" }
+- Filter customer list: { "pageContextId": "abc", "filters": [{ "column": "City", "value": "London" }] }
+- Read sales order lines: { "pageContextId": "abc", "section": "lines" }
+- Refresh a FactBox: { "pageContextId": "abc", "section": "factbox:Customer Statistics" }`,
       inputSchema: toMcpJsonSchema(ReadDataSchema),
       zodSchema: ReadDataSchema,
       execute: (input) => ops.readData.execute(input as Parameters<typeof ops.readData.execute>[0]),
