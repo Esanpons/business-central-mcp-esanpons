@@ -17,7 +17,7 @@ import {
   groupVisibility as treeGroupVisibility,
 } from './form-views.js';
 import { isEffectivelyVisible } from './visibility.js';
-import { mapRowCellKeys } from '../services/data-service.js';
+import { mapRowCellKeys } from './row-mapping.js';
 import type { ActionNode } from './form-node.js';
 import type { PageContext } from './page-context.js';
 
