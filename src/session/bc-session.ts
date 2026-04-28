@@ -122,7 +122,7 @@ export class BCSession {
     const effectiveTimeout = timeoutMs ?? this.timeoutMs;
     try {
       return await this.withTimeout(
-        this.enqueue(() => this.invokeInternal(interaction, expect, effectiveTimeout)),
+        this.enqueue(() => this.invokeUnqueued(interaction, expect, effectiveTimeout)),
         effectiveTimeout + 5000, // Session-level timeout is 5s longer than RPC timeout
         `Invoke(${interaction.type})`,
       );
@@ -149,7 +149,16 @@ export class BCSession {
     });
   }
 
-  private async invokeInternal(
+  /**
+   * Queue-bypassing invoke. Performs the actual encode -> sendRpc -> decode
+   * -> QUIESCENCE wait -> async-event merge cycle without enqueuing onto
+   * `this.queue`. This is intended for callers that already run inside an
+   * enqueued task (e.g. `reconcileModalStack`, called from
+   * `invokeUnqueued`'s own modal-violation retry path). Callers that are
+   * NOT already serialized must use the public `invoke` instead -- BC's
+   * protocol is stateful and concurrent sends corrupt sequence numbers.
+   */
+  private async invokeUnqueued(
     interaction: BCInteraction,
     expect: EventPredicate,
     timeoutMs: number,
@@ -206,12 +215,16 @@ export class BCSession {
           return rpcResult;
         }
         if (msg.includes('LogicalModalityViolationException')) {
-          // Stale modal state -- try to reconcile, then retry the original
-          // interaction once. The reconciler walks the modal stack top-down
-          // sending Abort. If it succeeds, BC's FormClosed events arrive in
-          // the reconcile invokes' responses (already merged into our state
-          // via updateFormTracking). On retry success we fall through to the
-          // normal decode path with the retry's events appended.
+          // Stale modal state -- reconcile, then retry the original interaction
+          // once. reconcileModalStack runs inside this enqueued task via
+          // invokeUnqueued (queue-bypassing) to avoid a self-deadlock: the
+          // outer enqueued task cannot resolve until reconcile finishes, and
+          // a queued reconcile sub-invoke cannot start until the outer task
+          // resolves. Each sub-invoke decodes its own response and updates
+          // _openFormIds / modalStack via updateFormTracking. The retry's
+          // events are merged into allEvents below so the caller's `expect`
+          // predicate observes them alongside any FormClosed events emitted
+          // by the reconcile sub-invokes.
           this.logger.warn(`LogicalModalityViolation detected, reconciling modal stack (size=${this.modalStack.size})`);
           const reconcile = await this.reconcileModalStack();
           if (isErr(reconcile)) {
@@ -345,7 +358,10 @@ export class BCSession {
    * to make progress.
    *
    * Used to clear stale modal state that produced a
-   * `LogicalModalityViolationException`.
+   * `LogicalModalityViolationException`. This method MUST be called from
+   * within an already-enqueued task (the modal-violation retry path inside
+   * `invokeUnqueued`); it uses `invokeUnqueued` for sub-invokes to avoid
+   * deadlocking on its own outer task in the promise queue.
    *
    * Reference: decompiled `LogicalModalityVerifier.IsUnderModalForm`, which
    * inspects `LogicalDispatcher.Frames`. SystemAction.Abort=320 closes the
@@ -355,9 +371,10 @@ export class BCSession {
     const MAX_ATTEMPTS = 10;
     for (let i = 0; i < MAX_ATTEMPTS && this.modalStack.size > 0; i++) {
       const top = this.modalStack.peek()!;
-      const result = await this.invoke(
+      const result = await this.invokeUnqueued(
         { type: 'InvokeAction', formId: top, controlPath: 'server:', systemAction: 320 },
         (event) => event.type === 'InvokeCompleted',
+        this.timeoutMs,
       );
       if (isErr(result)) {
         return err(new ProtocolError(`reconcileModalStack: Abort on formId=${top} failed: ${result.error.message}`));

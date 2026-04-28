@@ -119,8 +119,10 @@ describe('BCSession.reconcileModalStack', () => {
     ]);
     expect(s.stack()).toEqual(['M1', 'M2']);
 
-    // Stub invoke -- simulate BC closing the modal we just aborted.
-    (s as any).invoke = vi.fn(async (interaction: any) => {
+    // Stub invokeUnqueued -- simulate BC closing the modal we just aborted.
+    // reconcileModalStack uses invokeUnqueued (queue-bypassing) because it
+    // runs inside an already-enqueued task.
+    (s as any).invokeUnqueued = vi.fn(async (interaction: any) => {
       s.feed([{ type: 'FormClosed', formId: interaction.formId }]);
       return ok([]);
     });
@@ -129,7 +131,7 @@ describe('BCSession.reconcileModalStack', () => {
     expect(result.ok).toBe(true);
     expect(s.stack()).toEqual([]);
 
-    const calls = (s as any).invoke.mock.calls.map((c: any[]) => c[0]);
+    const calls = (s as any).invokeUnqueued.mock.calls.map((c: any[]) => c[0]);
     expect(calls.map((c: any) => c.formId)).toEqual(['M2', 'M1']);
     expect(calls.every((c: any) => c.systemAction === 320)).toBe(true);
   });
@@ -137,7 +139,7 @@ describe('BCSession.reconcileModalStack', () => {
   it('returns error if Abort itself fails', async () => {
     const s = new ReconcileProbe();
     s.feed([{ type: 'DialogOpened', formId: 'M1', controlTree: {} }]);
-    (s as any).invoke = vi.fn(async () => ({ ok: false, error: { message: 'BOOM' } }));
+    (s as any).invokeUnqueued = vi.fn(async () => ({ ok: false, error: { message: 'BOOM' } }));
     const result = await s.reconcile();
     expect(result.ok).toBe(false);
   });
@@ -145,7 +147,7 @@ describe('BCSession.reconcileModalStack', () => {
   it('force-pops if BC does NOT emit FormClosed for the aborted modal', async () => {
     const s = new ReconcileProbe();
     s.feed([{ type: 'DialogOpened', formId: 'M1', controlTree: {} }]);
-    (s as any).invoke = vi.fn(async () => ok([])); // Abort succeeds but BC doesn't close
+    (s as any).invokeUnqueued = vi.fn(async () => ok([])); // Abort succeeds but BC doesn't close
     const result = await s.reconcile();
     expect(result.ok).toBe(true);
     expect(s.stack()).toEqual([]); // force-popped
@@ -153,10 +155,10 @@ describe('BCSession.reconcileModalStack', () => {
 
   it('returns ok with empty stack', async () => {
     const s = new ReconcileProbe();
-    (s as any).invoke = vi.fn();
+    (s as any).invokeUnqueued = vi.fn();
     const result = await s.reconcile();
     expect(result.ok).toBe(true);
-    expect((s as any).invoke).not.toHaveBeenCalled();
+    expect((s as any).invokeUnqueued).not.toHaveBeenCalled();
   });
 });
 
@@ -242,4 +244,54 @@ describe('BCSession invoke with auto-recovery', () => {
     expect(result.ok).toBe(false);
     expect((s as any).reconcileModalStack).not.toHaveBeenCalled();
   });
+});
+
+describe('BCSession invoke + reconcile end-to-end (no stubs)', () => {
+  it('completes recovery without deadlocking when reconcileModalStack runs for real', async () => {
+    const s = new ReconcileProbe();
+    s.feed([{ type: 'DialogOpened', formId: 'M1', controlTree: {} }]);
+
+    let sendCount = 0;
+    (s as any).ws.sendRpc = vi.fn(async (_method: string, _params: unknown[]) => {
+      sendCount += 1;
+      if (sendCount === 1) {
+        // First send: original interaction hits modal violation
+        return { ok: false, error: { message: 'LogicalModalityViolationException: stale dialog' } };
+      }
+      if (sendCount === 2) {
+        // Second send: the Abort from reconcileModalStack succeeds and BC
+        // echoes a FormClosed for M1 (decoder injects it -- see below).
+        return { ok: true, value: [] };
+      }
+      // Third send: the retry of the original interaction.
+      return { ok: true, value: [] };
+    });
+
+    // Decoder fakes a FormClosed event ONLY on the second sendRpc (the Abort
+    // response) so reconcileModalStack pops M1. The first call doesn't reach
+    // decode (sendRpc errored), and the third call doesn't need any events.
+    (s as any).decoder.decode = vi.fn((_data: unknown) => {
+      const decoded: any[] = [];
+      if (sendCount === 2) {
+        decoded.push({ type: 'FormClosed', formId: 'M1' });
+      }
+      return decoded;
+    });
+
+    // Race the real invoke path against a 5s deadlock-detector. If the
+    // promise queue self-deadlocks, the race rejects.
+    const result = await Promise.race([
+      s.invoke(
+        { type: 'OpenForm', query: 'page=22&tenant=default' } as any,
+        () => true,
+      ),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('DEADLOCK: invoke did not complete within 5s')), 5000),
+      ),
+    ]);
+
+    expect(result.ok).toBe(true);
+    expect(sendCount).toBe(3); // original violation + abort + retry
+    expect(s.stack()).toEqual([]);
+  }, 10000);
 });

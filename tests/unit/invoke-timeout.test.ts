@@ -115,7 +115,7 @@ describe('BCSession invoke timeout', () => {
 
     const resultPromise = session.invoke(dummyInteraction, dummyExpect);
 
-    // Advance past the quiescence window (150ms) so invokeInternal completes
+    // Advance past the quiescence window (150ms) so invokeUnqueued completes
     await vi.advanceTimersByTimeAsync(200);
 
     const result = await resultPromise;
