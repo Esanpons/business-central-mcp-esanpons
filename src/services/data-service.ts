@@ -6,24 +6,9 @@ import type { BCEvent, RepeaterRow, RepeaterColumn, ControlField, TabGroup, Save
 import type { Logger } from '../core/logger.js';
 import { resolveSection } from '../protocol/section-resolver.js';
 import { fields as treeFields, tabs as treeTabs } from '../protocol/form-views.js';
-import { findByControlPath, ancestorGroupPaths } from '../protocol/form-tree-walk.js';
+import { findByControlPath } from '../protocol/form-tree-walk.js';
 import { isFieldNode, type FieldNode, type FormNode, type RepeaterNode } from '../protocol/form-node.js';
-
-function fieldNodeToControlField(root: FormNode, f: FieldNode): ControlField {
-  return {
-    controlPath: f.controlPath,
-    caption: f.properties.caption ?? '',
-    type: f.type,
-    editable: f.properties.editable ?? false,
-    visible: f.properties.visible ?? true,
-    stringValue: f.properties.stringValue,
-    value: f.properties.objectValue ?? f.properties.stringValue,
-    columnBinderName: f.columnBinder?.name,
-    ...(f.hasLookup ? { isLookup: true } : {}),
-    ...(f.properties.showMandatory ? { showMandatory: true } : {}),
-    ancestorGroupPaths: ancestorGroupPaths(root, f.controlPath),
-  };
-}
+import { fieldNodeToControlField } from '../protocol/mcp-adapters.js';
 
 export interface FieldWriteResult {
   fieldName: string;

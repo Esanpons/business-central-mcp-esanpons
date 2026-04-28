@@ -3,8 +3,7 @@ import type { BCEvent, DialogOpenedEvent, ControlField } from './types.js';
 import type { PageContext } from './page-context.js';
 import { buildFormTree } from './form-tree-builder.js';
 import { fields as treeFields } from './form-views.js';
-import { ancestorGroupPaths } from './form-tree-walk.js';
-import type { FieldNode, FormNode } from './form-node.js';
+import { fieldNodeToControlField } from './mcp-adapters.js';
 
 /**
  * Shared envelope returned by all mutating operations (write-data, execute-action,
@@ -52,23 +51,6 @@ export function detectChangedSections(
   }
 
   return changedSections;
-}
-
-/** Map a FieldNode to the ControlField DTO expected by dialog callers. */
-function fieldNodeToControlField(root: FormNode, f: FieldNode): ControlField {
-  return {
-    controlPath: f.controlPath,
-    caption: f.properties.caption ?? '',
-    type: f.type,
-    editable: f.properties.editable ?? false,
-    visible: f.properties.visible ?? true,
-    stringValue: f.properties.stringValue,
-    value: f.properties.objectValue ?? f.properties.stringValue,
-    columnBinderName: f.columnBinder?.name,
-    ...(f.hasLookup ? { isLookup: true } : {}),
-    ...(f.properties.showMandatory ? { showMandatory: true } : {}),
-    ancestorGroupPaths: ancestorGroupPaths(root, f.controlPath),
-  };
 }
 
 /**

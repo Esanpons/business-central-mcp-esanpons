@@ -12,9 +12,8 @@ import { repeaters as treeRepeaters } from './form-views.js';
 export interface FormState {
   readonly formId: string;
   readonly parentFormId?: string;
-  /** Reactive control tree — mutated by FormProjection.apply via tree mutator.
-   * Source of truth for fields/actions/tabs/repeaters/groupVisibility (computed
-   * via form-views.ts). */
+  /** Reactive control tree — replaced (with structural sharing) by FormProjection.apply via the tree mutator.
+   * Source of truth for fields/actions/tabs/repeaters/groupVisibility (computed via form-views.ts). */
   readonly root: FormNode;
   /** Repeater rows keyed by repeater controlPath. */
   readonly rows: ReadonlyMap<string, readonly RepeaterRow[]>;
