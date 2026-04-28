@@ -11,9 +11,6 @@ import { isFieldNode, type FieldNode, type FormNode, type RepeaterNode } from '.
 import { fieldNodeToControlField } from '../protocol/mcp-adapters.js';
 import { mapRowCellKeys } from '../protocol/row-mapping.js';
 
-/** @internal Re-exported so existing service-level callers keep working. */
-export { mapRowCellKeys } from '../protocol/row-mapping.js';
-
 export interface FieldWriteResult {
   fieldName: string;
   controlPath: string;
