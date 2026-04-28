@@ -3,6 +3,7 @@ export interface BCConfig {
   username: string;
   password: string;
   tenantId: string;
+  profile: string;
   clientVersionString: string;
   serverMajor: number;
   timeoutMs: number;
@@ -72,6 +73,7 @@ export function loadConfig(): AppConfig {
       username: requireEnv('BC_USERNAME'),
       password: requireEnv('BC_PASSWORD'),
       tenantId: optionalEnv('BC_TENANT_ID', 'default'),
+      profile: optionalEnv('BC_PROFILE', ''),
       clientVersionString: optionalEnv('BC_CLIENT_VERSION', '27.0.0.0'),
       serverMajor: optionalEnvInt('BC_SERVER_MAJOR', 27),
       timeoutMs: optionalEnvInt('BC_TIMEOUT', 120000),

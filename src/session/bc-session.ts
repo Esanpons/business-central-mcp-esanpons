@@ -30,6 +30,7 @@ export class BCSession {
     private readonly logger: Logger,
     private readonly tenantId: string,
     private readonly timeoutMs: number = DEFAULT_TIMEOUT_MS,
+    private readonly profile: string = '',
   ) {}
 
   get openFormIds(): ReadonlySet<string> {
@@ -49,7 +50,7 @@ export class BCSession {
   }
 
   async initialize(tenantId: string): Promise<Result<BCEvent[], ProtocolError>> {
-    const openSessionCall = this.encoder.encodeOpenSession(tenantId, this.ws.spaInstanceId);
+    const openSessionCall = this.encoder.encodeOpenSession(tenantId, this.ws.spaInstanceId, this.profile);
 
     this.logger.debug('protocol', 'Sending OpenSession');
     const rpcResult = await this.ws.sendRpc(openSessionCall.method, openSessionCall.params, this.timeoutMs);
