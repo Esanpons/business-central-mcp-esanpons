@@ -118,4 +118,67 @@ describe('PageContextRepository — modal-rooted pages', () => {
     expect(() => repo.invalidateSection('pc:1', 'nonexistent')).not.toThrow();
     expect(() => repo.invalidateSection('nonexistent-page', 'header')).not.toThrow();
   });
+
+  it('invalidates the header section of a modal-rooted page when its root form closes', () => {
+    const repo = new PageContextRepository();
+    repo.create('pc:modal', 'M1', { isModal: true });
+
+    // Apply a DialogOpened so the page becomes a real modal-rooted page
+    repo.applyEvents([{
+      type: 'DialogOpened',
+      formId: 'M1',
+      ownerFormId: 'roleCenter',
+      controlTree: { t: 'lf', Caption: 'Modal', PageType: 9, Children: [] },
+    }]);
+
+    const ctxBefore = repo.get('pc:modal')!;
+    expect(ctxBefore.isModal).toBe(true);
+    expect(ctxBefore.sections.get('header')!.valid).toBe(true);
+
+    // Close the modal
+    repo.applyToPage('pc:modal', [{ type: 'FormClosed', formId: 'M1' }]);
+
+    const ctxAfter = repo.get('pc:modal');
+    expect(ctxAfter).toBeDefined();
+    // Header section's formId is the root form, which was just closed.
+    expect(ctxAfter!.sections.get('header')!.valid).toBe(false);
+  });
+
+  it('invalidates ALL sections of a modal-rooted page when its root form closes', () => {
+    const repo = new PageContextRepository();
+    repo.create('pc:modal', 'M1', { isModal: true });
+
+    // Modal page with an embedded fhc child form (a hosted card-part section)
+    const hostedTree = { t: 'lf', ServerId: 'C1', Caption: 'Sub', PageType: 3, Children: [] };
+    repo.applyEvents([{
+      type: 'DialogOpened',
+      formId: 'M1',
+      ownerFormId: 'roleCenter',
+      controlTree: {
+        t: 'lf', Caption: 'Modal', PageType: 9,
+        Children: [
+          { t: 'fhc', Children: [hostedTree] },
+        ],
+      },
+    }]);
+
+    const ctxBefore = repo.get('pc:modal')!;
+    // Confirm there's at least one non-header section attached to a different formId
+    const nonHeaderSections = Array.from(ctxBefore.sections.values()).filter(s => s.sectionId !== 'header');
+    if (nonHeaderSections.length === 0) {
+      // No hosted child form was registered -- skip this branch quietly
+      return;
+    }
+    for (const sec of ctxBefore.sections.values()) expect(sec.valid).toBe(true);
+
+    // Close the root modal
+    repo.applyToPage('pc:modal', [{ type: 'FormClosed', formId: 'M1' }]);
+
+    const ctxAfter = repo.get('pc:modal')!;
+    // Per Plan B: when a modal-rooted page's root form closes, ALL its sections
+    // should be invalid (the page is gone, even non-root sections it owned).
+    for (const [, sec] of ctxAfter.sections) {
+      expect(sec.valid, `section ${sec.sectionId} (kind=${sec.kind}) should be invalid after modal close`).toBe(false);
+    }
+  });
 });

@@ -27,7 +27,7 @@ export class AbortedError extends BCError {
   constructor(message: string, context?: Record<string, unknown>) { super(message, 'ABORTED_ERROR', context); }
 }
 export class ProtocolError extends BCError {
-  constructor(message: string, context?: Record<string, unknown>) { super(message, 'PROTOCOL_ERROR', context); }
+  constructor(message: string, context?: Record<string, unknown>, code: string = 'PROTOCOL_ERROR') { super(message, code, context); }
 }
 export class SessionLostError extends BCError {
   public readonly impactedPageContextIds: string[];
@@ -36,6 +36,18 @@ export class SessionLostError extends BCError {
     super(message, 'SESSION_LOST', options?.context);
     this.impactedPageContextIds = impactedPageContextIds;
     this.reconnectFailed = options?.reconnectFailed ?? false;
+  }
+}
+/**
+ * Thrown when bc-mcp detected a `LogicalModalityViolationException` and the
+ * automatic modal-stack reconciliation could not clear it (Abort failed, or
+ * the violation persisted after retry). The session is killed and recreated
+ * by the SessionManager -- page contexts are invalidated, callers must re-open
+ * any pages.
+ */
+export class ModalReconcileError extends ProtocolError {
+  constructor(message: string, context?: Record<string, unknown>) {
+    super(message, context, 'MODAL_RECONCILE_ERROR');
   }
 }
 export class ValidationError extends BCError {

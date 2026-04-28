@@ -1,12 +1,13 @@
 import { v4 as uuid } from 'uuid';
 import { ok, err, isOk, isErr, type Result } from '../core/result.js';
-import { ProtocolError, TimeoutError } from '../core/errors.js';
+import { ProtocolError, TimeoutError, ModalReconcileError } from '../core/errors.js';
 import type { BCWebSocket } from '../connection/bc-websocket.js';
 import type { BCEvent, BCInteraction, EventPredicate } from '../protocol/types.js';
 import { EventDecoder } from '../protocol/event-decoder.js';
 import { InteractionEncoder, type EncodeContext } from '../protocol/interaction-encoder.js';
 import { decompressPayload } from '../protocol/decompression.js';
 import type { Logger } from '../core/logger.js';
+import { ModalStack } from './modal-stack.js';
 
 const DEFAULT_TIMEOUT_MS = 30000;
 const QUIESCENCE_MS = 150; // Trailing window for async Message bursts
@@ -14,6 +15,7 @@ const QUIESCENCE_MS = 150; // Trailing window for async Message bursts
 export class BCSession {
   private queue: Promise<void> = Promise.resolve();
   private readonly _openFormIds = new Set<string>();
+  private readonly modalStack = new ModalStack();
   private dead = false;
 
   private sessionId = '';
@@ -120,7 +122,7 @@ export class BCSession {
     const effectiveTimeout = timeoutMs ?? this.timeoutMs;
     try {
       return await this.withTimeout(
-        this.enqueue(() => this.invokeInternal(interaction, expect, effectiveTimeout)),
+        this.enqueue(() => this.invokeUnqueued(interaction, expect, effectiveTimeout)),
         effectiveTimeout + 5000, // Session-level timeout is 5s longer than RPC timeout
         `Invoke(${interaction.type})`,
       );
@@ -147,7 +149,16 @@ export class BCSession {
     });
   }
 
-  private async invokeInternal(
+  /**
+   * Queue-bypassing invoke. Performs the actual encode -> sendRpc -> decode
+   * -> QUIESCENCE wait -> async-event merge cycle without enqueuing onto
+   * `this.queue`. This is intended for callers that already run inside an
+   * enqueued task (e.g. `reconcileModalStack`, called from
+   * `invokeUnqueued`'s own modal-violation retry path). Callers that are
+   * NOT already serialized must use the public `invoke` instead -- BC's
+   * protocol is stateful and concurrent sends corrupt sequence numbers.
+   */
+  private async invokeUnqueued(
     interaction: BCInteraction,
     expect: EventPredicate,
     timeoutMs: number,
@@ -198,20 +209,61 @@ export class BCSession {
       // Send and wait for synchronous response
       const rpcResult = await this.ws.sendRpc(encoded.method, encoded.params, timeoutMs);
       if (isErr(rpcResult)) {
-        // Check for fatal session errors:
-        // - InvalidSessionException in the message text
-        // - JSON-RPC error code 1 (InvalidSession) regardless of exception type
         const msg = rpcResult.error.message;
         if (msg.includes('InvalidSessionException') || msg.includes('"code":1')) {
           this.markDead();
+          return rpcResult;
         }
-        return rpcResult;
-      }
-
-      // Decode synchronous response handlers
-      const responseData = rpcResult.value;
-      if (Array.isArray(responseData)) {
-        allEvents.push(...this.decoder.decode(responseData));
+        if (msg.includes('LogicalModalityViolationException')) {
+          // Stale modal state -- reconcile, then retry the original interaction
+          // once. reconcileModalStack runs inside this enqueued task via
+          // invokeUnqueued (queue-bypassing) to avoid a self-deadlock: the
+          // outer enqueued task cannot resolve until reconcile finishes, and
+          // a queued reconcile sub-invoke cannot start until the outer task
+          // resolves. Each sub-invoke decodes its own response and updates
+          // _openFormIds / modalStack via updateFormTracking. The retry's
+          // events are merged into allEvents below so the caller's `expect`
+          // predicate observes them alongside any FormClosed events emitted
+          // by the reconcile sub-invokes.
+          this.logger.warn(`LogicalModalityViolation detected, reconciling modal stack (size=${this.modalStack.size})`);
+          const reconcile = await this.reconcileModalStack();
+          if (isErr(reconcile)) {
+            this.markDead();
+            return err(new ModalReconcileError(`Modal reconciliation failed: ${reconcile.error.message}`, { originalError: msg }));
+          }
+          // Re-encode -- sequence numbers / openFormIds may have advanced.
+          const retryContext: EncodeContext = {
+            callbackId,
+            sequenceNo: this.ws.nextSequenceNo,
+            lastClientAckSequenceNumber: this.ws.lastClientAckSequenceNumber,
+            openFormIds: this._openFormIds,
+            session: {
+              sessionId: this.sessionId,
+              sessionKey: this.sessionKey,
+              company: this.company,
+              tenantId: this.tenantId,
+              spaInstanceId: this.ws.spaInstanceId,
+            },
+          };
+          const retryEncoded = this.encoder.encode(interaction, retryContext);
+          const retryRpc = await this.ws.sendRpc(retryEncoded.method, retryEncoded.params, timeoutMs);
+          if (isErr(retryRpc)) {
+            this.markDead();
+            return err(new ModalReconcileError(`Retry after modal reconcile still failed: ${retryRpc.error.message}`, { originalError: msg }));
+          }
+          if (Array.isArray(retryRpc.value)) {
+            allEvents.push(...this.decoder.decode(retryRpc.value));
+          }
+          // Fall through to the normal post-success path
+        } else {
+          return rpcResult;
+        }
+      } else {
+        // Normal success path
+        const responseData = rpcResult.value;
+        if (Array.isArray(responseData)) {
+          allEvents.push(...this.decoder.decode(responseData));
+        }
       }
 
       // Quiescence window — wait for trailing async Messages
@@ -265,8 +317,17 @@ export class BCSession {
 
   private updateFormTracking(events: BCEvent[]): void {
     for (const event of events) {
-      if ((event.type === 'FormCreated' || event.type === 'DialogOpened') && event.formId) {
+      if (event.type === 'FormCreated' && event.formId) {
         this._openFormIds.add(event.formId);
+        // Non-modal -- do not push onto modalStack
+      }
+      if (event.type === 'DialogOpened' && event.formId) {
+        this._openFormIds.add(event.formId);
+        this.modalStack.push(event.formId);
+      }
+      if (event.type === 'FormClosed' && event.formId) {
+        this._openFormIds.delete(event.formId);
+        this.modalStack.remove(event.formId);
       }
     }
   }
@@ -277,10 +338,66 @@ export class BCSession {
 
   removeOpenForm(formId: string): void {
     this._openFormIds.delete(formId);
+    this.modalStack.remove(formId);
+  }
+
+  /** Test seam: snapshot of the current modal stack (top-most last). */
+  modalStackSnapshot(): string[] {
+    return this.modalStack.snapshot();
   }
 
   markDead(): void {
     this.dead = true;
+  }
+
+  /**
+   * Walk the modal stack from top to bottom, sending Abort (SystemAction=320)
+   * to each modal until the stack is empty or an Abort fails. After each
+   * successful Abort, BC's FormClosed event normally pops the stack via
+   * updateFormTracking. If FormClosed does not arrive, the loop force-pops
+   * to make progress.
+   *
+   * Used to clear stale modal state that produced a
+   * `LogicalModalityViolationException`. Calls `invokeUnqueued` directly
+   * (queue-bypassing) so it works when triggered from inside the modal-violation
+   * retry path in `invokeUnqueued` itself — calling `invoke` from there would
+   * self-deadlock on the promise queue. External callers may invoke it
+   * outside the queue; in that case behaviour is well-defined as long as no
+   * other invoke is in flight on the same session (BC's wire protocol is
+   * stateful and concurrent sends corrupt sequence numbers).
+   *
+   * Reference: decompiled `LogicalModalityVerifier.IsUnderModalForm`, which
+   * inspects `LogicalDispatcher.Frames`. SystemAction.Abort=320 closes the
+   * topmost frame's ModalForm.
+   */
+  async reconcileModalStack(): Promise<Result<void, ProtocolError>> {
+    const MAX_ATTEMPTS = 10;
+    for (let i = 0; i < MAX_ATTEMPTS && this.modalStack.size > 0; i++) {
+      const top = this.modalStack.peek()!;
+      const result = await this.invokeUnqueued(
+        { type: 'InvokeAction', formId: top, controlPath: 'server:', systemAction: 320 },
+        (event) => event.type === 'InvokeCompleted',
+        this.timeoutMs,
+      );
+      if (isErr(result)) {
+        return err(new ProtocolError(`reconcileModalStack: Abort on formId=${top} failed: ${result.error.message}`));
+      }
+      // If BC didn't emit FormClosed for this formId, force-pop to make progress.
+      // Live observation (BC28): confirm dialogs do NOT emit FormClosed on
+      // Abort=320 against controlPath:'server:'. The local stack is force-popped
+      // here for client-state consistency, but BC may still consider the
+      // dialog open server-side -- in that case the next invoke triggers
+      // another LogicalModalityViolation and falls back to session reset.
+      if (this.modalStack.peek() === top) {
+        this.logger.warn(`reconcileModalStack: BC did not emit FormClosed for formId=${top} after Abort -- force-popping local stack (server-side dialog may still be open)`);
+        this.modalStack.pop();
+        this._openFormIds.delete(top);
+      }
+    }
+    if (this.modalStack.size > 0) {
+      return err(new ProtocolError(`reconcileModalStack: stack still has ${this.modalStack.size} entries after ${MAX_ATTEMPTS} attempts`));
+    }
+    return ok(undefined);
   }
 
   /**
