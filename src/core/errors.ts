@@ -38,6 +38,18 @@ export class SessionLostError extends BCError {
     this.reconnectFailed = options?.reconnectFailed ?? false;
   }
 }
+/**
+ * Thrown when bc-mcp detected a `LogicalModalityViolationException` and the
+ * automatic modal-stack reconciliation could not clear it (Abort failed, or
+ * the violation persisted after retry). The session is killed and recreated
+ * by the SessionManager -- page contexts are invalidated, callers must re-open
+ * any pages.
+ */
+export class ModalReconcileError extends BCError {
+  constructor(message: string, context?: Record<string, unknown>) {
+    super(message, 'MODAL_RECONCILE_ERROR', context);
+  }
+}
 export class ValidationError extends BCError {
   constructor(message: string, context?: Record<string, unknown>) { super(message, 'VALIDATION_ERROR', context); }
 }
