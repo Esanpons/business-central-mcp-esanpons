@@ -39,13 +39,55 @@ layout {
 }
 ```
 
-**Workaround**
+**Status (resolved 2026-04-28)**
 
-Open the underlying list page that the cue's `OnDrillDown` would have opened (e.g. `CDO Queue Entry` = page 6175297) directly via `bc_open_page`. The data is reachable; the cue tile aggregation is not.
+bc-mcp now models cuegroups as a section-level `cues[]` projection. Open the
+host Role Center via `bc_open_page` and each hosted CardPart appears as a
+`subpage` (or `factbox` — BC's `IsSubForm=false / IsPart=true` classification)
+section, with any cuegroup tiles surfaced as `section.cues[]`. Drill down via
+`bc_execute_action { section, cue }` which sends `SystemAction.DrillDown=120`
+against the cue's controlPath and returns the new pageContextId in
+`openedPages`.
 
-**Fix candidate**
+**Wire format finding (verified live, BC28 BUSINESS MANAGER profile):**
 
-Extend the page-payload parser to walk into `cuegroup` containers and either (a) emit each cue as a synthetic field with its computed value, or (b) emit each cue as an action whose drill-down opens the target list. Check `src/operations/open-page.ts` (or wherever Card layout flattening lives).
+Cuegroups arrive as a NEW wire type `stackgc` (NOT a generic `gc` with a
+mapping hint). Children are `stackc` cue tiles inside an inner
+`gc { MappingHint: 'STACKGROUP' }`. Cue values arrive via PropertyChanged
+events AFTER `LoadForm(loadData:true)`, NOT in the initial FormCreated. BC's
+default Role Center hosts 14 CardParts, 9 of which carry cues (50 tiles
+total: Activities=22, User Tasks=1, Job Queue Tasks=3, Email Status=3,
+Approvals=2, E-Document Activities=2, Intercompany=3, Self-Service=6,
+Shopify Activities=8).
+
+**Standalone CardPart symptom:**
+
+Opening page 6175308 standalone (the original limits.md repro) was
+**Continia/CDO-specific**. Live testing against default BC28 with pages 1310
+(Activities), 9061, 9152 all returned full content when opened standalone —
+the placeholder-shell stub is NOT a generic BC behavior. bc-mcp still detects
+this case defensively: `OpenPageOperation` returns a structured
+`CardPartStubError` (with `code: 'CARDPART_STUB'` and a `hostHint`) when a
+CardPart opens with zero captioned fields AND zero cue tiles, telling the
+caller to reach the part through its host page.
+
+**References**
+- `src/protocol/captures/cuegroup-rolecenter-2026-04-28.json` — frozen wire fixture (619 KB, 16 hosted CardParts)
+- `src/protocol/form-node.ts` — `StackGroupNode` and `CueFieldNode` first-class variants
+- `src/protocol/cue-detection.ts` — type-guard wrappers
+- `src/protocol/form-views.ts` — `cues(root)` memoised view
+- `src/protocol/section-dto.ts` — `SectionCue` DTO + `Section.cues`
+- `src/services/page-service.ts` — auto-load Role Center hosted CardParts (LoadForm `openForm:true` + Refresh)
+- `src/services/action-service.ts` — `executeOnCue` with new-pcId registration
+- `src/operations/open-page.ts` — `CardPartStubError` emission
+- `tests/integration/role-center.test.ts` — 4-test live verification
+
+**Original repro (Continia/CDO-specific)**
+
+Page 6175308 `CDO Document Output Queues`. Opening this standalone on a
+Continia-installed env returns the placeholder shell. Now mitigated by
+`CardPartStubError`; the caller is told to open the host page (Continia's
+Document Output Role Center) instead.
 
 ## 2. FactBox parts on a parent page are invisible to `bc_open_page` / `bc_read_data`
 
