@@ -299,6 +299,17 @@ export class PageContextRepository {
     });
   }
 
+  /** Mark a section as invalid (no longer surfaced via buildSection / buildAllSections). */
+  invalidateSection(pageContextId: string, sectionId: string): void {
+    const page = this.pages.get(pageContextId);
+    if (!page) return;
+    const old = page.sections.get(sectionId);
+    if (!old || !old.valid) return;
+    const sections = new Map(page.sections);
+    sections.set(sectionId, { ...old, valid: false });
+    this.pages.set(pageContextId, { ...page, sections });
+  }
+
   private markFormClosed(pcId: string, formId: string): void {
     const page = this.pages.get(pcId);
     if (!page) return;

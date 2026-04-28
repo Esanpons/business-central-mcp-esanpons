@@ -8,7 +8,7 @@ import type {
   BCEvent, OpenFormInteraction, LoadFormInteraction, CloseFormInteraction, InvokeActionInteraction, SetCurrentRowInteraction,
 } from '../protocol/types.js';
 import { buildFormTree } from '../protocol/form-tree-builder.js';
-import { repeaters as treeRepeaters } from '../protocol/form-views.js';
+import { fields as treeFields, repeaters as treeRepeaters } from '../protocol/form-views.js';
 import { walkTree } from '../protocol/form-tree-walk.js';
 import { isFormHostNode, isGroupNode, isLogicalFormNode } from '../protocol/form-node.js';
 import type { Logger } from '../core/logger.js';
@@ -235,6 +235,22 @@ export class PageService {
     // parent repeater. Without this, factbox forms have field metadata but empty values.
     // Verified from decompiled WebLogicalFormObserver.cs and live WebSocket capture.
     await this.triggerFactboxRefresh(pageContextId);
+
+    // After factbox refresh: any factbox section whose form has no captioned
+    // fields is dead (BC returned a stub). Mark it invalid so Section DTO
+    // builders skip it.
+    const finalCtx = this.repo.get(pageContextId);
+    if (finalCtx) {
+      for (const [sectionId, sec] of finalCtx.sections) {
+        if (sec.kind !== 'factbox') continue;
+        const f = finalCtx.forms.get(sec.formId);
+        if (!f) continue;
+        const captioned = treeFields(f.root).filter(fn => fn.properties.caption);
+        if (captioned.length === 0) {
+          this.repo.invalidateSection(pageContextId, sectionId);
+        }
+      }
+    }
   }
 
   private async triggerFactboxRefresh(pageContextId: string): Promise<void> {
