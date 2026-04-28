@@ -23,6 +23,7 @@ import { RespondDialogOperation } from '../../src/operations/respond-dialog.js';
 import type { PageContext } from '../../src/protocol/page-context.js';
 import type { BCEvent } from '../../src/protocol/types.js';
 import { detectDialogs, detectChangedSections } from '../../src/protocol/mutation-result.js';
+import { actions as treeActions, repeaters as treeRepeaters } from '../../src/protocol/form-views.js';
 import { isOk, isErr, unwrap } from '../../src/core/result.js';
 
 dotenvConfig();
@@ -129,14 +130,17 @@ describe.sequential('Test 3.1: Post Sales Order', () => {
     const headerForm = listCtx.forms.get(headerSection!.formId);
     expect(headerForm).toBeDefined();
 
-    const repeater = headerForm!.repeaters.values().next().value;
-    if (!repeater || repeater.rows.length === 0) {
+    const repeater = treeRepeaters(headerForm!.root).values().next().value;
+    const repeaterRows = repeater
+      ? (headerForm!.rows.get(repeater.controlPath) ?? [])
+      : [];
+    if (!repeater || repeaterRows.length === 0) {
       console.error('[3.1] No Sales Orders found in list -- skipping Post test');
       await h.closeAndUntrack(listCtx.pageContextId);
       return;
     }
 
-    const firstBookmark = repeater.rows[0]!.bookmark;
+    const firstBookmark = repeaterRows[0]!.bookmark;
     console.error(`[3.1] First SO bookmark: "${firstBookmark}"`);
 
     // Instead of drilling down, open page 42 directly (simpler, avoids drill-down complexity)
@@ -154,24 +158,27 @@ describe.sequential('Test 3.1: Post Sales Order', () => {
     // Step 3: List available actions to find Post-related ones
     const headerForm42 = cardCtx.forms.get(cardCtx.rootFormId);
     expect(headerForm42).toBeDefined();
-    const actions = headerForm42!.actions.filter(a => a.visible && a.enabled);
+    const actions = treeActions(headerForm42!.root).filter(
+      a => (a.properties.visible ?? true) && (a.properties.enabled ?? true)
+    );
     const postActions = actions.filter(a =>
-      a.caption.toLowerCase().includes('post')
+      (a.properties.caption ?? '').toLowerCase().includes('post')
     );
 
     console.error(`[3.1] Total visible+enabled actions: ${actions.length}`);
-    console.error(`[3.1] Post-related actions: ${postActions.map(a => `"${a.caption}"`).join(', ') || 'NONE'}`);
+    console.error(`[3.1] Post-related actions: ${postActions.map(a => `"${a.properties.caption ?? ''}"`).join(', ') || 'NONE'}`);
 
     // Log all action names for diagnostic purposes
     for (const a of actions.slice(0, 30)) {
-      console.error(`[3.1]   action: "${a.caption}" systemAction=${a.systemAction} path=${a.controlPath}`);
+      console.error(`[3.1]   action: "${a.properties.caption ?? ''}" systemAction=${a.systemAction} path=${a.controlPath}`);
     }
 
     // Step 4: Try executing the "Post..." action (or any Post variant)
     // On a blank SO, this should trigger a validation dialog (no lines, no customer, etc.)
-    const postAction = postActions.find(a =>
-      a.caption === 'Post...' || a.caption === 'P&ost...' || a.caption.startsWith('Post')
-    );
+    const postAction = postActions.find(a => {
+      const caption = a.properties.caption ?? '';
+      return caption === 'Post...' || caption === 'P&ost...' || caption.startsWith('Post');
+    });
 
     if (!postAction) {
       console.error('[3.1] No Post action found -- documenting available actions and skipping');
@@ -179,8 +186,9 @@ describe.sequential('Test 3.1: Post Sales Order', () => {
       return;
     }
 
-    console.error(`[3.1] Executing action: "${postAction.caption}"...`);
-    const postResult = await h.actionService.executeAction(pageContextId, postAction.caption);
+    const postCaption = postAction.properties.caption ?? '';
+    console.error(`[3.1] Executing action: "${postCaption}"...`);
+    const postResult = await h.actionService.executeAction(pageContextId, postCaption);
 
     if (isOk(postResult)) {
       const ar = unwrap(postResult);
@@ -255,12 +263,12 @@ describe.sequential('Test 3.3: Approval Workflows', () => {
     for (const [sectionId, section] of ctx.sections) {
       const form = ctx.forms.get(section.formId);
       if (!form) continue;
-      for (const action of form.actions) {
+      for (const action of treeActions(form.root)) {
         allActions.push({
-          caption: action.caption,
+          caption: action.properties.caption ?? '',
           section: sectionId,
-          enabled: action.enabled,
-          visible: action.visible,
+          enabled: action.properties.enabled ?? true,
+          visible: action.properties.visible ?? true,
         });
       }
     }
