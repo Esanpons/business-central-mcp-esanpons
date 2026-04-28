@@ -13,11 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-## [1.0.0] - 2026-04-28
+## [1.0.1] - 2026-04-28
 
-First stable release. Declares the MCP tool output shapes (`Section[]`) and
-env var contract as the public API surface — subsequent breaking changes
-require a major version bump per semver.
+First stable release of the v2 codebase. Declares the MCP tool output shapes
+(`Section[]`) and env var contract as the public API surface — subsequent
+breaking changes require a major version bump per semver.
+
+(Note: version `1.0.0` was historically published on 2026-03-04 from the
+prior codebase and unpublished; npm forbids version-number reuse, so the
+v2 line starts at `1.0.1`.)
 
 ### Added
 
