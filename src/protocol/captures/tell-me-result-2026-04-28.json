@@ -1,17 +1,2700 @@
-{
-  "capturedAt": "2026-04-28T10:40:43.736Z",
-  "query": "customer",
-  "formId": "259E",
-  "events": [
-    {
-      "type": "InvokeCompleted",
-      "sequenceNumber": 2,
-      "completedInteractions": [
-        {
-          "invocationId": "fec0e450-ef18-4be8-a6cd-28448d57af9a",
-          "durationMs": 0
-        }
-      ]
+[
+  {
+    "type": "InvokeCompleted",
+    "sequenceNumber": 2,
+    "completedInteractions": [
+      {
+        "invocationId": "1cde458c-f6c8-4c90-96d7-4e0cb0ff9a98",
+        "durationMs": 7
+      }
+    ]
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[0]/c[0]",
+    "changes": {
+      "StringValue": "customer"
     }
-  ]
-}
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[1]",
+    "changes": {
+      "Data.CurrentBookmark": "6e50f179-7956-4aef-b5cf-a425c1bd1c68"
+    }
+  },
+  {
+    "type": "DataLoaded",
+    "formId": "25FD",
+    "controlPath": "server:c[1]",
+    "currentRowOnly": false,
+    "rows": [
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          0,
+          {
+            "bookmark": "6e50f179-7956-4aef-b5cf-a425c1bd1c68",
+            "selected": true,
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Create Customer Journal Lines",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Tasks"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Create Customer Journal Lines\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          1,
+          {
+            "bookmark": "06e77890-dec1-41ff-ba26-9c1d63311f45",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Shopify Sync Customers",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Shopify Connector"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Tasks"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Shpfy Sync Customers\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          2,
+          {
+            "bookmark": "6bfd4cbd-9fe6-4651-b624-9b310e52c254",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Add Customer as Shopify Location",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Shopify Connector"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Administration"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Shpfy Add Cust. As Locations\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          3,
+          {
+            "bookmark": "a012ebcc-4ca5-4cde-af25-b6d184b24070",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Imported Customer Subscription Contracts",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Subscription Billing"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Administration"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "8013:pagemode(Edit):embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Imported Customer Contracts\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          4,
+          {
+            "bookmark": "9582dd56-3cf6-4972-bb5e-fc26dff342e2",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer Subscription Contracts",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Subscription Billing"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Lists"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "8053:embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Customer Contracts\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          5,
+          {
+            "bookmark": "55dd27df-35df-4f8a-99aa-288eec727c09",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Subscription Lines without Customer Subscription Contract",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Subscription Billing"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Lists"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "8069:embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Serv. Comm. WO Cust. Contract\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          6,
+          {
+            "bookmark": "ca8fb707-27da-434f-af19-733279da3954",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Usage Data Supp. Customers",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Subscription Billing"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Lists"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "8037:embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Usage Data Customers\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          7,
+          {
+            "bookmark": "5bb4dc24-125e-4cc3-af5b-ea26a9793afd",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Create Contacts from Customers",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Tasks"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Create Conts. from Customers\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          8,
+          {
+            "bookmark": "cfb13d2f-a663-4e97-8879-6d852d9e32df",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Add Customer to Shopify",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Shopify Connector"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Administration"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Shpfy Add Customer to Shopify\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          9,
+          {
+            "bookmark": "f53d865c-88ca-4bd1-b8c6-fff34fe17167",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer Templates",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Lists"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "1381:embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Customer Templ. List\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          10,
+          {
+            "bookmark": "119a6220-b5cd-4723-9293-90954e602ca1",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer Posting Groups",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Administration"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "110:pagemode(Edit):embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Customer Posting Groups\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          11,
+          {
+            "bookmark": "9b4fb4ce-f531-4204-a1ca-672f1eb7bb7c",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Alternative Customer VAT Registration",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Administration"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "212:pagemode(Edit):embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Alt. Cust. VAT Reg.\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          12,
+          {
+            "bookmark": "6abb3c61-f262-4e87-b15c-ce6df2a3fe35",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Register Customer Payments",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Tasks"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "981:pagemode(Edit):embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Payment Registration\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          13,
+          {
+            "bookmark": "3cb23f68-abf1-4f59-9370-a18f06315fdb",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer Price Groups",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Administration"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "7:pagemode(Edit):embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Customer Price Groups\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          14,
+          {
+            "bookmark": "26b657b6-1138-4e47-a9a7-4f1dc6f35a4c",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer Disc. Groups",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Administration"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "512:pagemode(Edit):embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Customer Disc. Groups\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          15,
+          {
+            "bookmark": "b3f41084-43d9-4fec-b47b-e611d3bc71f9",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customers",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Lists"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "True",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "22:embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Customer List\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          16,
+          {
+            "bookmark": "105a57da-cd5d-43b3-bbcd-70a897170a00",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Shopify Customers",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Shopify Connector"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Lists"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "30107:embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Shpfy Customers\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          17,
+          {
+            "bookmark": "18026dae-47b3-41b3-9a5c-a8c67c569eb3",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Cash Receipt Journals",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Tasks"
+              },
+              "SearchScore": {
+                "stringValue": "2"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "True"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "255:pagemode(Edit):embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Cash Receipt Journal\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          18,
+          {
+            "bookmark": "6b750667-e26f-4c02-8b94-ad2cfd504dde",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Direct Debit Collections",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Lists"
+              },
+              "SearchScore": {
+                "stringValue": "2"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "True"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "1207:embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Direct Debit Collections\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          19,
+          {
+            "bookmark": "4db1fba2-1b59-4062-89b5-0a8f6f4e668b",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Subscriptions",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Subscription Billing"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Lists"
+              },
+              "SearchScore": {
+                "stringValue": "2"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "True"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "8059:embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Service Objects\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          20,
+          {
+            "bookmark": "765d71fc-9044-47f6-8b76-9f40618e7e8c",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Usage Data Subscriptions",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Subscription Billing"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Lists"
+              },
+              "SearchScore": {
+                "stringValue": "2"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "True"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "8042:embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Usage Data Subscriptions\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          21,
+          {
+            "bookmark": "36c1b6cf-79a2-4098-bc21-b738fb892023",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Custom Report Layouts",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Administration"
+              },
+              "SearchScore": {
+                "stringValue": "2"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "9650:pagemode(Edit):embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Custom Report Layouts\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[1]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          22,
+          {
+            "bookmark": "7eaa5d6a-5ee5-4272-8605-356ff584da9f",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Report Layouts",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Administration"
+              },
+              "SearchScore": {
+                "stringValue": "1"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "True"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "9660:pagemode(Edit):embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Report Layouts\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[1]",
+    "changes": {
+      "Offset": 0
+    }
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[1]/cr",
+    "changes": {
+      "Selected": true
+    }
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[1]/cr/c[0]",
+    "changes": {
+      "Source": null
+    }
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[1]/cr/c[1]",
+    "changes": {
+      "StringValue": "Create Customer Journal Lines"
+    }
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[1]/cr/c[2]",
+    "changes": {
+      "StringValue": "Departments/Base Application"
+    }
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[1]/cr/c[3]",
+    "changes": {
+      "StringValue": "Tasks"
+    }
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[1]/cr/c[4]",
+    "changes": {
+      "StringValue": "3"
+    }
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[1]/cr/c[5]",
+    "changes": {
+      "StringValue": "False"
+    }
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[1]/cr/c[6]",
+    "changes": {
+      "StringValue": "False"
+    }
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[1]/cr/c[8]",
+    "changes": {
+      "StringValue": "[{ \"report\": \"Create Customer Journal Lines\"}]"
+    }
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[2]",
+    "changes": {
+      "Data.CurrentBookmark": "f37ea0b3-fbee-4962-be67-0e1c85789d2d"
+    }
+  },
+  {
+    "type": "DataLoaded",
+    "formId": "25FD",
+    "controlPath": "server:c[2]",
+    "currentRowOnly": false,
+    "rows": [
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          0,
+          {
+            "bookmark": "f37ea0b3-fbee-4962-be67-0e1c85789d2d",
+            "selected": true,
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Day Book Customer Ledger Entry",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Day Book Cust. Ledger Entry\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          1,
+          {
+            "bookmark": "ad6e4f44-f6f0-41b1-927a-140ef2dd3dbb",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Revenue by Customer",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Subscription Billing"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "8104:pagemode(Edit):embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Revenue by Customer Power BI\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          2,
+          {
+            "bookmark": "8a5cc60e-2395-4843-9767-085a1fe7de7f",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer Subscription Contract Deferrals",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Subscription Billing"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Archive"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "8079:embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Customer Contract Deferrals\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          3,
+          {
+            "bookmark": "e3eb6636-e1d3-496f-b25a-6cd907cdb6a5",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer Subscription Contract Deferrals Analysis",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Subscription Billing"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Cust. Contr. Def. Analysis\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          4,
+          {
+            "bookmark": "2a48b9de-e2c3-45d2-8ed7-cecd80dab119",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Sales by Customer",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Power BI Report embeddings for Dynamics 365 Business Central"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "37005:pagemode(Edit):embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Sales by Customer\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          5,
+          {
+            "bookmark": "b79a572f-9dcc-497a-a51a-6038dbd3b98e",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Revenue by Customer",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Power BI Report embeddings for Dynamics 365 Business Central"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "37074:pagemode(Edit):embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Revenue by Customer\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          6,
+          {
+            "bookmark": "768c327f-7b25-4ccf-98b7-001be2cb7d52",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer Deferrals",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Power BI Report embeddings for Dynamics 365 Business Central"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "37078:pagemode(Edit):embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Customer Deferrals\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          7,
+          {
+            "bookmark": "55d4e1f8-6b86-4353-a9d0-ab7fb7ffcc77",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer Retention Overview",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Power BI Report embeddings for Dynamics 365 Business Central"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "36983:pagemode(Edit):embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Customer Retention Overview\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          8,
+          {
+            "bookmark": "42276928-9473-499d-98ff-e5afb8159ae9",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Project Invoiced Sales by Customer",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Power BI Report embeddings for Dynamics 365 Business Central"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "37039:pagemode(Edit):embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Project Invd. Sales by Cust.\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          9,
+          {
+            "bookmark": "9916d84d-c1e0-4721-9e41-6090c03ea60c",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer Retention History",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Power BI Report embeddings for Dynamics 365 Business Central"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "37114:pagemode(Edit):embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Customer Retention History\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          10,
+          {
+            "bookmark": "d927b6f1-d6fc-4410-ac2b-65d76c748177",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer - Trial Balance",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Customer - Trial Balance\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          11,
+          {
+            "bookmark": "582cf9f9-2668-4276-a6fd-cd489a5a1f70",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer Statement",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Documents"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Customer Statement\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          12,
+          {
+            "bookmark": "d9b410bb-cf6e-4259-8725-037fcd9731a9",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Detailed Customer Ledger Entries",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Archive"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "573:embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Detailed Cust. Ledg. Entries\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          13,
+          {
+            "bookmark": "bde51a13-82b9-406f-b547-37aec55af6fa",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer List",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Customer - List\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          14,
+          {
+            "bookmark": "64e8adfe-a6a7-4ac6-a12e-230ecb05b79c",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer - Order Summary",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Customer - Order Summary\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          15,
+          {
+            "bookmark": "e37f4780-71d2-4e5e-9cd4-d9eaabf34b73",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Projects per Customer",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Jobs per Customer\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          16,
+          {
+            "bookmark": "20eda31c-92c6-4961-b8cc-4417b2b4b780",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer - Detail Trial Bal.",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Customer - Detail Trial Bal.\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          17,
+          {
+            "bookmark": "4760f1f9-79a4-4a23-bedf-25e9fcdb9ff9",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer - Sales List",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Customer - Sales List\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          18,
+          {
+            "bookmark": "af0b3edf-b91f-4edf-b864-99cd8efb1558",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer - Labels",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Customer - Labels\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          19,
+          {
+            "bookmark": "eb5cddf8-71c6-4951-babc-6d99748542be",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer - Order Detail",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Customer - Order Detail\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          20,
+          {
+            "bookmark": "79d6530a-3b77-4856-af5e-9524ddec1862",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer Detailed Aging",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Customer Detailed Aging\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          21,
+          {
+            "bookmark": "f458fdba-c284-4719-b261-90947f03b133",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer - Summary Aging",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Customer - Summary Aging\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          22,
+          {
+            "bookmark": "451441c3-5083-4b63-8e62-df1c91914d85",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer - Top 10 List (Obsolete)",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Customer - Top 10 List\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          23,
+          {
+            "bookmark": "0fd16d50-121a-4c84-95a5-228618681e9c",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer Ledger Entries",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Archive"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "25:embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Customer Ledger Entries\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          24,
+          {
+            "bookmark": "df5f4bb8-62c4-4537-92d9-dbfda6de80f2",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer - Summary Aging Simp.",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Customer - Summary Aging Simp.\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          25,
+          {
+            "bookmark": "baad316e-edb9-4c63-aa6f-6d0a3db60921",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer/Item Sales",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Customer/Item Sales\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          26,
+          {
+            "bookmark": "1a892bce-f838-4c6c-bbb6-d7bc073eb492",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Inventory Customer Sales",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Inventory - Customer Sales\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          27,
+          {
+            "bookmark": "567de27a-0400-422c-bff2-c88f46d42074",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Reconcile Customer and Vendor Accounts",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Reconcile Cust. and Vend. Accs\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          28,
+          {
+            "bookmark": "7c3a7389-a117-4f63-93e7-4305c3dae5e5",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer Register",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Customer Register\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          29,
+          {
+            "bookmark": "0d2b4ae7-04ab-4ce5-88c4-1a4c5ad29dc8",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer Balance to Date",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Base Application"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"Customer - Balance to Date\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          30,
+          {
+            "bookmark": "039edaa1-4d11-43bd-aaca-4788c6cf29d1",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer Deferrals",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Subscription Billing"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {
+                "stringValue": "8112:pagemode(Edit):embedded(False)"
+              },
+              "Source": {
+                "stringValue": "[{ \"page\": \"Customer Deferrals Power BI\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      },
+      {
+        "t": "DataRowInserted",
+        "ControlReference": {
+          "controlPath": "server:c[2]",
+          "formId": "25FD"
+        },
+        "DataRowInserted": [
+          31,
+          {
+            "bookmark": "c975cb47-96f4-47dc-9666-ba59d6435eca",
+            "cells": {
+              "Icon": {
+                "type": "image",
+                "source": "Resources/Images/static/transparentIcon.gif"
+              },
+              "Name": {
+                "stringValue": "Customer - Top List (Excel)",
+                "canInvoke": true
+              },
+              "DepartmentPath": {
+                "stringValue": "Departments/Dynamics BC Excel Reports"
+              },
+              "DepartmentCategory": {
+                "stringValue": "Reports and Analysis"
+              },
+              "SearchScore": {
+                "stringValue": "3"
+              },
+              "AdditionalSearchTermMatched": {
+                "stringValue": "False"
+              },
+              "IsBookmarked": {
+                "stringValue": "False",
+                "canInvoke": true
+              },
+              "CacheKey": {},
+              "Source": {
+                "stringValue": "[{ \"report\": \"EXR Customer Top List\"}]"
+              },
+              "Description": {}
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[2]",
+    "changes": {
+      "Offset": 0
+    }
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[2]/cr",
+    "changes": {
+      "Selected": true
+    }
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[2]/cr/c[0]",
+    "changes": {
+      "Source": null
+    }
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[2]/cr/c[1]",
+    "changes": {
+      "StringValue": "Day Book Customer Ledger Entry"
+    }
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[2]/cr/c[2]",
+    "changes": {
+      "StringValue": "Departments/Base Application"
+    }
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[2]/cr/c[3]",
+    "changes": {
+      "StringValue": "Reports and Analysis"
+    }
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[2]/cr/c[4]",
+    "changes": {
+      "StringValue": "3"
+    }
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[2]/cr/c[5]",
+    "changes": {
+      "StringValue": "False"
+    }
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[2]/cr/c[6]",
+    "changes": {
+      "StringValue": "False"
+    }
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[2]/cr/c[8]",
+    "changes": {
+      "StringValue": "[{ \"report\": \"Day Book Cust. Ledger Entry\"}]"
+    }
+  },
+  {
+    "type": "PropertyChanged",
+    "formId": "25FD",
+    "controlPath": "server:c[3]/c[0]",
+    "changes": {
+      "Caption": "Didn't find what you were looking for? Try <link>exploring pages</link> or <link>exploring reports</link>"
+    }
+  }
+]
