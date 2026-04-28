@@ -142,7 +142,13 @@ export class SessionManager {
       const errorMsg = result.error.message;
 
       if (errorMsg.includes('LogicalModalityViolation')) {
-        this.logger.warn(`LogicalModalityViolation on attempt ${attempt + 1}, will retry: ${errorMsg}`);
+        // Mid-session violations are reconciled in BCSession.invokeUnqueued.
+        // Reaching this branch means the violation surfaced during *initial*
+        // connect (NTLM slot still held by a previous crashed session) or a
+        // full session recreate after death. Backoff retry is the right
+        // response there; nothing to abort because the new session has no
+        // modals yet.
+        this.logger.warn(`LogicalModalityViolation during initial connect (NTLM slot held by previous session?), attempt ${attempt + 1}: ${errorMsg}`);
       } else {
         this.logger.warn(`Session create failed on attempt ${attempt + 1}: ${errorMsg}`);
       }
