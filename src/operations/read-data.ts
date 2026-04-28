@@ -28,6 +28,9 @@ export class ReadDataOperation {
   async execute(input: ReadDataInput): Promise<Result<ReadDataOutput, ProtocolError>> {
     const sectionId = input.section ?? 'header';
 
+    const ctx = this.repo.get(input.pageContextId);
+    if (!ctx) return err(new ProtocolError(`Page context not found: ${input.pageContextId}`));
+
     if (input.filters && input.filters.length > 0) {
       const filterResult = await this.filterService.applyFilters(input.pageContextId, input.filters, input.section);
       if (isErr(filterResult)) return filterResult;
@@ -36,11 +39,11 @@ export class ReadDataOperation {
     // For repeater-bearing sections, materialize rows up to the requested range
     // so the resulting Section.rows reflects the slice the caller asked for.
     if (input.range) {
-      const ctx = this.repo.get(input.pageContextId);
-      if (!ctx) return err(new ProtocolError(`Page context not found: ${input.pageContextId}`));
       const totalRowCount = this.dataService.getRepeaterTotalRowCount(input.pageContextId, input.section);
       const needed = input.range.offset + input.range.limit;
-      let loaded = (this.dataService.readRows(input.pageContextId, input.section));
+      // readRows err is benign here -- buildSection below produces a clearer
+      // "Section '<id>' not found" diagnostic for the same root causes.
+      const loaded = this.dataService.readRows(input.pageContextId, input.section);
       if (isOk(loaded)) {
         let rowsLen = loaded.value.length;
         while (rowsLen < needed && rowsLen < (totalRowCount ?? Infinity)) {
@@ -52,13 +55,10 @@ export class ReadDataOperation {
       }
     }
 
-    const ctxAfter = this.repo.get(input.pageContextId);
-    if (!ctxAfter) return err(new ProtocolError(`Page context not found: ${input.pageContextId}`));
-
-    const section = buildSection(ctxAfter, sectionId);
+    const section = buildSection(ctx, sectionId);
     if (!section) {
       return err(new ProtocolError(`Section '${sectionId}' not found.`, {
-        availableSections: Array.from(ctxAfter.sections.keys()),
+        availableSections: Array.from(ctx.sections.keys()),
       }));
     }
 
