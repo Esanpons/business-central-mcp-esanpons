@@ -28,8 +28,10 @@ export class ReadDataOperation {
   async execute(input: ReadDataInput): Promise<Result<ReadDataOutput, ProtocolError>> {
     const sectionId = input.section ?? 'header';
 
-    const ctx = this.repo.get(input.pageContextId);
-    if (!ctx) return err(new ProtocolError(`Page context not found: ${input.pageContextId}`));
+    // Fast-fail for unknown pageContextId before any service calls.
+    if (!this.repo.get(input.pageContextId)) {
+      return err(new ProtocolError(`Page context not found: ${input.pageContextId}`));
+    }
 
     if (input.filters && input.filters.length > 0) {
       const filterResult = await this.filterService.applyFilters(input.pageContextId, input.filters, input.section);
@@ -54,6 +56,14 @@ export class ReadDataOperation {
         }
       }
     }
+
+    // Re-fetch the context AFTER applyFilters / scrollRepeater. The repo
+    // replaces the PageContext entry on every event-induced update (immutable
+    // updates with structural sharing), so a context captured before those
+    // calls is stale and would cause buildSection to project pre-filter /
+    // pre-scroll state.
+    const ctx = this.repo.get(input.pageContextId);
+    if (!ctx) return err(new ProtocolError(`Page context not found: ${input.pageContextId}`));
 
     const section = buildSection(ctx, sectionId);
     if (!section) {
