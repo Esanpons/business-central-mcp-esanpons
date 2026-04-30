@@ -64,7 +64,11 @@ Workspace: create `.vscode/mcp.json`:
 ### Claude Code
 
 ```bash
-claude mcp add business-central -- env BC_BASE_URL=http://your-bc-server/BC BC_USERNAME=you BC_PASSWORD=secret npx -y business-central-mcp
+claude mcp add business-central \
+  -e BC_BASE_URL=http://your-bc-server/BC \
+  -e BC_USERNAME=you \
+  -e BC_PASSWORD=secret \
+  -- npx -y business-central-mcp
 ```
 
 Scope it to the current project with `--scope project`. See `claude mcp --help` for scoping options.
@@ -118,6 +122,9 @@ Restart Claude Desktop.
 | `LOG_LEVEL` | No | `info` | `debug` / `info` / `warn` / `error`. |
 | `LOG_DIR` | No | `./logs` | Directory for log files. |
 | `STATE_DIR` | No | `./.state` | Directory for session state. |
+| `BC_INVOKE_TIMEOUT` | No | `30000` | Per-invoke timeout in ms. Kills hung sessions. |
+| `BC_RECONNECT_MAX_RETRIES` | No | `4` | Reconnect attempts after session death. |
+| `BC_RECONNECT_BASE_DELAY` | No | `1000` | Base delay (ms) for exponential reconnect backoff. |
 
 ## What can it do?
 
