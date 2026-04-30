@@ -10,13 +10,79 @@
   <a href="https://www.npmjs.com/package/business-central-mcp"><img src="https://img.shields.io/npm/v/business-central-mcp" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/business-central-mcp"><img src="https://img.shields.io/npm/dm/business-central-mcp" alt="npm downloads"></a>
   <a href="https://github.com/SShadowS/business-central-mcp/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/business-central-mcp" alt="license"></a>
+  <a href="vscode:mcp/install?%7B%22name%22%3A%22business-central%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22business-central-mcp%22%5D%7D"><img src="https://img.shields.io/badge/VSCode-Install-007ACC?logo=visualstudiocode" alt="Install in VSCode"></a>
+  <a href="https://github.com/SShadowS/business-central-mcp/releases/latest"><img src="https://img.shields.io/badge/Claude%20Desktop-Download%20.dxt-d97757" alt="Download .dxt for Claude Desktop"></a>
 </p>
 
 ---
 
-## Quick start
+## Overview
 
-Add to your Claude Desktop config:
+| Property | Value |
+|----------|-------|
+| Language | TypeScript / Node 20+ |
+| npm package | [`business-central-mcp`](https://www.npmjs.com/package/business-central-mcp) |
+| BC versions | BC27, BC28 (wire-compatible) |
+| Auth | NavUserPassword (OAuth on roadmap) |
+| Tools | 12 |
+| Tests | 281 unit/protocol + 111 integration |
+| License | MIT |
+
+## Install
+
+### VSCode
+
+[![Install in VSCode](https://img.shields.io/badge/VSCode-Install-007ACC?logo=visualstudiocode)](vscode:mcp/install?%7B%22name%22%3A%22business-central%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22business-central-mcp%22%5D%7D)
+
+Click the badge. VSCode opens, prompts to add the server, and writes to your user `mcp.json`.
+
+You will still need to set `BC_BASE_URL`, `BC_USERNAME`, and `BC_PASSWORD` in the entry's `env` block. VSCode opens the file for you to edit.
+
+<details>
+<summary><strong>Manual install</strong></summary>
+
+Workspace: create `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "business-central": {
+      "command": "npx",
+      "args": ["-y", "business-central-mcp"],
+      "env": {
+        "BC_BASE_URL": "http://your-bc-server/BC",
+        "BC_USERNAME": "your-user",
+        "BC_PASSWORD": "your-password"
+      }
+    }
+  }
+}
+```
+
+</details>
+
+### Claude Code
+
+```bash
+claude mcp add business-central -- env BC_BASE_URL=http://your-bc-server/BC BC_USERNAME=you BC_PASSWORD=secret npx -y business-central-mcp
+```
+
+Scope it to the current project with `--scope project`. See `claude mcp --help` for scoping options.
+
+### Claude Desktop
+
+1. Download the latest `.dxt` from [Releases](https://github.com/SShadowS/business-central-mcp/releases/latest).
+2. Double-click. Claude Desktop opens Settings → Extensions and prompts for BC URL, username, and password.
+3. Restart Claude Desktop.
+
+<details>
+<summary><strong>Manual install</strong></summary>
+
+Edit `claude_desktop_config.json`:
+
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+- Linux: `~/.config/Claude/claude_desktop_config.json`
 
 ```json
 {
@@ -34,7 +100,24 @@ Add to your Claude Desktop config:
 }
 ```
 
-That's it. The LLM can now open pages, read and write data, run actions, and navigate BC -- just like a human using the web client.
+Restart Claude Desktop.
+
+</details>
+
+## Configuration
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `BC_BASE_URL` | Yes | — | BC server base URL, e.g. `http://your-bc-server/BC` |
+| `BC_USERNAME` | Yes | — | NavUserPassword username |
+| `BC_PASSWORD` | Yes | — | NavUserPassword password |
+| `BC_PROFILE` | No | server default | Profile id, e.g. `BUSINESS MANAGER`. Affects which Role Center loads and which pages Tell Me indexes. |
+| `BC_TENANT_ID` | No | `default` | Multi-tenant deployments only. |
+| `BC_CLIENT_VERSION` | No | `27.0.0.0` | Version reported to BC during session open. |
+| `PORT` | No | `3000` | HTTP transport port (stdio transport ignores this). |
+| `LOG_LEVEL` | No | `info` | `debug` / `info` / `warn` / `error`. |
+| `LOG_DIR` | No | `./logs` | Directory for log files. |
+| `STATE_DIR` | No | `./.state` | Directory for session state. |
 
 ## What can it do?
 
@@ -58,6 +141,19 @@ That's it. The LLM can now open pages, read and write data, run actions, and nav
 This server speaks BC's internal WebSocket protocol directly -- the same protocol the browser-based web client uses. It was reverse-engineered from decompiled BC server assemblies. No OData endpoints, no SOAP services, no Selenium.
 
 One WebSocket connection per session. All operations serialized through a promise queue. BC27 and BC28 are wire-compatible.
+
+```
+LLM (Claude / Copilot / etc.)
+   |
+   v   MCP (stdio or HTTP)
+business-central-mcp
+   |
+   v   WebSocket + JSON-RPC
+BC Web Service Tier (BC27 / BC28)
+   |
+   v   internal calls
+BC Server
+```
 
 <details>
 <summary><strong>Page output shape</strong></summary>
@@ -97,22 +193,19 @@ Each section carries its own content shape:
 
 </details>
 
-<details>
-<summary><strong>Environment variables</strong></summary>
+## Key files
 
-| Variable | Default | Description |
-|---|---|---|
-| `BC_BASE_URL` | (required) | BC server URL |
-| `BC_USERNAME` | (required) | BC username |
-| `BC_PASSWORD` | (required) | BC password |
-| `BC_TENANT_ID` | `default` | Tenant ID |
-| `BC_PROFILE` | (empty) | BC profile id (e.g. `BUSINESS MANAGER`). Selects which Role Center loads and which pages Tell Me indexes. Empty = server default. |
-| `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
-| `BC_INVOKE_TIMEOUT` | `30000` | Kill session if BC hangs (ms) |
-| `BC_RECONNECT_MAX_RETRIES` | `4` | Reconnect attempts |
-| `BC_RECONNECT_BASE_DELAY` | `1000` | Backoff base delay (ms) |
-
-</details>
+| File | Purpose |
+|------|---------|
+| `src/stdio-server.ts` | npm `bin` entry -- stdio MCP transport |
+| `src/server.ts` | HTTP MCP transport entry |
+| `src/protocol/` | WebSocket transport, wire types, captures |
+| `src/services/` | Tool implementations (page, data, action, navigation, search) |
+| `src/session/` | Session lifecycle, modal stack, reconnect |
+| `manifest.json` | Claude Desktop Extension manifest |
+| `scripts/build-dxt.ts` | Builds `.dxt` artifact for Claude Desktop |
+| `.github/workflows/release.yml` | Builds + attaches `.dxt` on `v*` tag pushes |
+| `ROADMAP.md` | Deferred work (OAuth, Cursor, init wizard) |
 
 ## Development
 
@@ -125,6 +218,12 @@ npm test                     # 281 unit + protocol tests
 npm run test:integration     # 111 integration tests against real BC (requires running BC server)
 ```
 
-## License
+## Roadmap
 
-MIT
+OAuth, Cursor support, an interactive `init` wizard, and a few protocol gaps.
+See [ROADMAP.md](ROADMAP.md) for the full list and priorities.
+
+---
+
+**Author:** Torben Leth (sshadows@sshadows.dk)
+**License:** MIT (see [LICENSE](LICENSE))
