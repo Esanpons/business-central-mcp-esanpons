@@ -7,3 +7,4 @@ reference/
 *.tsbuildinfo
 coverage/
 .worktrees/
+dist-dxt/
