@@ -25,7 +25,7 @@
 | BC versions | BC27, BC28 (wire-compatible) |
 | Auth | NavUserPassword (OAuth on roadmap) |
 | Tools | 12 |
-| Tests | 281 unit/protocol + 111 integration |
+| Tests | 284 unit/protocol + 111 integration |
 | License | MIT |
 
 ## Install
@@ -206,8 +206,10 @@ Each section carries its own content shape:
 |------|---------|
 | `src/stdio-server.ts` | npm `bin` entry -- stdio MCP transport |
 | `src/server.ts` | HTTP MCP transport entry |
+| `src/mcp/` | MCP tool registry, schemas, request handler |
+| `src/operations/` | One handler per tool (`bc_open_page`, `bc_read_data`, etc.) |
+| `src/services/` | Page, data, action, navigation, search business logic |
 | `src/protocol/` | WebSocket transport, wire types, captures |
-| `src/services/` | Tool implementations (page, data, action, navigation, search) |
 | `src/session/` | Session lifecycle, modal stack, reconnect |
 | `manifest.json` | Claude Desktop Extension manifest |
 | `scripts/build-dxt.ts` | Builds `.dxt` artifact for Claude Desktop |
@@ -221,7 +223,7 @@ git clone https://github.com/SShadowS/business-central-mcp
 cd business-central-mcp
 npm install
 npm run start:stdio-direct   # Run from source
-npm test                     # 281 unit + protocol tests
+npm test                     # 284 unit + protocol tests
 npm run test:integration     # 111 integration tests against real BC (requires running BC server)
 ```
 
