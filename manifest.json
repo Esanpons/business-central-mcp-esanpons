@@ -29,26 +29,26 @@
     "bc_base_url": {
       "type": "string",
       "title": "BC base URL",
-      "description": "e.g. http://your-bc-server/BC",
+      "description": "Business Central server base URL, e.g. http://your-bc-server/BC",
       "required": true
     },
     "bc_username": {
       "type": "string",
       "title": "BC username",
-      "description": "Username for authenticating with Business Central.",
+      "description": "NavUserPassword username for the BC server.",
       "required": true
     },
     "bc_password": {
       "type": "string",
       "title": "BC password",
-      "description": "Password for authenticating with Business Central.",
+      "description": "NavUserPassword password for the BC server.",
       "sensitive": true,
       "required": true
     },
     "bc_profile": {
       "type": "string",
       "title": "BC profile",
-      "description": "Optional. e.g. BUSINESS MANAGER",
+      "description": "Optional profile id, e.g. BUSINESS MANAGER. Affects which Role Center loads and which pages Tell Me indexes.",
       "required": false
     }
   },
