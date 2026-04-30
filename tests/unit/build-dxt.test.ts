@@ -12,7 +12,7 @@ const packageJsonPath = resolve(repoRoot, 'package.json');
 describe('build-dxt', () => {
   beforeAll(() => {
     execSync('npm run build:dxt', { cwd: repoRoot, stdio: 'inherit' });
-  }, 60_000);
+  }, 60_000); // hookTimeout: build:dxt spawns `npx @anthropic-ai/dxt validate`, slow on cold cache
 
   it('produces dist-dxt/business-central-mcp.dxt', () => {
     expect(existsSync(dxtPath)).toBe(true);
