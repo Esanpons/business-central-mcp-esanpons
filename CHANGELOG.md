@@ -13,6 +13,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [1.0.2] - 2026-05-01
+
+Install ergonomics across the three primary MCP hosts. Documentation, build
+pipeline, and release automation only — no protocol or runtime changes.
+
+### Added
+
+- **Claude Desktop Extension (`.dxt`).** New `manifest.json` declaring the
+  server with four prompted `user_config` fields (`bc_base_url`,
+  `bc_username`, `bc_password` (sensitive), `bc_profile` (optional)). Manifest
+  validates against `@anthropic-ai/dxt`. Wraps `npx -y business-central-mcp`
+  rather than bundling `dist/`, so the `.dxt` tracks the latest npm version
+  automatically.
+- **`scripts/build-dxt.ts`** that produces `dist-dxt/business-central-mcp.dxt`:
+  syncs `manifest.json` version from `package.json`, validates the manifest,
+  zips manifest + icon + README + LICENSE via `archiver`. Three vitest tests
+  cover artifact existence, size, and version sync.
+- **`.github/workflows/release.yml`** triggered on `v*` tag pushes. Builds
+  the `.dxt` and attaches it to the GitHub Release with auto-generated notes.
+  Hardened with explicit artifact-existence check and
+  `fail_on_unmatched_files`.
+- **`ROADMAP.md`** capturing deferred work: OAuth/AAD auth, Windows auth,
+  Cursor support, interactive `init` wizard, host auto-detection, more tools,
+  BC29+ wire-compat verification, `.dxt` signing, MCP marketplace publication,
+  the `manifest.json` `entry_point` schema/runtime gap, and the VSCode
+  one-click `inputs` opportunity.
+- **`icon.png`** (512×512, BC monogram on dark background) for the `.dxt`.
+- **`build:dxt` and `validate:dxt` npm scripts.** `archiver` and
+  `@types/archiver` added as devDependencies.
+
+### Changed
+
+- **`README.md` rewritten** following readme-design guidelines. New sections:
+  Overview table (language, npm, BC versions, auth, tools, tests, license);
+  Install with three host-specific subsections (VSCode one-click badge plus
+  manual `.vscode/mcp.json`, Claude Code one-line `claude mcp add -e ...`,
+  Claude Desktop `.dxt` download plus manual `claude_desktop_config.json`
+  with per-OS paths); Configuration table covering 13 env vars
+  (including `BC_INVOKE_TIMEOUT`, `BC_RECONNECT_MAX_RETRIES`,
+  `BC_RECONNECT_BASE_DELAY` that previously had no documented home);
+  ASCII protocol-flow diagram; Key files table; Roadmap section linking to
+  `ROADMAP.md`; author/license footer. Old `## Quick start` JSON-paste
+  section removed.
+
 ## [1.0.1] - 2026-04-28
 
 First stable release of the v2 codebase. Declares the MCP tool output shapes
