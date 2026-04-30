@@ -24,8 +24,12 @@ jobs:
       - name: Build .dxt artifact
         run: npm run build:dxt
 
+      - name: Verify .dxt artifact exists
+        run: test -f dist-dxt/business-central-mcp.dxt
+
       - name: Attach .dxt to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist-dxt/business-central-mcp.dxt
           generate_release_notes: true
+          fail_on_unmatched_files: true
