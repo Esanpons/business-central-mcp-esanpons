@@ -6,6 +6,7 @@ export interface BCConfig {
   profile: string;
   clientVersionString: string;
   serverMajor: number;
+  applicationId: string;
   timeoutMs: number;
   invokeTimeoutMs: number;
   reconnectMaxRetries: number;
@@ -76,6 +77,7 @@ export function loadConfig(): AppConfig {
       profile: optionalEnv('BC_PROFILE', ''),
       clientVersionString: optionalEnv('BC_CLIENT_VERSION', '27.0.0.0'),
       serverMajor: optionalEnvInt('BC_SERVER_MAJOR', 27),
+      applicationId: optionalEnv('BC_APPLICATION_ID', 'NAV'),
       timeoutMs: optionalEnvInt('BC_TIMEOUT', 120000),
       invokeTimeoutMs: optionalEnvInt('BC_INVOKE_TIMEOUT', 30000),
       reconnectMaxRetries: optionalEnvInt('BC_RECONNECT_MAX_RETRIES', 4),

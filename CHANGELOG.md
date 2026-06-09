@@ -13,6 +13,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [1.1.0] - 2026-06-09
+
+Fork (AESVA / Esanpons): connect to BC 27 (ltsc2025) on-prem with NavUserPassword.
+
+### Added
+
+- **`BC_APPLICATION_ID` env var** (default `NAV`) to override the
+  `navigationContext.applicationId` sent in `OpenSession` / `Invoke`.
+
+### Changed
+
+- **`OpenSession` now sends `applicationId: "NAV"` instead of `"FIN"`.** BC 27
+  (ltsc2025) rejects `"FIN"` with `NavCancelCredentialPromptException` on the first
+  `OpenSession` even though HTTP auth and the WebSocket handshake both succeed.
+  Verified empirically by capturing the real web client and a 3-variant isolation
+  test against a live BC 27 container. Configurable via `BC_APPLICATION_ID` for
+  builds that expect a different value. Files: `src/protocol/interaction-encoder.ts`,
+  `src/core/config.ts`, `src/stdio-server.ts`, `src/server.ts`.
+
+### Fixed
+
+- **`NavCancelCredentialPromptException` on connect against BC 27 + NavUserPassword**,
+  caused by the wrong `applicationId` (see Changed).
+
 ## [1.0.2] - 2026-05-01
 
 Install ergonomics across the three primary MCP hosts. Documentation, build

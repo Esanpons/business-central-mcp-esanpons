@@ -36,7 +36,7 @@ describe('InteractionEncoder', () => {
     expect(params.features).toBeInstanceOf(Array);
     expect(typeof params.supportedExtensions).toBe('string');
     const navCtx = params.navigationContext as Record<string, unknown>;
-    expect(navCtx.applicationId).toBe('FIN');
+    expect(navCtx.applicationId).toBe('NAV');
     expect(navCtx.spaInstanceId).toBe('testspa123');
     const interactions = params.interactionsToInvoke as unknown[];
     expect(interactions.length).toBe(1);
@@ -167,7 +167,7 @@ describe('InteractionEncoder', () => {
     expect(params.features).toBeInstanceOf(Array);
     expect(typeof params.supportedExtensions).toBe('string');
     const navCtx = params.navigationContext as Record<string, unknown>;
-    expect(navCtx.applicationId).toBe('FIN');
+    expect(navCtx.applicationId).toBe('NAV');
     expect(navCtx.spaInstanceId).toBe('spa-abc');
     const interactions = params.interactionsToInvoke as Record<string, unknown>[];
     expect(interactions.length).toBe(1);
@@ -197,6 +197,22 @@ describe('InteractionEncoder', () => {
       const call = enc.encodeOpenSession('default', 'spa-1', undefined);
       const params = (call.params[0] as Record<string, unknown>);
       expect(params.profile).toBe('');
+    });
+  });
+
+  describe('navigationContext applicationId', () => {
+    it('uses NAV as the default applicationId (BC 27 web client; FIN triggers NavCancelCredentialPromptException)', () => {
+      const enc = new InteractionEncoder('27.0.0.0');
+      const call = enc.encodeOpenSession('default', 'spa-1');
+      const navCtx = (call.params[0] as Record<string, unknown>).navigationContext as Record<string, unknown>;
+      expect(navCtx.applicationId).toBe('NAV');
+    });
+
+    it('honors a custom applicationId override', () => {
+      const enc = new InteractionEncoder('27.0.0.0', 'FIN');
+      const call = enc.encodeOpenSession('default', 'spa-1');
+      const navCtx = (call.params[0] as Record<string, unknown>).navigationContext as Record<string, unknown>;
+      expect(navCtx.applicationId).toBe('FIN');
     });
   });
 });

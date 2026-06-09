@@ -73,6 +73,10 @@ claude mcp add business-central \
 
 Scope it to the current project with `--scope project`. See `claude mcp --help` for scoping options.
 
+**Use it from every project (user scope):** to register this fork once so any folder you open can
+use it — running the compiled server from `dist/` rather than npm — see
+[docs/SETUP-GLOBAL.md](docs/SETUP-GLOBAL.md).
+
 ### Claude Desktop
 
 1. Download the latest `.dxt` from [Releases](https://github.com/SShadowS/business-central-mcp/releases/latest).
@@ -118,6 +122,7 @@ Restart Claude Desktop.
 | `BC_PROFILE` | No | server default | Profile id, e.g. `BUSINESS MANAGER`. Affects which Role Center loads and which pages Tell Me indexes. |
 | `BC_TENANT_ID` | No | `default` | Multi-tenant deployments only. |
 | `BC_CLIENT_VERSION` | No | `27.0.0.0` | Version reported to BC during session open. |
+| `BC_APPLICATION_ID` | No | `NAV` | `navigationContext.applicationId` sent in OpenSession. BC 27 expects `NAV`; `FIN` triggers `NavCancelCredentialPromptException`. Override only for other builds. |
 | `PORT` | No | `3000` | HTTP transport port (stdio transport ignores this). |
 | `LOG_LEVEL` | No | `info` | `debug` / `info` / `warn` / `error`. |
 | `LOG_DIR` | No | `./logs` | Directory for log files. |

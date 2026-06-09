@@ -1,5 +1,13 @@
 # BC MCP Server v2
 
+> **Fork (AESVA / Esanpons).** This is a fork of `SShadowS/business-central-mcp`. It adds one fix
+> required to connect to a BC 27 (ltsc2025) on-prem container using `NavUserPassword`: the
+> `navigationContext.applicationId` sent in `OpenSession` must be **`NAV`**, not `FIN`. With `FIN`,
+> the server throws `NavCancelCredentialPromptException` on the first `OpenSession` even though HTTP
+> auth and the WebSocket handshake both succeed. Made configurable via `BC_APPLICATION_ID` (default
+> `NAV`). See **OpenSession applicationId** under BC Protocol Patterns. Verified against the live
+> `devel1` container (see BC Test Environments).
+
 ## Development Philosophy
 
 This project is NOT released and in active development:
@@ -30,6 +38,21 @@ This project is NOT released and in active development:
 | Protocol version | 15041 | 15041 (identical) |
 
 Both use NavUserPassword authentication (not Windows/NTLM).
+
+### Fork environment (AESVA `devel1`)
+
+Local Docker container `devel1` (`mcr.microsoft.com/businesscentral:ltsc2025`, BC 27):
+
+| | devel1 |
+|---|---|
+| Base URL | `https://devel1/BC` (HTTPS, self-signed) |
+| Username | `admin` |
+| Auth | NavUserPassword |
+| applicationId | **`NAV`** (see OpenSession applicationId) |
+| TLS | self-signed — set `NODE_TLS_REJECT_UNAUTHORIZED=0` |
+
+Server config read from the container: `ClientServicesCredentialType=NavUserPassword`,
+`PublicWebBaseUrl=https://devel1/BC/`. The WebSocket is `wss://devel1/BC/csh`.
 
 ### Essential Commands
 ```bash
@@ -94,6 +117,40 @@ Configurable via env vars: `BC_INVOKE_TIMEOUT` (default 30s), `BC_RECONNECT_MAX_
 Every session starts with an `OpenSession` RPC that returns `ServerSessionId`, `SessionKey`, `CompanyName`. All subsequent `Invoke` calls must include these fields plus `tenantId`, `navigationContext`, `features`, `supportedExtensions`.
 
 Reference: `BCSessionManager.ts` (v1), `NsServiceJsonRpcHostFactory.cs` (decompiled)
+
+### OpenSession applicationId (Fork fix — NAV vs FIN)
+
+`navigationContext.applicationId` in the `OpenSession` (and every subsequent `Invoke`) payload must
+match what the NST expects for the target build. The real BC 27 web client sends **`NAV`**. Sending
+`FIN` makes the server reject the session with
+`Microsoft.Dynamics.Nav.Types.NavCancelCredentialPromptException` (code 3) on the **first
+`OpenSession`** — even though `POST /SignIn` returns 302 with valid cookies AND the
+`wss://.../BC/csh?csrftoken=...&ackseqnb=-1` socket opens cleanly. The failure is at the application
+layer, not the transport.
+
+This was diagnosed empirically (not from decompiled source): the real web client's `OpenSession`
+frame was captured via Playwright (`page.on('websocket')` + `framesent`; note the BC web client
+creates its WebSocket inside a Web Worker, so a `window.WebSocket` hook on the main page sees
+nothing). A 3-variant isolation test against `devel1` then confirmed it — only `applicationId`
+matters:
+
+| OpenSession variant | Result |
+|---|---|
+| code as-shipped (`applicationId: "FIN"`) | ❌ `NavCancelCredentialPromptException` |
+| same payload, only `applicationId: "NAV"` | ✅ session opens |
+| exact captured browser payload (NAV) | ✅ session opens |
+
+The other browser/MCP payload differences (modern `features` list, extra `supportedExtensions`,
+non-null `telemetryClientSessionId`) are NOT required.
+
+Implementation: `InteractionEncoder` takes an `applicationId` constructor arg (default `'NAV'`),
+used in both `encode()` and `encodeOpenSession()`. Wired from `BCConfig.applicationId` =
+`BC_APPLICATION_ID` env (default `'NAV'`) in `stdio-server.ts` / `server.ts`. Override
+`BC_APPLICATION_ID` for builds that expect a different value; if a new BC version regresses with
+`NavCancelCredentialPromptException`, re-capture the real web client's `applicationId` and set it.
+
+Files: `src/protocol/interaction-encoder.ts`, `src/core/config.ts`, `src/stdio-server.ts`,
+`src/server.ts`. Tests: `tests/protocol/interaction-encoder.test.ts` (default NAV + override).
 
 ### Parameter Case Sensitivity
 BC uses case-INSENSITIVE parameter matching. Verified from decompiled `InteractionParameterHelper.TryGetValueIgnoreCase` which uses `StringComparison.OrdinalIgnoreCase`. Both camelCase and PascalCase work.
@@ -305,6 +362,39 @@ The invoke quiescence window (150ms) is a best-effort wait for trailing async `M
 ```
 
 Note: `tsx` via `npx` pollutes stdout with `◇ injecting...` which breaks JSON-RPC. Use the direct path `node_modules/tsx/dist/cli.mjs` instead.
+
+### Fork config (AESVA `devel1`, compiled `dist`)
+
+Run the compiled server (`npm run build` first) and point at the `devel1` container. `BC_APPLICATION_ID=NAV`
+is the default, shown here for clarity:
+
+```json
+{
+  "mcpServers": {
+    "bc-ws": {
+      "command": "node",
+      "args": ["D:/Proyectos/Aesva/business-central-mcp-esanpons/dist/stdio-server.js"],
+      "env": {
+        "BC_BASE_URL": "https://devel1/BC",
+        "BC_USERNAME": "admin",
+        "BC_PASSWORD": "<password>",
+        "NODE_TLS_REJECT_UNAUTHORIZED": "0",
+        "BC_TENANT_ID": "default",
+        "BC_SERVER_MAJOR": "27",
+        "BC_APPLICATION_ID": "NAV",
+        "LOG_LEVEL": "warn"
+      }
+    }
+  }
+}
+```
+
+The same block works in a project `.mcp.json` (Claude Code) or registered globally via
+`claude mcp add bc-ws --scope user ... -- node <path>/dist/stdio-server.js`. After editing, restart
+the client so it reloads the MCP.
+
+To make the server available to **every** project once at user scope (recommended), follow the
+step-by-step guide in [`docs/SETUP-GLOBAL.md`](docs/SETUP-GLOBAL.md).
 
 ## AI Assistant Guidelines
 
