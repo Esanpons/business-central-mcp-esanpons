@@ -67,6 +67,61 @@ claude mcp get bc-ws     # shows command, args and env
 Then **restart Claude Code** (close and reopen) so it loads the server. In any project, ask:
 "use bc-ws to call bc_list_companies" — it should return the BC companies.
 
+## Where do the credentials / target server live?
+
+**Not in the code.** The server (`dist/stdio-server.js`) reads everything from environment
+variables at startup (`src/core/config.ts`: `requireEnv('BC_BASE_URL')`, etc.). It has **no
+hardcoded URL, user, password, tenant or company**. The same compiled server can talk to any BC.
+
+What decides *which* BC / Docker / user / tenant is the **`env` block of the MCP registration**,
+stored in your personal config file:
+
+```
+~/.claude.json   (Windows: C:\Users\<you>\.claude.json)
+```
+
+So: **the GitHub repo never contains your password** — only this local file does. Inspect the
+active values any time with `claude mcp get bc-ws`.
+
+| Env var | Controls | Example |
+|---|---|---|
+| `BC_BASE_URL` | **which BC server / Docker** | `https://devel1/BC` |
+| `BC_USERNAME` | user | `admin` |
+| `BC_PASSWORD` | password (plain text in `~/.claude.json`) | — |
+| `BC_TENANT_ID` | **which tenant / database** inside BC | `default` |
+| `NODE_TLS_REJECT_UNAUTHORIZED` | `0` to accept a self-signed cert | `0` |
+| `BC_SERVER_MAJOR` | BC major version | `27` |
+| `BC_APPLICATION_ID` | OpenSession applicationId (the fix) | `NAV` |
+
+### Pointing at a DIFFERENT Docker / server
+
+Two options:
+
+1. **Replace the existing registration** (one BC at a time) — remove and re-add with the new env
+   (see *Update or remove* below).
+2. **Register a SECOND server under a different name** (several BCs side by side). Reuse the same
+   `dist/stdio-server.js`, just change the name and the env. Example for a second container:
+   ```powershell
+   claude mcp add bc-ws-otrodocker -s user `
+     -e BC_BASE_URL=https://otrodocker/BC `
+     -e BC_USERNAME=admin `
+     -e BC_PASSWORD=<password> `
+     -e NODE_TLS_REJECT_UNAUTHORIZED=0 `
+     -e BC_TENANT_ID=default `
+     -e BC_SERVER_MAJOR=27 `
+     -e BC_APPLICATION_ID=NAV `
+     -- node "D:\Proyectos\Aesva\business-central-mcp-esanpons\dist\stdio-server.js"
+   ```
+   The same code base serves both; only the env differs. Each appears as its own MCP
+   (`bc-ws`, `bc-ws-otrodocker`).
+
+### Which company does it open?
+
+There is **no company env var** — the server opens the **default company of `BC_USERNAME`** on the
+target server (currently `CRONUS_03` for `admin`). To work in another company at runtime, switch
+with the `bc_switch_company` tool. Convention in the JBC workspace: pick the CRONUS with the
+highest number; note that non-CRONUS companies (e.g. `JBC JAPAN`) must be named explicitly.
+
 ## Update or remove
 
 ```powershell
