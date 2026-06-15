@@ -26,7 +26,8 @@
     "start:stdio-direct": "tsx src/stdio-server.ts",
     "prepublishOnly": "tsc --noEmit && tsc",
     "validate:dxt": "npx -y @anthropic-ai/dxt validate manifest.json",
-    "build:dxt": "tsx scripts/build-dxt.ts"
+    "build:dxt": "tsx scripts/build-dxt.ts",
+    "screenshot:poc": "tsx scripts/screenshot-poc.ts"
   },
   "keywords": [
     "mcp",
@@ -46,6 +47,7 @@
   },
   "dependencies": {
     "cheerio": "^1.2.0",
+    "puppeteer-core": "^25.1.0",
     "uuid": "^13.0.0",
     "ws": "^8.20.0",
     "zod": "^4.3.6",
