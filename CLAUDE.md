@@ -323,6 +323,41 @@ Following Anthropic's official guidance:
 
 Source: https://platform.claude.com/docs/en/docs/agents-and-tools/tool-use/define-tools
 
+## Screenshot Capture (`bc_screenshot`) — Fork addition
+
+`bc_screenshot` (the 13th tool) captures a REAL PNG of the BC web client for a page/record,
+with an optional `highlight` callout box around a named field/action. Built for manuals/docs.
+It is **additive and out-of-band**: a headless system Chrome/Edge (via `puppeteer-core`, no
+bundled download) is launched on demand and torn down — it does NOT touch the WebSocket
+session or invoke queue, so normal tools keep full speed.
+
+Engine = **cookie injection** (verified live against `devel1`): bc-mcp does its own forms
+`/SignIn`, exports the cookie jar with real attributes, injects into the browser, opens a
+deep-link URL, waits for the SPA, optionally annotates, captures. Auto-falls-back to an
+in-page login if injection ever lands on `/SignIn`. Output: PNG to disk
+(`out` or `BC_SCREENSHOT_DIR`, default `./screenshots`) + inline image in the MCP response.
+
+Key empirical findings (all verified live, BC27):
+- Deep-link `?page=<id>&tenant=<t>&company=<c>&bookmark=<bm>` lands on the exact record; BC
+  normalizes to `?company=…&page=…&dc=0&bookmark=…`. The internal `bc_read_data` bookmark IS
+  the URL `bookmark=`. `company=` is honored (no cross-session wrong-company surprise).
+- **NEVER send `runinframe=1`** — it hangs a top-level load on "Getting ready…" forever.
+- Auth is ASP.NET forms/cookie (POST `/SignIn` → 302). Real cookies `.AspNetCore.Antiforgery.*`,
+  `SessionId`, `.AspNetCore.Cookies`, all `path=/BC; secure; samesite=none; httponly`.
+- Page content is inside an iframe — readiness is detected via the document title; highlight
+  lookup scans all frames.
+- The zero-dep `chrome.exe --headless --screenshot` path is NOT auth-viable (BC session
+  cookies are in-memory, a copied on-disk profile loses them).
+
+Config: `BC_SCREENSHOT_DIR` (default `./screenshots`), `BC_SCREENSHOT_CHROME` (browser path
+override; auto-detected otherwise). Requires Chrome/Edge installed. `puppeteer-core` is a
+runtime dependency, lazy-imported so it never affects startup.
+
+Files: `src/services/screenshot-service.ts`, `src/operations/screenshot.ts`,
+`src/mcp/schemas.ts` (`ScreenshotSchema`), `src/mcp/tool-registry.ts`, `src/mcp/handler.ts`
+(inline image block), `src/core/config.ts`. Comparison harness: `scripts/screenshot-poc.ts`
+(`npm run screenshot:poc`). Full reference: `docs/SCREENSHOTS.md`.
+
 ## Known Limitations
 
 ### Document Pages (Multi-Repeater)

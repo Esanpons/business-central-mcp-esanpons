@@ -76,6 +76,19 @@ export const RunReportSchema = z.object({
 
 export const ListCompaniesSchema = z.object({});
 
+export const ScreenshotSchema = z.object({
+  pageId: StringOrNumberInput.describe('Numeric BC page ID to screenshot (e.g., 21 for Customer Card, 22 for Customer List). Use bc_search_pages to find IDs.'),
+  bookmark: z.string().optional().describe('Open a specific record before capturing. Bookmarks come from list row results in bc_open_page / bc_read_data. Omit for list/role-center pages.'),
+  company: z.string().optional().describe('Company to capture in. Defaults to the session\'s current company. Pin it explicitly for consistent manuals across runs.'),
+  highlight: z.string().optional().describe('Draw a red highlight box (callout) around the field/action whose caption matches this text (e.g., "Name", "Credit Limit"). Ideal for user manuals.'),
+  out: z.string().optional().describe('Output file path. Absolute path is used as-is; a relative name is placed under BC_SCREENSHOT_DIR. Omit to auto-name as page-<id>-<timestamp>.png.'),
+  width: z.number().optional().describe('Viewport width in pixels (default 1600).'),
+  height: z.number().optional().describe('Viewport height in pixels (default 1000).'),
+  scale: z.number().optional().describe('Device scale factor for crispness (default 2 = retina-sharp). Use 1 for smaller files.'),
+  fullPage: z.boolean().optional().describe('Capture the full scrollable page instead of just the viewport (default false).'),
+  inline: z.boolean().optional().describe('Also return the PNG inline in the response so the assistant can see it (default true). Set false to only write the file.'),
+});
+
 export const WizardNavigateSchema = z.object({
   pageContextId: z.string().min(1).describe('Page context ID returned by bc_open_page for a NavigatePage / wizard.'),
   action: z.enum(['back', 'next', 'finish', 'cancel']).describe('Wizard step navigation. "next" advances, "back" returns to previous step, "finish" completes the wizard, "cancel" aborts.'),

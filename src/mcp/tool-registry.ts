@@ -12,6 +12,7 @@ import {
   ListCompaniesSchema,
   RunReportSchema,
   WizardNavigateSchema,
+  ScreenshotSchema,
   toMcpJsonSchema,
 } from './schemas.js';
 import type { OpenPageOperation } from '../operations/open-page.js';
@@ -26,6 +27,7 @@ import type { SwitchCompanyOperation } from '../operations/switch-company.js';
 import type { ListCompaniesOperation } from '../operations/list-companies.js';
 import type { RunReportOperation } from '../operations/run-report.js';
 import type { WizardNavigateOperation } from '../operations/wizard-navigate.js';
+import type { ScreenshotOperation } from '../operations/screenshot.js';
 
 export interface ToolDefinition {
   name: string;
@@ -48,6 +50,7 @@ export interface Operations {
   listCompanies: ListCompaniesOperation;
   runReport: RunReportOperation;
   wizardNavigate: WizardNavigateOperation;
+  screenshot: ScreenshotOperation;
 }
 
 export function buildToolRegistry(ops: Operations): ToolDefinition[] {
@@ -250,6 +253,29 @@ Example: { "pageContextId": "abc", "action": "next" }`,
       inputSchema: toMcpJsonSchema(WizardNavigateSchema),
       zodSchema: WizardNavigateSchema,
       execute: (input) => ops.wizardNavigate.execute(input as Parameters<typeof ops.wizardNavigate.execute>[0]),
+    },
+    {
+      name: 'bc_screenshot',
+      description: `Captures a REAL screenshot (PNG) of the Business Central web client for a given page, optionally pointing at a specific record and drawing a highlight callout box. Use this to produce images for user manuals, documentation, bug reports, or to visually confirm what a page looks like. Unlike every other bc_ tool, this renders the actual BC web UI in a headless browser -- it does NOT return structured data. For reading or editing data use bc_open_page / bc_read_data / bc_write_data instead.
+
+This is additive and out-of-band: it runs an independent headless browser session and does NOT disturb the WebSocket session your other bc_ tools use. It authenticates by itself (reusing the configured BC credentials), opens a deep-link URL, waits for the BC single-page app to finish rendering, optionally annotates, then captures.
+
+Targeting: pass pageId (required). Add bookmark to open a specific record's Card (bookmarks come from list rows returned by bc_open_page / bc_read_data). Add company to pin a company (defaults to the session's current company). For a clean manual sequence, open a list, grab the row's bookmark, then bc_screenshot the Card page id with that bookmark.
+
+Annotation: pass highlight with a field or action caption (e.g. "Name", "Credit Limit (LCY)", "Post") to draw a red box around that control -- ideal for "click here" manual steps.
+
+Output: the PNG is written to disk (out path, or auto-named under BC_SCREENSHOT_DIR) and, unless inline:false, also returned inline in the response so it can be viewed immediately. The response also reports the resolved url, pageTitle, and whether the highlight was found.
+
+Requires Chrome or Edge installed on the machine running the server (or BC_SCREENSHOT_CHROME set to a browser path). Do NOT use this for data extraction, posting, or navigation -- only for visual capture.
+
+Examples:
+- Whole Customer Card: { "pageId": 21, "bookmark": "1B_Eg...", "company": "CRONUS" }
+- With a callout on a field: { "pageId": 21, "bookmark": "1B_Eg...", "highlight": "Credit Limit (LCY)" }
+- A list page: { "pageId": 22 }
+- Save to a specific file, no inline image: { "pageId": 21, "out": "C:/manuals/customer-card.png", "inline": false }`,
+      inputSchema: toMcpJsonSchema(ScreenshotSchema),
+      zodSchema: ScreenshotSchema,
+      execute: (input) => ops.screenshot.execute(input as Parameters<typeof ops.screenshot.execute>[0]),
     },
   ];
 }

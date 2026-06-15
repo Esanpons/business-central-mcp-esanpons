@@ -24,7 +24,7 @@
 | npm package | [`business-central-mcp`](https://www.npmjs.com/package/business-central-mcp) |
 | BC versions | BC27, BC28 (wire-compatible) |
 | Auth | NavUserPassword (OAuth on roadmap) |
-| Tools | 12 |
+| Tools | 13 |
 | Tests | 284 unit/protocol + 111 integration |
 | License | MIT |
 
@@ -130,6 +130,8 @@ Restart Claude Desktop.
 | `BC_INVOKE_TIMEOUT` | No | `30000` | Per-invoke timeout in ms. Kills hung sessions. |
 | `BC_RECONNECT_MAX_RETRIES` | No | `4` | Reconnect attempts after session death. |
 | `BC_RECONNECT_BASE_DELAY` | No | `1000` | Base delay (ms) for exponential reconnect backoff. |
+| `BC_SCREENSHOT_DIR` | No | `./screenshots` | Folder where `bc_screenshot` writes PNGs (relative paths resolve against the server's working dir). |
+| `BC_SCREENSHOT_CHROME` | No | auto-detect | Path to a Chrome/Edge executable for `bc_screenshot`. Auto-detected on Windows/macOS/Linux if omitted. |
 
 ## What can it do?
 
@@ -147,6 +149,11 @@ Restart Claude Desktop.
 | `bc_list_companies` | Discover available companies |
 | `bc_run_report` | Execute reports and fill request page parameters |
 | `bc_wizard_navigate` | Drive NavigatePage / wizard flows (back / next / finish / cancel) |
+| `bc_screenshot` | Capture a REAL PNG of the BC web client for a page/record, with an optional highlight callout box -- for manuals and docs. Saves to disk and returns the image inline. Out-of-band: does not disturb the WebSocket session. |
+
+> **Screenshots for manuals:** `bc_screenshot` renders the real BC web UI (headless system
+> Chrome/Edge) and can draw a highlight callout box around a field. It runs out-of-band and
+> does not disturb the WebSocket session. See [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md).
 
 ## How it works
 

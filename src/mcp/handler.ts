@@ -122,13 +122,19 @@ export class MCPHandler {
       // Result is a Result<T, ProtocolError>
       const r = result as { ok: boolean; value?: unknown; error?: { message: string } };
       if (r.ok) {
-        return {
-          jsonrpc: '2.0',
-          id: request.id,
-          result: {
-            content: [{ type: 'text', text: JSON.stringify(r.value, null, 2) }],
-          },
-        };
+        // A tool may attach an inline image via a `__image` field ({ data, mimeType }).
+        // Surface it as an MCP image content block alongside the JSON text.
+        const value = r.value as Record<string, unknown> | undefined;
+        const image = value && (value.__image as { data?: string; mimeType?: string } | undefined);
+        const content: Array<Record<string, unknown>> = [];
+        if (image && image.data) {
+          const { __image: _omit, ...rest } = value as Record<string, unknown>;
+          content.push({ type: 'text', text: JSON.stringify(rest, null, 2) });
+          content.push({ type: 'image', data: image.data, mimeType: image.mimeType ?? 'image/png' });
+        } else {
+          content.push({ type: 'text', text: JSON.stringify(r.value, null, 2) });
+        }
+        return { jsonrpc: '2.0', id: request.id, result: { content } };
       } else {
         return {
           jsonrpc: '2.0',
