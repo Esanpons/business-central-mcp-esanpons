@@ -70,7 +70,7 @@ async function main() {
   const sessionManager = new SessionManager(sessionFactory, pageContextRepo, logger, {
     maxRetries: config.bc.reconnectMaxRetries,
     baseDelayMs: config.bc.reconnectBaseDelayMs,
-  }, metrics);
+  }, metrics, authProvider);
 
   // bc_health bypasses the ensureSession gate — it reports status even when BC is down.
   const healthDeps = { currentSession: () => sessionManager.currentSession, metrics, bc: config.bc };

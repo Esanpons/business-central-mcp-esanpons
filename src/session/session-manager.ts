@@ -5,6 +5,7 @@ import type { SessionFactory } from './session-factory.js';
 import type { PageContextRepository } from '../protocol/page-context-repo.js';
 import type { Logger } from '../core/logger.js';
 import type { Metrics } from '../services/metrics.js';
+import type { IBCAuthProvider } from '../connection/auth/auth-provider.js';
 
 export interface ReconnectOptions {
   maxRetries: number;
@@ -31,6 +32,8 @@ export class SessionManager {
   private session: BCSession | null = null;
   private servicesInvalidated = false;
   private readonly reconnectOptions: ReconnectOptions;
+  /** Recovery en curs compartit: coalesça crides concurrents en un sol intent (un sol /SignIn). */
+  private recovering: Promise<BCSession | null> | null = null;
 
   /** Exposed for testing -- override to avoid real delays. */
   protected delay(ms: number): Promise<void> {
@@ -43,6 +46,7 @@ export class SessionManager {
     private readonly logger: Logger,
     reconnectOptions?: ReconnectOptions,
     private readonly metrics?: Metrics,
+    private readonly authProvider?: IBCAuthProvider,
   ) {
     this.reconnectOptions = reconnectOptions ?? DEFAULT_RECONNECT;
   }
@@ -129,14 +133,36 @@ export class SessionManager {
    * Returns the new BCSession on success, or null if all retries are exhausted.
    */
   private async createWithBackoff(): Promise<BCSession | null> {
+    // Coalesça crides concurrents: stdio-server (rl.on('line', async)) no espera
+    // el callback, així que dues tool calls simultànies post-publish entrarien
+    // totes dues aquí. Compartir el mateix intent evita dos /SignIn i dos
+    // OpenSession competint per l'slot NTLM (i sobreescriure this.session).
+    if (this.recovering) {
+      return this.recovering;
+    }
+    this.recovering = this.runBackoffLoop();
+    try {
+      return await this.recovering;
+    } finally {
+      this.recovering = null;
+    }
+  }
+
+  private async runBackoffLoop(): Promise<BCSession | null> {
     const { maxRetries, baseDelayMs } = this.reconnectOptions;
+    const MAX_BACKOFF_MS = 30000; // cap per evitar esperes desmesurades amb maxRetries alts
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (attempt > 0) {
-        const delayMs = baseDelayMs * Math.pow(2, attempt - 1);
+        const delayMs = Math.min(baseDelayMs * Math.pow(2, attempt - 1), MAX_BACKOFF_MS);
         this.logger.info(`Reconnect attempt ${attempt}/${maxRetries} after ${delayMs}ms delay...`);
         await this.delay(delayMs);
       }
+
+      // Forçar re-login fresc en cada intent: després d'un publish el NST recicla
+      // l'app domain i invalida les cookies/CSRF; reusar-les sempre falla. Invalidar
+      // aquí fa que ConnectionFactory.create torni a executar authenticate() (/SignIn nou).
+      this.authProvider?.invalidate();
 
       const result = await this.sessionFactory.create();
 

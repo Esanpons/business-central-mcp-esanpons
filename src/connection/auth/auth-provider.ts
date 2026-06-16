@@ -11,4 +11,6 @@ export interface IBCAuthProvider {
   getWebSocketHeaders(): Record<string, string>;
   getWebSocketQueryParams(): Record<string, string>;
   isAuthenticated(): boolean;
+  /** Descarta cookies/CSRF i el flag d'auth per forçar un /SignIn fresc al següent connect (recovery post-publish). */
+  invalidate(): void;
 }

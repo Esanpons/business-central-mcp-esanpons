@@ -119,4 +119,16 @@ export class NTLMAuthProvider implements IBCAuthProvider {
   isAuthenticated(): boolean {
     return this.authenticated;
   }
+
+  invalidate(): void {
+    // Hard-reset de l'estat d'auth: deixa el singleton com acabat de crear
+    // perquè el següent connect refaci GET+POST /SignIn (cookies/CSRF nous).
+    // Necessari després d'un publish: el NST recicla l'app domain i invalida
+    // server-side les cookies forms-auth, però el flag authenticated seguia true
+    // i el gate de ConnectionFactory saltava el re-login amb credencials mortes.
+    this.authenticated = false;
+    this.cookies = '';
+    this.csrfToken = '';
+    this.logger.info('Auth state invalidated; next connection will re-sign-in');
+  }
 }

@@ -69,7 +69,7 @@ async function main() {
   const sessionManager = new SessionManager(sessionFactory, pageContextRepo, logger, {
     maxRetries: config.bc.reconnectMaxRetries,
     baseDelayMs: config.bc.reconnectBaseDelayMs,
-  }, metrics);
+  }, metrics, authProvider);
 
   let realTools: ReturnType<typeof buildToolRegistry> | null = null;
 

@@ -82,8 +82,8 @@ export function loadConfig(): AppConfig {
       applicationId: optionalEnv('BC_APPLICATION_ID', 'NAV'),
       timeoutMs: optionalEnvInt('BC_TIMEOUT', 120000),
       invokeTimeoutMs: optionalEnvInt('BC_INVOKE_TIMEOUT', 30000),
-      reconnectMaxRetries: optionalEnvInt('BC_RECONNECT_MAX_RETRIES', 4),
-      reconnectBaseDelayMs: optionalEnvInt('BC_RECONNECT_BASE_DELAY', 1000),
+      reconnectMaxRetries: optionalEnvInt('BC_RECONNECT_MAX_RETRIES', 6),
+      reconnectBaseDelayMs: optionalEnvInt('BC_RECONNECT_BASE_DELAY', 2000),
     },
     logging: {
       level: optionalEnv('LOG_LEVEL', 'info'),
