@@ -44,6 +44,14 @@ export interface CaptureInput {
   redact?: string[];
   /** Caption(s) to crop the screenshot to (clip = union bbox of the located captions + padding). */
   crop?: string[];
+  /**
+   * Reveal hidden content before capturing: expand every collapsed FastTab/group and
+   * click every "Show more" toggle so additional fields become visible. When false
+   * (default) the page is captured in whatever collapse/Show-more state BC restores,
+   * but a reveal pass still runs automatically if a requested highlight/crop target
+   * turns out to be hidden (reveal-when-needed).
+   */
+  expand?: boolean;
   out?: string;
   width?: number;
   height?: number;
@@ -114,6 +122,12 @@ export class ScreenshotService {
 
       const spaReady = await this.waitReady(p);
 
+      // Explicit reveal: expand all collapsed FastTabs + click all "Show more" up front.
+      if (input.expand) {
+        await this.revealAll(p);
+        await sleep(800); // let the relayout settle before locating controls
+      }
+
       // Redacted captions are just blur-style annotations.
       const annos: Annotation[] = [
         ...(input.annotations ?? []),
@@ -124,9 +138,23 @@ export class ScreenshotService {
       let annotations: CaptureResult['annotations'];
       let clip: Rect | undefined;
       if (annos.length || cropTargets.length) {
-        const res = await this.annotate(p, annos, cropTargets, width, height);
+        // BC content scrolls INSIDE an iframe, so a control below the fold (common once a
+        // FastTab/Show-more is revealed) is off-screen in the capture. Scroll the primary
+        // target into view so its callout/crop actually lands in the screenshot.
+        const scrollTarget = input.annotations?.[0]?.target ?? cropTargets[0];
+        let res = await this.annotate(p, annos, cropTargets, width, height, scrollTarget);
+        // Reveal-when-needed: a requested callout/crop target that wasn't found may be
+        // hidden behind a collapsed FastTab or a "Show more" toggle. Expand once and retry.
+        const missing = res.annotations.some((a) => !a.found) || (cropTargets.length > 0 && !res.clip);
+        if (missing && !input.expand) {
+          this.logger.info('[screenshot] target(s) not found — expanding groups / Show more and retrying');
+          await this.revealAll(p);
+          await sleep(800);
+          res = await this.annotate(p, annos, cropTargets, width, height, scrollTarget);
+        }
         if (input.annotations?.length) annotations = res.annotations.slice(0, input.annotations.length);
         clip = res.clip;
+        await sleep(300); // let any scroll-into-view settle before the capture
       }
 
       const file = this.resolveOut(input.out, pageId);
@@ -270,17 +298,37 @@ export class ScreenshotService {
     cropTargets: string[],
     width: number,
     height: number,
+    scrollTarget?: string,
   ): Promise<{ annotations: Array<{ target: string; found: boolean }>; clip?: Rect }> {
     // Runs inside each frame: draws annotations, returns found-rects + crop-rects.
     // NOTE: must contain NO named nested functions (no `const f = () => {}`) — under
     // tsx/esbuild those get wrapped with a `__name` helper that is undefined in the
     // browser. Only anonymous arrows passed inline to .map are safe.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const inFrame = (spec: { annotations: Annotation[]; cropTargets: string[] }) => {
+    const inFrame = (spec: { annotations: Annotation[]; cropTargets: string[]; scrollTarget?: string }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const doc = (globalThis as any).document;
+      // Clear annotations drawn by a previous pass so a retry never double-draws.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      Array.prototype.slice.call(doc.querySelectorAll('[data-bcmcp]')).forEach((n: any) => n.remove());
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const all: any[] = Array.prototype.slice.call(doc.querySelectorAll('*'));
+      // Scroll the primary target into view BEFORE measuring, so a revealed control below
+      // the (iframe) fold lands inside the captured viewport. position:fixed callouts use
+      // viewport-relative rects, so they stay aligned after the scroll.
+      if (spec.scrollTarget) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let st: any = null;
+        for (let i = 0; i < all.length; i++) {
+          const ar = all[i].getAttribute('aria-label');
+          if (ar && ar.trim() === spec.scrollTarget) { st = all[i]; break; }
+        }
+        if (!st) for (let i = 0; i < all.length; i++) {
+          const tc = all[i].textContent;
+          if (all[i].childElementCount === 0 && tc && tc.trim() === spec.scrollTarget) { st = all[i].closest('[class]') || all[i]; break; }
+        }
+        if (st && st.scrollIntoView) st.scrollIntoView({ block: 'center', inline: 'nearest' });
+      }
       const Z = 2147483647;
       const pad = 6;
 
@@ -301,29 +349,35 @@ export class ScreenshotService {
         const style = a.style || 'box';
         if (style === 'blur') {
           const b = doc.createElement('div');
+          b.setAttribute('data-bcmcp', '1');
           b.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;background:#cfd3da;border-radius:3px;z-index:${Z};pointer-events:none;`;
           doc.body.appendChild(b);
           return { found: true, rect: { x: r.left, y: r.top, w: r.width, h: r.height } };
         }
         const box = doc.createElement('div');
+        box.setAttribute('data-bcmcp', '1');
         box.style.cssText = `position:fixed;left:${r.left - pad}px;top:${r.top - pad}px;width:${r.width + pad * 2}px;height:${r.height + pad * 2}px;border:3px solid #e11;border-radius:4px;z-index:${Z};pointer-events:none;`;
         doc.body.appendChild(box);
         if (style === 'badge' && a.label) {
           const badge = doc.createElement('div');
+          badge.setAttribute('data-bcmcp', '1');
           badge.textContent = a.label;
           badge.style.cssText = `position:fixed;left:${r.left - pad - 13}px;top:${r.top - pad - 13}px;width:24px;height:24px;border-radius:50%;background:#e11;color:#fff;font:bold 14px sans-serif;display:flex;align-items:center;justify-content:center;z-index:${Z};pointer-events:none;box-shadow:0 1px 3px rgba(0,0,0,.4);`;
           doc.body.appendChild(badge);
         } else if (a.label) {
           const chip = doc.createElement('div');
+          chip.setAttribute('data-bcmcp', '1');
           chip.textContent = a.label;
           chip.style.cssText = `position:fixed;left:${r.left - pad}px;top:${r.top - pad - 22}px;background:#e11;color:#fff;font:bold 12px sans-serif;padding:1px 6px;border-radius:3px;z-index:${Z};pointer-events:none;white-space:nowrap;`;
           doc.body.appendChild(chip);
         }
         if (style === 'arrow') {
           const line = doc.createElement('div');
+          line.setAttribute('data-bcmcp', '1');
           line.style.cssText = `position:fixed;left:${r.left - pad - 50}px;top:${r.top + r.height / 2 - 1}px;width:50px;height:3px;background:#e11;z-index:${Z};pointer-events:none;`;
           doc.body.appendChild(line);
           const head = doc.createElement('div');
+          head.setAttribute('data-bcmcp', '1');
           head.style.cssText = `position:fixed;left:${r.left - pad - 9}px;top:${r.top + r.height / 2 - 6}px;width:0;height:0;border-top:6px solid transparent;border-bottom:6px solid transparent;border-left:9px solid #e11;z-index:${Z};pointer-events:none;`;
           doc.body.appendChild(head);
         }
@@ -352,7 +406,7 @@ export class ScreenshotService {
     const perFrame: Array<{ drawn: Array<{ found: boolean; rect: Rect | null }>; crops: Array<Rect | null> }> = [];
     for (const f of p.frames()) {
       try {
-        perFrame.push(await f.evaluate(inFrame, { annotations, cropTargets }));
+        perFrame.push(await f.evaluate(inFrame, { annotations, cropTargets, scrollTarget }));
       } catch (e) {
         // Cross-origin / empty frames are expected — keep this at debug level.
         this.logger.debug('screenshot', `annotate frame skipped: ${e instanceof Error ? e.message : String(e)}`);
@@ -380,6 +434,70 @@ export class ScreenshotService {
       if (maxX > minX && maxY > minY) clip = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
     }
     return { annotations: annResults, clip };
+  }
+
+  // ---------- reveal hidden content (collapsed FastTabs + "Show more") ----------
+  // Verified live against BC27 (devel1):
+  //  - A collapsible FastTab/group header is `span.ms-nav-columns-caption[aria-expanded]`
+  //    (sub-groups use `.ms-nav-group-caption[aria-expanded]`). aria-expanded is a clean
+  //    state signal, so expanding = clicking the ones currently "false".
+  //  - The "Show more"/"Show less" toggle is `button.show-more-fields-button`. It carries
+  //    NO state attribute and its class is identical in both states; only the locale-bound
+  //    caption/title flips. So state is detected by EFFECT: clicking it while collapsed
+  //    reveals fields (visible-node count rises); if the count drops we just collapsed an
+  //    already-expanded tab and click again to undo. This stays locale-independent.
+  // Both steps are independent: expanding a FastTab shows its standard fields, while the
+  // additional ("Importance = Additional") fields stay hidden until Show more is clicked.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async revealAll(p: any): Promise<void> {
+    for (const f of p.frames()) {
+      try {
+        // 1. Expand collapsed FastTabs/groups. Loop because expanding one can surface
+        //    nested collapsibles; bounded so a pathological page can't spin forever.
+        for (let pass = 0; pass < 6; pass++) {
+          const clicked: number = await f.evaluate(() => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const doc = (globalThis as any).document;
+            const caps = doc.querySelectorAll(
+              '.ms-nav-columns-caption[aria-expanded="false"], .ms-nav-group-caption[aria-expanded="false"]',
+            );
+            for (let i = 0; i < caps.length; i++) caps[i].click();
+            return caps.length;
+          });
+          if (!clicked) break;
+          await sleep(300);
+        }
+        // 2. Click each "Show more" that is currently collapsed (detected by effect).
+        const count: number = await f.evaluate(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          () => (globalThis as any).document.querySelectorAll('button.show-more-fields-button').length,
+        );
+        for (let i = 0; i < count; i++) {
+          await f.evaluate(async (idx: number) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const doc = (globalThis as any).document;
+            const btns = doc.querySelectorAll('button.show-more-fields-button');
+            const b = btns[idx];
+            if (!b) return;
+            const all1 = doc.querySelectorAll('*');
+            let before = 0;
+            for (let k = 0; k < all1.length; k++) if (all1[k].offsetParent !== null) before++;
+            b.click();
+            await new Promise((r) => setTimeout(r, 400));
+            const all2 = doc.querySelectorAll('*');
+            let after = 0;
+            for (let k = 0; k < all2.length; k++) if (all2[k].offsetParent !== null) after++;
+            if (after < before) {
+              b.click();
+              await new Promise((r) => setTimeout(r, 250));
+            }
+          }, i);
+        }
+      } catch (e) {
+        // Cross-origin / empty frames are expected — keep this at debug level.
+        this.logger.debug('screenshot', `reveal frame skipped: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
   }
 
   // ---------- output path ----------

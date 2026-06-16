@@ -12,6 +12,7 @@ export interface ScreenshotInput {
   highlight?: HighlightInput;
   redact?: string[];
   crop?: string | string[];
+  expand?: boolean;
   out?: string;
   width?: number;
   height?: number;
@@ -55,6 +56,7 @@ export class ScreenshotOperation {
       annotations: normalizeHighlight(input.highlight),
       redact: input.redact,
       crop: input.crop === undefined ? undefined : Array.isArray(input.crop) ? input.crop : [input.crop],
+      expand: input.expand,
       out: input.out,
       width: input.width,
       height: input.height,

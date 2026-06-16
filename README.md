@@ -150,13 +150,15 @@ Restart Claude Desktop.
 | `bc_list_companies` | Discover available companies |
 | `bc_run_report` | Execute reports and fill request page parameters |
 | `bc_wizard_navigate` | Drive NavigatePage / wizard flows (back / next / finish / cancel) |
-| `bc_screenshot` | Capture a REAL PNG of the BC web client for a page/record. Annotate with highlight callout boxes (single, auto-numbered badges, arrows), redact fields, and crop to a section -- for manuals and docs. Saves to disk and returns the image inline. Out-of-band. |
+| `bc_screenshot` | Capture a REAL PNG of the BC web client for a page/record. Annotate with highlight callout boxes (single, auto-numbered badges, arrows), redact fields, and crop to a section -- for manuals and docs. Fields in collapsed FastTabs or behind "Show more" are revealed automatically when highlighted (or pass `expand:true`). Saves to disk and returns the image inline. Out-of-band. |
 | `bc_build_manual` | Build a step-by-step user manual (Markdown + PDF + DOCX) with annotated screenshots from a list of steps. The high-level companion to `bc_screenshot`. |
 | `bc_health` | Server/session diagnostics: connected?, active company, open forms, modal depth, and metrics (invokes, errors, reconnects, uptime). Answers even when BC is down. |
 
 > **Screenshots for manuals:** `bc_screenshot` renders the real BC web UI (headless system
-> Chrome/Edge) and can draw a highlight callout box around a field. It runs out-of-band and
-> does not disturb the WebSocket session. See [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md).
+> Chrome/Edge) and can draw a highlight callout box around a field. Collapsed FastTabs and
+> "Show more" (Additional) fields are revealed automatically when you highlight/crop them, or
+> pass `expand:true` to capture a fully-expanded page. It runs out-of-band and does not disturb
+> the WebSocket session. See [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md).
 
 ## How it works
 

@@ -358,6 +358,25 @@ Files: `src/services/screenshot-service.ts`, `src/operations/screenshot.ts`,
 (inline image block), `src/core/config.ts`. Comparison harness: `scripts/screenshot-poc.ts`
 (`npm run screenshot:poc`). Full reference: `docs/SCREENSHOTS.md`.
 
+**Revealing collapsed FastTabs & "Show more" (screenshot-only).** Card/document pages hide
+fields two ways in the web client: collapsed FastTabs/groups, and per-tab "Show more"
+(`Importance = Additional`) toggles. This affects ONLY screenshots — `bc_read_data` /
+`bc_open_page` / `bc_navigate` already return ALL fields regardless of collapse/Show-more state
+(verified: a Sales Order drill-down returns every Invoice Details + Shipping/Billing field).
+`bc_screenshot` (and each `bc_build_manual` step) takes an `expand?: boolean`. When `true` it
+expands every collapsed FastTab and clicks every "Show more" before capture. Even when `false`,
+a reveal pass fires AUTOMATICALLY when a requested `highlight`/`crop` caption isn't found
+(reveal-when-needed), then the target is `scrollIntoView`-ed (BC content scrolls inside an
+iframe, so below-fold revealed fields would otherwise miss the viewport). Empirical selectors
+(BC27 `devel1`): FastTab header = `span.ms-nav-columns-caption[aria-expanded]`
+(`.ms-nav-group-caption` for sub-groups), expand = click the `="false"` ones; "Show more" =
+`button.show-more-fields-button` which has NO state attribute and an invariant class (only the
+locale-bound caption flips más/menos), so its state is detected BY EFFECT (visible-node count
+delta) to stay locale-independent. Files: `src/services/screenshot-service.ts` (`revealAll`,
+`annotate` scroll-into-view), `src/operations/screenshot.ts`, `src/mcp/schemas.ts`,
+`src/services/manual-service.ts`. Live check: `scripts/verify-expand.ts`; integration tests in
+`tests/integration/screenshot.test.ts`.
+
 **Annotations & crop (caption-geometry).** `highlight` accepts a caption (one box), a list of
 captions (auto-numbered badges for ordered steps), or `{target,label,style}` objects
 (style: box / badge / arrow / blur). `redact` blacks out fields; `crop` clips to the bounding

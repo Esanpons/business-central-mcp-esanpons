@@ -29,6 +29,7 @@ invoke queue that the other tools use, so normal bc-mcp operations keep their fu
 | `highlight` | No | — | Callout(s) by caption. A **string** → one red box. A **list of strings** → auto-numbered badges (1,2,3…) for ordered steps. A **list of `{target,label,style}`** → full control (`style`: `box` / `badge` / `arrow` / `blur`). |
 | `redact` | No | — | List of captions to black out (opaque box) for privacy. |
 | `crop` | No | — | Caption(s) to crop the image to: clipped to the bounding box enclosing the located caption(s) + padding. Use to capture just one field/section area. |
+| `expand` | No | `false` | Reveal hidden content before capturing: expand every collapsed FastTab/group and click every **"Show more"** toggle so additional fields appear. Even when `false`, a reveal pass runs **automatically** if a requested `highlight`/`crop` caption turns out to be hidden behind a collapsed group or "Show more" (reveal-when-needed). Set `true` to force the fully-expanded view for a whole-section screenshot. See [Revealing collapsed FastTabs and "Show more"](#revealing-collapsed-fasttabs-and-show-more). |
 | `out` | No | `page-<id>-<timestamp>.png` | Output file. Absolute path is used as-is; a relative name goes under `BC_SCREENSHOT_DIR`. |
 | `width` | No | `1600` | Viewport width (px). |
 | `height` | No | `1000` | Viewport height (px). |
@@ -65,7 +66,53 @@ invoke queue that the other tools use, so normal bc-mcp operations keep their fu
 
 // Save to a specific file, do not return the image inline
 { "pageId": 21, "out": "C:/manuals/customer-card.png", "inline": false }
+
+// Highlight a field that is hidden behind "Show more" in a collapsed FastTab —
+// the reveal pass fires automatically because the target isn't visible yet.
+{ "pageId": 42, "bookmark": "1D_J…", "highlight": "VAT Registration No." }
+
+// Force the whole "Invoice Details" FastTab expanded (incl. its additional fields)
+{ "pageId": 42, "bookmark": "1D_J…", "expand": true, "crop": "Invoice Details" }
 ```
+
+## Revealing collapsed FastTabs and "Show more"
+
+In the BC web client, a card/document page hides part of its fields two ways:
+
+- **Collapsed FastTabs / groups** — a FastTab (e.g. *Invoice Details*, *Shipping and
+  Billing*) can be collapsed, so its fields aren't rendered until you expand it.
+- **"Show more" (Mostrar más)** — within a FastTab, fields whose AL `Importance` is
+  *Additional* are hidden behind a per-tab **Show more / Show less** toggle.
+
+> **Data tools are unaffected.** `bc_read_data` / `bc_open_page` / `bc_navigate` already
+> return **all** fields regardless of collapse or "Show more" state — that state is purely a
+> web-client visual concern. The reveal feature exists **only for the screenshot/manual
+> path**, where a control must be physically on screen to appear in the PNG.
+
+`bc_screenshot` (and each `bc_build_manual` step) handles both:
+
+1. **Reveal-when-needed (automatic).** If a requested `highlight` / `crop` caption can't be
+   found on the first pass, the tool expands every collapsed FastTab, clicks every "Show
+   more", and retries once. So you can highlight an *Additional* field by name and it just
+   works — no flag needed.
+2. **`expand: true` (explicit).** Forces the fully-expanded view up front — every FastTab
+   open and every "Show more" clicked — for a clean whole-section screenshot even when you
+   aren't highlighting a specific hidden field.
+
+After revealing, the primary target is **scrolled into view** before capture (BC content
+scrolls *inside an iframe*, so a now-revealed field below the fold would otherwise be off the
+captured viewport).
+
+How it works (verified live against BC27 `devel1`):
+
+- A collapsible FastTab header is `span.ms-nav-columns-caption[aria-expanded]` (sub-groups use
+  `.ms-nav-group-caption[aria-expanded]`); `aria-expanded` is a clean state signal, so
+  expanding = clicking the ones currently `"false"`.
+- The "Show more" toggle is `button.show-more-fields-button`. It carries **no state
+  attribute** and its class is identical in both states (only the locale-bound caption flips
+  *más*↔*menos*). State is therefore detected **by effect**: clicking it while collapsed
+  reveals fields (visible-node count rises); if the count drops, an already-expanded tab was
+  collapsed and it's clicked again to undo. This keeps the logic **locale-independent**.
 
 ## Building manuals — `bc_build_manual`
 
@@ -144,7 +191,12 @@ These were verified live and drive the implementation:
   cookies are `.AspNetCore.Antiforgery.*`, `SessionId`, `.AspNetCore.Cookies`, all scoped
   `path=/BC; secure; samesite=none; httponly` — reproduced faithfully on injection.
 - **Page content lives in an iframe**, so the "rendered" signal is the document **title**
-  flipping to the page's own title, and highlight lookup searches **all frames**.
+  flipping to the page's own title, and highlight lookup searches **all frames**. The iframe
+  also scrolls independently of the outer page — neither `fullPage` nor a tall viewport shows
+  below-fold content, so the primary target is `scrollIntoView`-ed before capture.
+- **Collapsed FastTabs / "Show more" hide fields visually only.** A control must be expanded
+  *and* scrolled on-screen to appear in the PNG — see
+  [Revealing collapsed FastTabs and "Show more"](#revealing-collapsed-fasttabs-and-show-more).
 
 ## Troubleshooting
 
@@ -153,7 +205,7 @@ These were verified live and drive the implementation:
 | Response shows `authenticated: false` | Wrong `BC_USERNAME` / `BC_PASSWORD`, or BC not reachable. The probe `node scripts/auth-probe.mjs` (with env set) prints the live sign-in result. |
 | `No Chrome/Edge found` | Install Chrome/Edge or set `BC_SCREENSHOT_CHROME`. |
 | Screenshot shows "Getting ready…" | A cold BC session is still compiling; retry. (The tool already waits up to ~60s and never sends `runinframe`.) |
-| `highlight.found: false` | The caption text didn't match a visible control. Use the exact caption as shown on the page (e.g. `"Credit Limit (LCY)"`), or omit `highlight`. |
+| `highlight.found: false` | The caption text didn't match a control even after the automatic reveal pass. Use the exact caption as shown on the page (e.g. `"Credit Limit (LCY)"`); if it lives in a collapsed FastTab / behind "Show more" the tool already expands those, so a remaining miss means the caption is wrong or the field is genuinely absent for that record. |
 | `puppeteer-core is not installed` | `npm install puppeteer-core`. |
 
 ## Source
@@ -163,3 +215,5 @@ These were verified live and drive the implementation:
 - `src/mcp/schemas.ts` (`ScreenshotSchema`), `src/mcp/tool-registry.ts` (`bc_screenshot`)
 - `src/mcp/handler.ts` — inline image content block
 - `scripts/screenshot-poc.ts` — the 4-method comparison harness (`npm run screenshot:poc`)
+- `scripts/verify-expand.ts` — live check of the reveal feature against `devel1` (`npx tsx scripts/verify-expand.ts`)
+- `tests/integration/screenshot.test.ts` — live screenshot tests incl. reveal + `expand`

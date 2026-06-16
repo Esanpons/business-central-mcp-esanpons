@@ -269,6 +269,8 @@ Targeting: pass pageId (required). Add bookmark to open a specific record's Card
 
 Annotation (highlight): a single caption draws one red box; a list of captions draws auto-numbered badges (1,2,3...) for ordered steps; a list of { target, label, style } objects gives full control (style: box / badge / arrow / blur). Use redact to black out sensitive fields, and crop to clip the image to one section/field area (the bounding box of the given caption(s)). All target a control by its visible caption -- ideal for "click here" manual steps.
 
+Hidden fields (collapsed FastTabs / "Show more"): the BC web client hides fields inside collapsed FastTabs and behind per-tab "Show more" (Additional-importance) toggles. You do NOT need to do anything special -- if you highlight/crop a caption that is hidden, the tool automatically expands the needed group and clicks "Show more", scrolls it into view, and retries (reveal-when-needed). Pass expand:true to force the whole page fully expanded (every FastTab open, every "Show more" clicked) for a complete section screenshot even without highlighting. (This affects screenshots only -- bc_read_data/bc_open_page already return all fields regardless of collapse state.)
+
 Output: the PNG is written to disk (out path, or auto-named under BC_SCREENSHOT_DIR) and, unless inline:false, also returned inline in the response so it can be viewed immediately. The response also reports the resolved url, pageTitle, which annotations were found, and whether it was cropped.
 
 Requires Chrome or Edge installed on the machine running the server (or BC_SCREENSHOT_CHROME set to a browser path). Do NOT use this for data extraction, posting, or navigation -- only for visual capture.
@@ -279,6 +281,8 @@ Examples:
 - Numbered steps: { "pageId": 21, "highlight": ["Name", "Credit Limit (LCY)", "Blocked"] }
 - Arrow + redaction: { "pageId": 21, "highlight": [{ "target": "Post", "style": "arrow", "label": "Post here" }], "redact": ["Name"] }
 - Crop to a field area: { "pageId": 21, "bookmark": "1B_Eg...", "crop": "Credit Limit (LCY)" }
+- Highlight a field hidden behind "Show more" (auto-revealed): { "pageId": 42, "bookmark": "1D_J...", "highlight": "VAT Registration No." }
+- Force the whole page expanded: { "pageId": 42, "bookmark": "1D_J...", "expand": true }
 - Save to a file, no inline image: { "pageId": 21, "out": "C:/manuals/customer-card.png", "inline": false }`,
       inputSchema: toMcpJsonSchema(ScreenshotSchema),
       zodSchema: ScreenshotSchema,
@@ -288,7 +292,7 @@ Examples:
       name: 'bc_build_manual',
       description: `Builds a step-by-step USER MANUAL of Business Central and writes it as Markdown, PDF, and/or DOCX. You provide the ordered steps (each a heading, optional prose, and an optional screenshot spec); the tool captures the annotated screenshots and assembles the document. This is the high-level companion to bc_screenshot -- use it to produce shareable documentation, training material, or onboarding guides.
 
-Each step's screenshot spec is the same shape as bc_screenshot (pageId, bookmark, company, highlight, redact, crop): highlight a list of captions to get auto-numbered "click here" callouts. Alternatively a step can reference an existing PNG via image, or carry only prose (no screenshot).
+Each step's screenshot spec is the same shape as bc_screenshot (pageId, bookmark, company, highlight, redact, crop, expand): highlight a list of captions to get auto-numbered "click here" callouts. Fields hidden in collapsed FastTabs or behind "Show more" are revealed automatically when you highlight/crop them; pass expand:true on a step to force its page fully expanded. Alternatively a step can reference an existing PNG via image, or carry only prose (no screenshot).
 
 Output: files are written under BC_MANUAL_DIR (or outDir), named from the title (or name). formats defaults to all three: md (images as relative links), pdf (rendered via the headless browser), docx (images embedded). The response returns the file paths and the captured image paths. This runs out-of-band (its own browser) and does not disturb the WebSocket session.
 

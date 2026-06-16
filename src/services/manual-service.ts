@@ -16,6 +16,7 @@ export interface ManualScreenshotSpec {
   highlight?: HighlightInput;
   redact?: string[];
   crop?: string | string[];
+  expand?: boolean;
   width?: number;
   height?: number;
   scale?: number;
@@ -87,6 +88,7 @@ export class ManualService {
           annotations: normalizeHighlight(s.highlight),
           redact: s.redact,
           crop: s.crop === undefined ? undefined : Array.isArray(s.crop) ? s.crop : [s.crop],
+          expand: s.expand,
           width: s.width,
           height: s.height,
           scale: s.scale,

@@ -102,4 +102,32 @@ describe.skipIf(!RUN)('bc_screenshot live', () => {
     if (!r.ok) return;
     expect(r.value.cropped).toBe(true);
   }, 90_000);
+
+  // "VAT Registration No." is an Additional-importance field on the Sales Order
+  // "Invoice Details" FastTab — hidden behind "Show more", and that tab is collapsed
+  // by default. Highlighting it must trigger reveal-when-needed (expand + Show more).
+  it('reveals a field hidden behind "Show more" when it is highlighted', async () => {
+    const list = await openPage.execute({ pageId: 9305 }); // Sales Orders
+    expect(list.ok).toBe(true);
+    if (!list.ok) return;
+    const bookmark = list.value.sections.flatMap((s) => s.rows ?? [])[0]?.bookmark;
+    expect(bookmark).toBeTruthy();
+
+    const r = await screenshot.execute({ pageId: 42, bookmark, highlight: 'VAT Registration No.', inline: false });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.annotations?.[0]).toEqual({ target: 'VAT Registration No.', found: true });
+  }, 120_000);
+
+  it('expand:true reveals all FastTabs + "Show more" up front', async () => {
+    const list = await openPage.execute({ pageId: 9305 });
+    expect(list.ok).toBe(true);
+    if (!list.ok) return;
+    const bookmark = list.value.sections.flatMap((s) => s.rows ?? [])[0]?.bookmark;
+
+    const r = await screenshot.execute({ pageId: 42, bookmark, expand: true, highlight: 'VAT Registration No.', inline: false });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.annotations?.[0]).toEqual({ target: 'VAT Registration No.', found: true });
+  }, 120_000);
 });
