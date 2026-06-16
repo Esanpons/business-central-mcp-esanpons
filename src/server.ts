@@ -17,6 +17,7 @@ import { NavigationService } from './services/navigation-service.js';
 import { SearchService } from './services/search-service.js';
 import { ScreenshotService } from './services/screenshot-service.js';
 import { ManualService } from './services/manual-service.js';
+import { ObjectIndexService } from './services/object-index-service.js';
 import { OpenPageOperation } from './operations/open-page.js';
 import { ReadDataOperation } from './operations/read-data.js';
 import { WriteDataOperation } from './operations/write-data.js';
@@ -31,6 +32,8 @@ import { RunReportOperation } from './operations/run-report.js';
 import { WizardNavigateOperation } from './operations/wizard-navigate.js';
 import { ScreenshotOperation } from './operations/screenshot.js';
 import { BuildManualOperation } from './operations/build-manual.js';
+import { FindObjectOperation } from './operations/find-object.js';
+import { RefreshObjectsOperation } from './operations/refresh-objects.js';
 import { buildToolRegistry, buildHealthTool, type Operations } from './mcp/tool-registry.js';
 import { MCPHandler } from './mcp/handler.js';
 import { Metrics } from './services/metrics.js';
@@ -83,6 +86,7 @@ async function main() {
     const navigationService = new NavigationService(s, pageContextRepo, logger);
     const searchService = new SearchService(s, logger);
     const screenshotService = new ScreenshotService(config.bc, config.screenshotDir, () => s.companyName, logger);
+    const objectIndexService = new ObjectIndexService(pageService, config.stateDir, config.bc.baseUrl, config.bc.tenantId, logger);
 
     const operations: Operations = {
       openPage: new OpenPageOperation(pageService),
@@ -99,6 +103,8 @@ async function main() {
       wizardNavigate: new WizardNavigateOperation(actionService, pageContextRepo),
       screenshot: new ScreenshotOperation(screenshotService),
       buildManual: new BuildManualOperation(new ManualService(screenshotService, config.manualDir, logger)),
+      findObject: new FindObjectOperation(objectIndexService),
+      refreshObjects: new RefreshObjectsOperation(objectIndexService),
     };
 
     return { operations, tools: buildToolRegistry(operations) };

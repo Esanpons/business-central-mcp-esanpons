@@ -15,9 +15,13 @@ import {
   ScreenshotSchema,
   BuildManualSchema,
   HealthSchema,
+  FindObjectSchema,
+  RefreshObjectsSchema,
   toMcpJsonSchema,
 } from './schemas.js';
 import { HealthOperation, type HealthDeps } from '../operations/health.js';
+import type { FindObjectOperation } from '../operations/find-object.js';
+import type { RefreshObjectsOperation } from '../operations/refresh-objects.js';
 import type { OpenPageOperation } from '../operations/open-page.js';
 import type { ReadDataOperation } from '../operations/read-data.js';
 import type { WriteDataOperation } from '../operations/write-data.js';
@@ -56,6 +60,8 @@ export interface Operations {
   wizardNavigate: WizardNavigateOperation;
   screenshot: ScreenshotOperation;
   buildManual: BuildManualOperation;
+  findObject: FindObjectOperation;
+  refreshObjects: RefreshObjectsOperation;
 }
 
 export function buildToolRegistry(ops: Operations): ToolDefinition[] {
@@ -311,6 +317,38 @@ Example:
       inputSchema: toMcpJsonSchema(BuildManualSchema),
       zodSchema: BuildManualSchema,
       execute: (input) => ops.buildManual.execute(input as Parameters<typeof ops.buildManual.execute>[0]),
+    },
+    {
+      name: 'bc_find_object',
+      description: `Resolves a Business Central object (page, report, table, codeunit, ...) by NAME or keyword to its numeric ID, using a cached index of the environment's objects (standard + add-ins + custom). Use this BEFORE bc_open_page when you do not know the page ID: search by name/caption, get the id, then open by id. Opening by numeric id is robust (ids are stable); resolving a name to an id avoids guessing.
+
+Each result is { type, id, name, caption, app }: type is "Page" / "Report" / "TableData" / "Codeunit" / etc., id is the numeric Object ID, name is the AL object name, caption is the localized caption (in the BC user's language), app is the owning app (e.g. "Base Application", or a custom/ISV app name). Filter to pages with type: "Page".
+
+The index is populated by bc_refresh_objects (run it first if this returns empty or stale). It is read from a cached JSON, so it is fast and does not hit BC.
+
+Examples:
+- { "query": "customer", "type": "Page" } -> the Customer-related pages with their ids.
+- { "query": "Customer List", "type": "Page" } -> { id: 22, name: "Customer List", ... }.
+- { "query": "9174" } -> the object with id 9174.`,
+      inputSchema: toMcpJsonSchema(FindObjectSchema),
+      zodSchema: FindObjectSchema,
+      execute: (input) => ops.findObject.execute(input as Parameters<typeof ops.findObject.execute>[0]),
+    },
+    {
+      name: 'bc_refresh_objects',
+      description: `Refreshes the cached index of Business Central objects used by bc_find_object, by reading the "All Objects with Caption" system page (9174) for a range of Object IDs and storing id + name + caption + app to a local JSON. Run this once before using bc_find_object, and again whenever objects change.
+
+Default (no args): refreshes the CUSTOM + add-in space (Object ID >= 50000) — fast, a handful of reads. Run it whenever you (or an ISV) deploy/update an app. Pass { from, to } to refresh a specific Object ID range (e.g. one add-in's range). Pass { all: true } for the FULL range including standard Microsoft objects — this is thousands of reads and takes minutes; only needed after a BC platform/app upgrade.
+
+Returns { scanned, totalInIndex, range, reads, updatedAt }. Requires a live BC session (it reads from BC). Do NOT call this on every lookup — the index is cached; refresh only when objects may have changed.
+
+Examples:
+- { } -> refresh all custom + add-in objects (the daily driver).
+- { "from": 6175000, "to": 6175999 } -> refresh one add-in's object range.
+- { "all": true } -> full rebuild including standard (slow).`,
+      inputSchema: toMcpJsonSchema(RefreshObjectsSchema),
+      zodSchema: RefreshObjectsSchema,
+      execute: (input) => ops.refreshObjects.execute(input as Parameters<typeof ops.refreshObjects.execute>[0]),
     },
   ];
 }

@@ -78,6 +78,18 @@ export const ListCompaniesSchema = z.object({});
 
 export const HealthSchema = z.object({});
 
+export const FindObjectSchema = z.object({
+  query: z.string().min(1).describe('Name/caption keyword or numeric ID to look up (e.g. "Customer List", "client", "22"). Matches Object Name and the localized Object Caption.'),
+  type: z.string().optional().describe('Filter by object type: "Page", "Report", "Table"/"TableData", "Codeunit", "Query", "XMLport", etc. Omit for any type. Use "Page" to find a page id to open with bc_open_page.'),
+  limit: z.number().optional().describe('Max results to return (default 25).'),
+});
+
+export const RefreshObjectsSchema = z.object({
+  from: z.number().optional().describe('Start of the Object ID range to refresh (default 50000, i.e. custom + add-ins).'),
+  to: z.number().optional().describe('End of the Object ID range to refresh (default a very high value covering PTE 50000-99999 and high ISV/Microsoft ranges).'),
+  all: z.boolean().optional().describe('Refresh the FULL range including standard Microsoft objects (thousands of reads — slow, minutes). Use after a BC upgrade. Omit for the fast custom/add-in refresh.'),
+});
+
 const AnnotationSchema = z.object({
   target: z.string().describe('Caption / aria-label of the control to annotate (exact visible text).'),
   label: z.string().optional().describe('Text or number shown on the callout (e.g. "1").'),

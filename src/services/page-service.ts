@@ -74,11 +74,16 @@ export class PageService {
     this.autoLoadSections = options?.autoLoadSections ?? DEFAULT_AUTO_LOAD_SECTIONS;
   }
 
-  async openPage(pageId: string, options?: { bookmark?: string; tenantId?: string }): Promise<Result<PageContext, ProtocolError>> {
+  async openPage(pageId: string, options?: { bookmark?: string; tenantId?: string; filter?: string }): Promise<Result<PageContext, ProtocolError>> {
     const tenantId = options?.tenantId ?? 'default';
     let query = `page=${pageId}&tenant=${tenantId}`;
     if (options?.bookmark) {
       query += `&bookmark=${encodeURIComponent(options.bookmark)}`;
+    }
+    if (options?.filter) {
+      // BC honors a filter in the OpenForm query (verified live against page 9174).
+      // Encode spaces and single quotes the way the web client does (%20 / %27).
+      query += `&filter=${options.filter.replace(/ /g, '%20').replace(/'/g, '%27')}`;
     }
 
     const interaction: OpenFormInteraction = {
