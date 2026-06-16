@@ -26,7 +26,9 @@ invoke queue that the other tools use, so normal bc-mcp operations keep their fu
 | `pageId` | Yes | — | Numeric BC page ID (e.g. 21 Customer Card, 22 Customer List). Use `bc_search_pages` to find IDs. |
 | `bookmark` | No | — | Open a specific record's Card. Bookmarks come from list rows in `bc_open_page` / `bc_read_data`. Omit for list / Role Center pages. |
 | `company` | No | session's current company | Pin a company explicitly for consistent manuals across runs. |
-| `highlight` | No | — | Draw a **red callout box** around the field/action whose caption matches this text (e.g. `"Name"`, `"Credit Limit (LCY)"`, `"Post"`). |
+| `highlight` | No | — | Callout(s) by caption. A **string** → one red box. A **list of strings** → auto-numbered badges (1,2,3…) for ordered steps. A **list of `{target,label,style}`** → full control (`style`: `box` / `badge` / `arrow` / `blur`). |
+| `redact` | No | — | List of captions to black out (opaque box) for privacy. |
+| `crop` | No | — | Caption(s) to crop the image to: clipped to the bounding box enclosing the located caption(s) + padding. Use to capture just one field/section area. |
 | `out` | No | `page-<id>-<timestamp>.png` | Output file. Absolute path is used as-is; a relative name goes under `BC_SCREENSHOT_DIR`. |
 | `width` | No | `1600` | Viewport width (px). |
 | `height` | No | `1000` | Viewport height (px). |
@@ -49,15 +51,47 @@ invoke queue that the other tools use, so normal bc-mcp operations keep their fu
 // Whole Customer Card for one record
 { "pageId": 21, "bookmark": "1B_Eg…", "company": "CRONUS_01" }
 
-// With a callout on a field (ideal for a "fill this in" manual step)
+// One callout on a field
 { "pageId": 21, "bookmark": "1B_Eg…", "highlight": "Credit Limit (LCY)" }
 
-// A list page
-{ "pageId": 22 }
+// Numbered steps (auto badges 1,2,3…)
+{ "pageId": 21, "highlight": ["Name", "Credit Limit (LCY)", "Blocked"] }
+
+// Arrow + label, and redact a field
+{ "pageId": 21, "highlight": [{ "target": "Post", "style": "arrow", "label": "Post here" }], "redact": ["Name"] }
+
+// Crop to a field area
+{ "pageId": 21, "bookmark": "1B_Eg…", "crop": "Credit Limit (LCY)" }
 
 // Save to a specific file, do not return the image inline
 { "pageId": 21, "out": "C:/manuals/customer-card.png", "inline": false }
 ```
+
+## Building manuals — `bc_build_manual`
+
+The companion tool assembles a step-by-step manual to **Markdown + PDF + DOCX** with annotated
+screenshots. You give it ordered steps; it captures each screenshot (reusing the screenshot
+engine) and renders the document.
+
+```jsonc
+{
+  "title": "How to create a customer",
+  "intro": "This guide shows how to register a new customer.",
+  "steps": [
+    { "heading": "Open the customer list", "body": "Search for Customers.", "screenshot": { "pageId": 22 } },
+    { "heading": "Fill in the key fields", "body": "Enter the name and credit limit.",
+      "screenshot": { "pageId": 21, "bookmark": "1B_Eg…", "highlight": ["Name", "Credit Limit (LCY)"] } }
+  ],
+  "formats": ["md", "pdf", "docx"]
+}
+```
+
+- Output goes under `BC_MANUAL_DIR` (default `./manuals`), named from the `title` (or `name`).
+- MD references images by relative path; PDF is rendered via the headless browser; DOCX embeds
+  the images (via the `docx` package).
+- A step may instead carry an existing `image` path, or only prose (no screenshot).
+- The user-scope skill `~/.claude/skills/bc-manual/SKILL.md` lets you just ask
+  *"document how to create a customer"* and Claude drives the pages and calls this tool.
 
 Typical manual flow: `bc_open_page` a list → take a row's `bookmark` → `bc_screenshot`
 the Card page id with that bookmark and a `highlight`.

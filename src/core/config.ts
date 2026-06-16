@@ -33,6 +33,7 @@ export interface AppConfig {
   port: number;
   stateDir: string;
   screenshotDir: string;
+  manualDir: string;
 }
 
 function requireEnv(name: string): string {
@@ -98,5 +99,6 @@ export function loadConfig(): AppConfig {
     port: optionalEnvInt('PORT', 3000),
     stateDir: optionalEnv('STATE_DIR', './.state'),
     screenshotDir: optionalEnv('BC_SCREENSHOT_DIR', './screenshots'),
+    manualDir: optionalEnv('BC_MANUAL_DIR', './manuals'),
   };
 }

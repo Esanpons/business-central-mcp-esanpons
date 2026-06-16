@@ -16,6 +16,7 @@ import { FilterService } from './services/filter-service.js';
 import { NavigationService } from './services/navigation-service.js';
 import { SearchService } from './services/search-service.js';
 import { ScreenshotService } from './services/screenshot-service.js';
+import { ManualService } from './services/manual-service.js';
 import { OpenPageOperation } from './operations/open-page.js';
 import { ReadDataOperation } from './operations/read-data.js';
 import { WriteDataOperation } from './operations/write-data.js';
@@ -29,8 +30,11 @@ import { ListCompaniesOperation } from './operations/list-companies.js';
 import { RunReportOperation } from './operations/run-report.js';
 import { WizardNavigateOperation } from './operations/wizard-navigate.js';
 import { ScreenshotOperation } from './operations/screenshot.js';
-import { buildToolRegistry, type Operations } from './mcp/tool-registry.js';
+import { BuildManualOperation } from './operations/build-manual.js';
+import { buildToolRegistry, buildHealthTool, type Operations } from './mcp/tool-registry.js';
 import { MCPHandler } from './mcp/handler.js';
+import { Metrics } from './services/metrics.js';
+import { HealthOperation } from './operations/health.js';
 import { createApiRoutes } from './api/routes.js';
 import { parseJsonBody, checkApiToken } from './api/middleware.js';
 // isErr no longer needed — SessionManager handles session creation errors internally
@@ -59,10 +63,16 @@ async function main() {
   const sessionFactory = new SessionFactory(
     connectionFactory, decoder, encoder, logger, config.bc.tenantId, config.bc.invokeTimeoutMs, config.bc.profile,
   );
+  const metrics = new Metrics();
   const sessionManager = new SessionManager(sessionFactory, pageContextRepo, logger, {
     maxRetries: config.bc.reconnectMaxRetries,
     baseDelayMs: config.bc.reconnectBaseDelayMs,
-  });
+  }, metrics);
+
+  // bc_health bypasses the ensureSession gate — it reports status even when BC is down.
+  const healthDeps = { currentSession: () => sessionManager.currentSession, metrics, bc: config.bc };
+  const healthTool = buildHealthTool(healthDeps);
+  const healthOp = new HealthOperation(healthDeps);
 
   // Services — built once after session is available
   function buildServices(s: BCSession): { operations: Operations; tools: ReturnType<typeof buildToolRegistry> } {
@@ -72,6 +82,7 @@ async function main() {
     const filterService = new FilterService(s, pageContextRepo, logger);
     const navigationService = new NavigationService(s, pageContextRepo, logger);
     const searchService = new SearchService(s, logger);
+    const screenshotService = new ScreenshotService(config.bc, config.screenshotDir, () => s.companyName, logger);
 
     const operations: Operations = {
       openPage: new OpenPageOperation(pageService),
@@ -86,7 +97,8 @@ async function main() {
       listCompanies: new ListCompaniesOperation(pageService, dataService, () => s.companyName, logger),
       runReport: new RunReportOperation(s),
       wizardNavigate: new WizardNavigateOperation(actionService, pageContextRepo),
-      screenshot: new ScreenshotOperation(new ScreenshotService(config.bc, config.screenshotDir, () => s.companyName, logger)),
+      screenshot: new ScreenshotOperation(screenshotService),
+      buildManual: new BuildManualOperation(new ManualService(screenshotService, config.manualDir, logger)),
     };
 
     return { operations, tools: buildToolRegistry(operations) };
@@ -100,7 +112,7 @@ async function main() {
     // Rebuild services if session was recreated or first call
     if (mcpHandler === null || sessionManager.needsServiceRebuild) {
       const { operations, tools } = buildServices(s);
-      mcpHandler = new MCPHandler(tools, logger);
+      mcpHandler = new MCPHandler([...tools, healthTool], logger, metrics);
       apiRoutes = createApiRoutes(operations, logger);
       sessionManager.markServicesRebuilt();
     }
@@ -120,12 +132,9 @@ async function main() {
     try {
       // Health check (no session needed)
       if (url === '/health' && method === 'GET') {
+        const h = await healthOp.execute();
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          status: sessionManager.currentSession !== null ? 'healthy' : 'starting',
-          version: '2.0.0',
-          bc: { baseUrl: config.bc.baseUrl, tenantId: config.bc.tenantId },
-        }));
+        res.end(JSON.stringify(h.ok ? h.value : { status: 'disconnected' }));
         return;
       }
 

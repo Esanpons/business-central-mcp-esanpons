@@ -7,11 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Fork (AESVA / Esanpons): real screenshots of the BC web client, a manual generator,
+and server health/diagnostics. Additive and out-of-band — none of this touches the
+WebSocket protocol path, so the existing data tools keep their full speed.
+
 ### Added
+
+- **`bc_screenshot` tool — real PNG screenshots of the BC web client.** Captures the
+  actual rendered web UI (not synthetic HTML) for a page/record. Engine = cookie
+  injection (verified live against BC 27 / `devel1`): bc-mcp authenticates via the forms
+  `/SignIn` flow, injects the cookie jar (with its real `path=/BC; secure; samesite=none;
+  httponly` attributes) into a headless system Chrome/Edge (`puppeteer-core`, no bundled
+  download), opens a deep-link URL (`?page=&tenant=&company=&bookmark=`), waits for the
+  SPA, and captures. Auto-falls-back to an in-page `/SignIn` if injection lands on the
+  login page. Writes the PNG to disk (`BC_SCREENSHOT_DIR` / `out`) and returns it inline
+  in the MCP response. Files: `src/services/screenshot-service.ts`,
+  `src/operations/screenshot.ts`, `src/services/browser.ts`, `src/mcp/handler.ts`
+  (inline image content block). Reference: `docs/SCREENSHOTS.md`.
+- **Annotation & crop options on `bc_screenshot`.** `highlight` accepts a caption (one
+  red box), a list of captions (auto-numbered badges 1,2,3… for ordered manual steps), or
+  `{target,label,style}` objects (style `box` / `badge` / `arrow` / `blur`). `redact`
+  blacks out fields; `crop` clips the image to the bounding box of the given caption(s).
+  All locate controls by visible caption (no dependency on BC exposing DOM ids).
+- **`bc_build_manual` tool — step-by-step user manuals in Markdown + PDF + DOCX.** You
+  provide ordered steps (heading, prose, optional screenshot spec); the tool captures the
+  annotated screenshots and renders the document. MD references images by relative path;
+  PDF is rendered via the shared headless browser (`page.pdf()`); DOCX embeds images via
+  the `docx` package (lazy-imported). Output under `BC_MANUAL_DIR` (default `./manuals`).
+  Files: `src/services/manual-service.ts`, `src/services/manual-render.ts`,
+  `src/operations/build-manual.ts`. A user-scope skill `bc-manual` guides Claude to gather
+  steps and call it.
+- **`bc_health` tool + richer `/health` endpoint.** Reports connection status, active
+  company, open form count, modal-dialog depth, and lightweight metrics (tool invocations,
+  errors by category, session reconnects, session uptime). Registered to BYPASS the
+  `ensureSession()` gate so it answers even when BC is down. Files:
+  `src/operations/health.ts`, `src/services/metrics.ts`.
+- **New env vars:** `BC_SCREENSHOT_DIR` (default `./screenshots`), `BC_SCREENSHOT_CHROME`
+  (browser path override; auto-detected otherwise), `BC_MANUAL_DIR` (default `./manuals`).
+- **Integration tests for `bc_screenshot`** (`tests/integration/screenshot.test.ts`) with a
+  skip-guard that skips when BC env vars or a browser are absent (CI-safe).
+- **`scripts/screenshot-poc.ts`** — a throwaway 4-method comparison harness used to choose
+  the capture engine (`npm run screenshot:poc`).
 
 ### Changed
 
-### Fixed
+- **Clearer, actionable error messages.** `MCPHandler` now translates raw BC/.NET/transport
+  error strings into friendly messages with remediation hints (modal stuck → session reset,
+  lost session, `NavCancelCredentialPrompt` → applicationId hint, connection refused, TLS,
+  timeout, bookmark, …) via `src/core/error-translator.ts`. Translation happens only at the
+  output boundary so upstream session-death / modal detection still sees the raw string.
+- **`puppeteer-core` promoted to a runtime dependency** (lazy-imported so it never affects
+  startup); **`docx` added** as a runtime dependency for DOCX manual output.
 
 ## [1.1.0] - 2026-06-09
 

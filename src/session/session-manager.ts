@@ -4,6 +4,7 @@ import type { BCSession } from './bc-session.js';
 import type { SessionFactory } from './session-factory.js';
 import type { PageContextRepository } from '../protocol/page-context-repo.js';
 import type { Logger } from '../core/logger.js';
+import type { Metrics } from '../services/metrics.js';
 
 export interface ReconnectOptions {
   maxRetries: number;
@@ -41,6 +42,7 @@ export class SessionManager {
     private readonly pageContextRepo: PageContextRepository,
     private readonly logger: Logger,
     reconnectOptions?: ReconnectOptions,
+    private readonly metrics?: Metrics,
   ) {
     this.reconnectOptions = reconnectOptions ?? DEFAULT_RECONNECT;
   }
@@ -99,6 +101,8 @@ export class SessionManager {
       }
 
       this.session = newSession;
+      this.metrics?.recordReconnect();
+      this.metrics?.recordSessionCreated();
       this.logger.info('Session recovered successfully');
 
       // Throw SessionLostError so the MCP handler returns a clear message to the LLM
@@ -115,6 +119,7 @@ export class SessionManager {
     }
 
     this.session = newSession;
+    this.metrics?.recordSessionCreated();
     this.logger.info('BC session established');
     return this.session;
   }

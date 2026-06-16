@@ -1,5 +1,6 @@
-// End-to-end MCP test: spawn the built stdio server and call bc_screenshot
-// over JSON-RPC, exactly as Claude would. Run: node scripts/test-mcp-e2e.mjs
+// End-to-end MCP test: spawn the built stdio server and exercise the new tools
+// (bc_health, bc_screenshot, bc_build_manual) over JSON-RPC, as Claude would.
+// Run: node scripts/test-mcp-e2e.mjs
 import { spawn } from 'node:child_process';
 
 const srv = spawn('node', ['dist/stdio-server.js'], { env: process.env, stdio: ['pipe', 'pipe', 'inherit'] });
@@ -19,31 +20,46 @@ srv.stdout.on('data', (d) => {
   }
 });
 
-function rpc(id, method, params) {
+let id = 0;
+function rpc(method, params) {
+  const myId = ++id;
   return new Promise((res) => {
-    pending.set(id, res);
-    srv.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+    pending.set(myId, res);
+    srv.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: myId, method, params }) + '\n');
   });
 }
+const textOf = (r) => (r.result?.content || []).find((c) => c.type === 'text')?.text;
 
-const init = await rpc(1, 'initialize', {});
-console.log('initialize:', init.result?.serverInfo);
+await rpc('initialize', {});
 
-const list = await rpc(2, 'tools/list', {});
+const list = await rpc('tools/list', {});
 const names = (list.result?.tools || []).map((t) => t.name);
-console.log('bc_screenshot registered:', names.includes('bc_screenshot'), `(${names.length} tools total)`);
+console.log(`tools (${names.length}):`, names.join(', '));
+for (const t of ['bc_health', 'bc_screenshot', 'bc_build_manual']) {
+  console.log(`  ${t} registered:`, names.includes(t));
+}
 
-const call = await rpc(3, 'tools/call', {
+// bc_health (no session needed)
+const health = await rpc('tools/call', { name: 'bc_health', arguments: {} });
+console.log('\n[bc_health]\n', textOf(health));
+
+// bc_screenshot with numbered badges + crop
+const shot = await rpc('tools/call', {
   name: 'bc_screenshot',
-  arguments: { pageId: 21, bookmark: '1B_EgAAAAJ7CDAAMQAxADIAMQAyADEAMg', company: 'CRONUS_01', highlight: 'Credit Limit (LCY)', out: 'mcp-e2e.png', inline: true },
+  arguments: { pageId: 22, highlight: ['No.', 'Name'], crop: ['No.', 'Name'], out: 'e2e-badges.png', inline: false },
 });
-const content = call.result?.content || [];
-console.log('isError:', !!call.result?.isError);
-console.log('content blocks:', content.map((c) => c.type));
-const text = content.find((c) => c.type === 'text');
-const image = content.find((c) => c.type === 'image');
-if (text) console.log('text payload:', text.text);
-if (image) console.log('image block: mimeType =', image.mimeType, ', base64 length =', image.data?.length);
+console.log('\n[bc_screenshot]\n', textOf(shot));
+
+// bc_build_manual (1 step, md only for speed)
+const manual = await rpc('tools/call', {
+  name: 'bc_build_manual',
+  arguments: {
+    title: 'E2E smoke manual', name: 'e2e-smoke',
+    steps: [{ heading: 'Customer list', body: 'The customer list.', screenshot: { pageId: 22 } }],
+    formats: ['md', 'pdf', 'docx'],
+  },
+});
+console.log('\n[bc_build_manual]\n', textOf(manual));
 
 srv.kill();
 process.exit(0);

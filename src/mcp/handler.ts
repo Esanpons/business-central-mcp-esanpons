@@ -1,6 +1,8 @@
 import type { ToolDefinition } from './tool-registry.js';
 import type { Logger } from '../core/logger.js';
 import { SessionLostError } from '../core/errors.js';
+import { translateBcError } from '../core/error-translator.js';
+import type { Metrics } from '../services/metrics.js';
 
 interface JsonRpcRequest {
   jsonrpc: string;
@@ -28,6 +30,7 @@ export class MCPHandler {
   constructor(
     private readonly tools: ToolDefinition[],
     private readonly logger: Logger,
+    private readonly metrics?: Metrics,
   ) {}
 
   async handleRequest(request: JsonRpcRequest): Promise<JsonRpcResponse> {
@@ -103,6 +106,8 @@ export class MCPHandler {
       return { jsonrpc: '2.0', id: request.id, error: { code: -32602, message: `Unknown tool: ${params.name}` } };
     }
 
+    this.metrics?.recordInvoke();
+
     // Validate input via Zod
     const parseResult = tool.zodSchema.safeParse(params.arguments ?? {});
     if (!parseResult.success) {
@@ -136,11 +141,13 @@ export class MCPHandler {
         }
         return { jsonrpc: '2.0', id: request.id, result: { content } };
       } else {
+        const t = translateBcError(r.error?.message ?? 'Unknown error');
+        this.metrics?.recordError(t.code, r.error?.message);
         return {
           jsonrpc: '2.0',
           id: request.id,
           result: {
-            content: [{ type: 'text', text: `Error: ${r.error?.message ?? 'Unknown error'}` }],
+            content: [{ type: 'text', text: `Error [${t.code}]: ${t.message}` }],
             isError: true,
           },
         };
@@ -159,12 +166,15 @@ export class MCPHandler {
         };
       }
 
-      this.logger.error(`Tool ${params.name} failed: ${e instanceof Error ? e.message : String(e)}`);
+      const raw = e instanceof Error ? e.message : String(e);
+      this.logger.error(`Tool ${params.name} failed: ${raw}`);
+      const t = translateBcError(raw);
+      this.metrics?.recordError(t.code, raw);
       return {
         jsonrpc: '2.0',
         id: request.id,
         result: {
-          content: [{ type: 'text', text: `Tool error: ${e instanceof Error ? e.message : String(e)}` }],
+          content: [{ type: 'text', text: `Error [${t.code}]: ${t.message}` }],
           isError: true,
         },
       };

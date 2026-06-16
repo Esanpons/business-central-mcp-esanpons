@@ -76,17 +76,57 @@ export const RunReportSchema = z.object({
 
 export const ListCompaniesSchema = z.object({});
 
+export const HealthSchema = z.object({});
+
+const AnnotationSchema = z.object({
+  target: z.string().describe('Caption / aria-label of the control to annotate (exact visible text).'),
+  label: z.string().optional().describe('Text or number shown on the callout (e.g. "1").'),
+  style: z.enum(['box', 'arrow', 'badge', 'blur']).optional().describe('"box" (red border, default), "badge" (numbered circle + box), "arrow" (pointer + label), "blur" (redact).'),
+});
+
+const HighlightSchema = z.union([z.string(), z.array(z.string()), z.array(AnnotationSchema)]);
+
 export const ScreenshotSchema = z.object({
   pageId: StringOrNumberInput.describe('Numeric BC page ID to screenshot (e.g., 21 for Customer Card, 22 for Customer List). Use bc_search_pages to find IDs.'),
   bookmark: z.string().optional().describe('Open a specific record before capturing. Bookmarks come from list row results in bc_open_page / bc_read_data. Omit for list/role-center pages.'),
   company: z.string().optional().describe('Company to capture in. Defaults to the session\'s current company. Pin it explicitly for consistent manuals across runs.'),
-  highlight: z.string().optional().describe('Draw a red highlight box (callout) around the field/action whose caption matches this text (e.g., "Name", "Credit Limit"). Ideal for user manuals.'),
+  highlight: HighlightSchema.optional().describe('Draw callout(s) on the page. A single caption -> one red box. A list of captions -> auto-numbered badges (1,2,3...) for ordered manual steps. A list of {target,label,style} objects -> full control. Ideal for "click here" manual steps.'),
+  redact: z.array(z.string()).optional().describe('Captions to black out for privacy (each drawn as an opaque box).'),
+  crop: z.union([z.string(), z.array(z.string())]).optional().describe('Caption(s) to crop the screenshot to. The image is clipped to the bounding box enclosing the located caption(s) plus padding — use to capture just one section/FactBox/field area.'),
   out: z.string().optional().describe('Output file path. Absolute path is used as-is; a relative name is placed under BC_SCREENSHOT_DIR. Omit to auto-name as page-<id>-<timestamp>.png.'),
   width: z.number().optional().describe('Viewport width in pixels (default 1600).'),
   height: z.number().optional().describe('Viewport height in pixels (default 1000).'),
   scale: z.number().optional().describe('Device scale factor for crispness (default 2 = retina-sharp). Use 1 for smaller files.'),
-  fullPage: z.boolean().optional().describe('Capture the full scrollable page instead of just the viewport (default false).'),
+  fullPage: z.boolean().optional().describe('Capture the full scrollable page instead of just the viewport (default false). Ignored when crop is set.'),
   inline: z.boolean().optional().describe('Also return the PNG inline in the response so the assistant can see it (default true). Set false to only write the file.'),
+});
+
+const ManualScreenshotSchema = z.object({
+  pageId: StringOrNumberInput.describe('BC page ID to capture for this step.'),
+  bookmark: z.string().optional().describe('Record bookmark (from bc_open_page / bc_read_data rows).'),
+  company: z.string().optional().describe('Company to capture in (defaults to the session company).'),
+  highlight: HighlightSchema.optional().describe('Callout(s): a caption, a list of captions (auto-numbered), or {target,label,style} objects.'),
+  redact: z.array(z.string()).optional().describe('Captions to black out for privacy.'),
+  crop: z.union([z.string(), z.array(z.string())]).optional().describe('Caption(s) to crop the image to.'),
+  width: z.number().optional(),
+  height: z.number().optional(),
+  scale: z.number().optional(),
+});
+
+const ManualStepSchema = z.object({
+  heading: z.string().describe('Step heading / title (e.g. "Open the Customer Card").'),
+  body: z.string().optional().describe('Prose explaining the step.'),
+  screenshot: ManualScreenshotSchema.optional().describe('Capture a fresh annotated screenshot for this step.'),
+  image: z.string().optional().describe('Or reference an existing PNG (absolute path, or relative to the manual dir).'),
+});
+
+export const BuildManualSchema = z.object({
+  title: z.string().describe('Manual title (also used to name the output files unless name is given).'),
+  intro: z.string().optional().describe('Optional introduction paragraph.'),
+  steps: z.array(ManualStepSchema).min(1).describe('Ordered steps. Each may capture a screenshot and/or carry prose.'),
+  formats: z.array(z.enum(['md', 'pdf', 'docx'])).optional().describe('Which formats to generate. Defaults to all three (md, pdf, docx).'),
+  outDir: z.string().optional().describe('Output directory (absolute, or relative to BC_MANUAL_DIR). Defaults to BC_MANUAL_DIR.'),
+  name: z.string().optional().describe('Base file name (slugified). Defaults to the title.'),
 });
 
 export const WizardNavigateSchema = z.object({

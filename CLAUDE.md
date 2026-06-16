@@ -358,6 +358,26 @@ Files: `src/services/screenshot-service.ts`, `src/operations/screenshot.ts`,
 (inline image block), `src/core/config.ts`. Comparison harness: `scripts/screenshot-poc.ts`
 (`npm run screenshot:poc`). Full reference: `docs/SCREENSHOTS.md`.
 
+**Annotations & crop (caption-geometry).** `highlight` accepts a caption (one box), a list of
+captions (auto-numbered badges for ordered steps), or `{target,label,style}` objects
+(style: box / badge / arrow / blur). `redact` blacks out fields; `crop` clips to the bounding
+box of the given caption(s). All locate controls by visible caption (no dependency on BC DOM
+ids). The in-browser annotate function must contain NO named nested functions — under tsx/esbuild
+those get a `__name` wrapper that is undefined in the browser (`drawn`/`crops` use inline `.map`).
+
+**`bc_build_manual`** (`src/services/manual-service.ts`, `manual-render.ts`, `operations/build-manual.ts`)
+builds a step-by-step manual to Markdown + PDF + DOCX. MD = text + relative image links; PDF =
+the assembled HTML rendered via the shared headless browser (`src/services/browser.ts`,
+`page.pdf()`); DOCX = the `docx` package (lazy-imported). Output under `BC_MANUAL_DIR` (default
+`./manuals`). A user-scope skill `~/.claude/skills/bc-manual/SKILL.md` guides Claude to gather
+steps and call it.
+
+**`bc_health`** (`src/operations/health.ts`, `src/services/metrics.ts`) reports connection,
+company, open forms, modal depth, and metrics (invokes / errors-by-code / reconnects / uptime).
+It is registered to BYPASS the `ensureSession()` gate so it answers even when BC is down; the
+HTTP `/health` endpoint returns the same shape. `MCPHandler` translates raw BC errors to clear,
+actionable messages via `src/core/error-translator.ts` and records error codes in `Metrics`.
+
 ## Known Limitations
 
 ### Document Pages (Multi-Repeater)

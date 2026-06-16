@@ -13,8 +13,11 @@ import {
   RunReportSchema,
   WizardNavigateSchema,
   ScreenshotSchema,
+  BuildManualSchema,
+  HealthSchema,
   toMcpJsonSchema,
 } from './schemas.js';
+import { HealthOperation, type HealthDeps } from '../operations/health.js';
 import type { OpenPageOperation } from '../operations/open-page.js';
 import type { ReadDataOperation } from '../operations/read-data.js';
 import type { WriteDataOperation } from '../operations/write-data.js';
@@ -28,6 +31,7 @@ import type { ListCompaniesOperation } from '../operations/list-companies.js';
 import type { RunReportOperation } from '../operations/run-report.js';
 import type { WizardNavigateOperation } from '../operations/wizard-navigate.js';
 import type { ScreenshotOperation } from '../operations/screenshot.js';
+import type { BuildManualOperation } from '../operations/build-manual.js';
 
 export interface ToolDefinition {
   name: string;
@@ -51,6 +55,7 @@ export interface Operations {
   runReport: RunReportOperation;
   wizardNavigate: WizardNavigateOperation;
   screenshot: ScreenshotOperation;
+  buildManual: BuildManualOperation;
 }
 
 export function buildToolRegistry(ops: Operations): ToolDefinition[] {
@@ -262,20 +267,66 @@ This is additive and out-of-band: it runs an independent headless browser sessio
 
 Targeting: pass pageId (required). Add bookmark to open a specific record's Card (bookmarks come from list rows returned by bc_open_page / bc_read_data). Add company to pin a company (defaults to the session's current company). For a clean manual sequence, open a list, grab the row's bookmark, then bc_screenshot the Card page id with that bookmark.
 
-Annotation: pass highlight with a field or action caption (e.g. "Name", "Credit Limit (LCY)", "Post") to draw a red box around that control -- ideal for "click here" manual steps.
+Annotation (highlight): a single caption draws one red box; a list of captions draws auto-numbered badges (1,2,3...) for ordered steps; a list of { target, label, style } objects gives full control (style: box / badge / arrow / blur). Use redact to black out sensitive fields, and crop to clip the image to one section/field area (the bounding box of the given caption(s)). All target a control by its visible caption -- ideal for "click here" manual steps.
 
-Output: the PNG is written to disk (out path, or auto-named under BC_SCREENSHOT_DIR) and, unless inline:false, also returned inline in the response so it can be viewed immediately. The response also reports the resolved url, pageTitle, and whether the highlight was found.
+Output: the PNG is written to disk (out path, or auto-named under BC_SCREENSHOT_DIR) and, unless inline:false, also returned inline in the response so it can be viewed immediately. The response also reports the resolved url, pageTitle, which annotations were found, and whether it was cropped.
 
 Requires Chrome or Edge installed on the machine running the server (or BC_SCREENSHOT_CHROME set to a browser path). Do NOT use this for data extraction, posting, or navigation -- only for visual capture.
 
 Examples:
 - Whole Customer Card: { "pageId": 21, "bookmark": "1B_Eg...", "company": "CRONUS" }
-- With a callout on a field: { "pageId": 21, "bookmark": "1B_Eg...", "highlight": "Credit Limit (LCY)" }
-- A list page: { "pageId": 22 }
-- Save to a specific file, no inline image: { "pageId": 21, "out": "C:/manuals/customer-card.png", "inline": false }`,
+- One callout: { "pageId": 21, "bookmark": "1B_Eg...", "highlight": "Credit Limit (LCY)" }
+- Numbered steps: { "pageId": 21, "highlight": ["Name", "Credit Limit (LCY)", "Blocked"] }
+- Arrow + redaction: { "pageId": 21, "highlight": [{ "target": "Post", "style": "arrow", "label": "Post here" }], "redact": ["Name"] }
+- Crop to a field area: { "pageId": 21, "bookmark": "1B_Eg...", "crop": "Credit Limit (LCY)" }
+- Save to a file, no inline image: { "pageId": 21, "out": "C:/manuals/customer-card.png", "inline": false }`,
       inputSchema: toMcpJsonSchema(ScreenshotSchema),
       zodSchema: ScreenshotSchema,
       execute: (input) => ops.screenshot.execute(input as Parameters<typeof ops.screenshot.execute>[0]),
     },
+    {
+      name: 'bc_build_manual',
+      description: `Builds a step-by-step USER MANUAL of Business Central and writes it as Markdown, PDF, and/or DOCX. You provide the ordered steps (each a heading, optional prose, and an optional screenshot spec); the tool captures the annotated screenshots and assembles the document. This is the high-level companion to bc_screenshot -- use it to produce shareable documentation, training material, or onboarding guides.
+
+Each step's screenshot spec is the same shape as bc_screenshot (pageId, bookmark, company, highlight, redact, crop): highlight a list of captions to get auto-numbered "click here" callouts. Alternatively a step can reference an existing PNG via image, or carry only prose (no screenshot).
+
+Output: files are written under BC_MANUAL_DIR (or outDir), named from the title (or name). formats defaults to all three: md (images as relative links), pdf (rendered via the headless browser), docx (images embedded). The response returns the file paths and the captured image paths. This runs out-of-band (its own browser) and does not disturb the WebSocket session.
+
+Typical use: open a list with bc_open_page, grab the record bookmark, then call bc_build_manual with a few steps that screenshot the card and highlight the fields the reader must fill in. Requires Chrome/Edge installed (same as bc_screenshot).
+
+Example:
+{
+  "title": "How to create a customer",
+  "intro": "This guide shows how to register a new customer.",
+  "steps": [
+    { "heading": "Open the customer list", "body": "Search for Customers and open the list.", "screenshot": { "pageId": 22 } },
+    { "heading": "Fill in the key fields", "body": "Enter the name and credit limit.", "screenshot": { "pageId": 21, "bookmark": "1B_Eg...", "highlight": ["Name", "Credit Limit (LCY)"] } }
+  ],
+  "formats": ["md", "pdf", "docx"]
+}`,
+      inputSchema: toMcpJsonSchema(BuildManualSchema),
+      zodSchema: BuildManualSchema,
+      execute: (input) => ops.buildManual.execute(input as Parameters<typeof ops.buildManual.execute>[0]),
+    },
   ];
+}
+
+/**
+ * The bc_health diagnostics tool is built separately from buildToolRegistry because
+ * it must NOT be wrapped by the ensureSession() gate — it reports status even when
+ * BC is unreachable. Both server entrypoints append it to the tool list directly.
+ */
+export function buildHealthTool(deps: HealthDeps): ToolDefinition {
+  const op = new HealthOperation(deps);
+  return {
+    name: 'bc_health',
+    description: `Reports the health and diagnostics of the Business Central MCP server itself: whether it is connected to BC, the active company, how many pages/forms are open, the modal-dialog depth, and lightweight metrics (tool invocations, errors by category, session reconnects, session uptime). Use this to check "are you connected to BC?", to diagnose why other tools are failing, or to confirm which company/tenant/version you are talking to.
+
+Unlike every other bc_ tool, this does NOT open or require a BC page/session — it answers even when BC is down (status: "disconnected"). It takes no parameters and has no side effects.
+
+Do NOT use this for business data — it returns server/session status only.`,
+    inputSchema: toMcpJsonSchema(HealthSchema),
+    zodSchema: HealthSchema,
+    execute: () => op.execute(),
+  };
 }

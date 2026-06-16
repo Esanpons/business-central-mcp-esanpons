@@ -17,6 +17,7 @@ import { FilterService } from './services/filter-service.js';
 import { NavigationService } from './services/navigation-service.js';
 import { SearchService } from './services/search-service.js';
 import { ScreenshotService } from './services/screenshot-service.js';
+import { ManualService } from './services/manual-service.js';
 import { OpenPageOperation } from './operations/open-page.js';
 import { ReadDataOperation } from './operations/read-data.js';
 import { WriteDataOperation } from './operations/write-data.js';
@@ -30,8 +31,10 @@ import { ListCompaniesOperation } from './operations/list-companies.js';
 import { RunReportOperation } from './operations/run-report.js';
 import { WizardNavigateOperation } from './operations/wizard-navigate.js';
 import { ScreenshotOperation } from './operations/screenshot.js';
-import { buildToolRegistry, type Operations } from './mcp/tool-registry.js';
+import { BuildManualOperation } from './operations/build-manual.js';
+import { buildToolRegistry, buildHealthTool, type Operations } from './mcp/tool-registry.js';
 import { MCPHandler } from './mcp/handler.js';
+import { Metrics } from './services/metrics.js';
 // isErr no longer needed — SessionManager handles session creation errors internally
 
 async function main() {
@@ -59,10 +62,11 @@ async function main() {
   const sessionFactory = new SessionFactory(
     connectionFactory, decoder, encoder, logger, config.bc.tenantId, config.bc.invokeTimeoutMs, config.bc.profile,
   );
+  const metrics = new Metrics();
   const sessionManager = new SessionManager(sessionFactory, pageContextRepo, logger, {
     maxRetries: config.bc.reconnectMaxRetries,
     baseDelayMs: config.bc.reconnectBaseDelayMs,
-  });
+  }, metrics);
 
   let realTools: ReturnType<typeof buildToolRegistry> | null = null;
 
@@ -74,6 +78,7 @@ async function main() {
     const filterService = new FilterService(s, pageContextRepo, logger);
     const navigationService = new NavigationService(s, pageContextRepo, logger);
     const searchService = new SearchService(s, logger);
+    const screenshotService = new ScreenshotService(config.bc, config.screenshotDir, () => s.companyName, logger);
 
     const operations: Operations = {
       openPage: new OpenPageOperation(pageService),
@@ -88,7 +93,8 @@ async function main() {
       listCompanies: new ListCompaniesOperation(pageService, dataService, () => s.companyName, logger),
       runReport: new RunReportOperation(s),
       wizardNavigate: new WizardNavigateOperation(actionService, pageContextRepo),
-      screenshot: new ScreenshotOperation(new ScreenshotService(config.bc, config.screenshotDir, () => s.companyName, logger)),
+      screenshot: new ScreenshotOperation(screenshotService),
+      buildManual: new BuildManualOperation(new ManualService(screenshotService, config.manualDir, logger)),
     };
 
     return buildToolRegistry(operations);
@@ -123,7 +129,9 @@ async function main() {
     },
   }));
 
-  const mcpHandler = new MCPHandler(lazyTools, logger);
+  // bc_health bypasses the ensureSession gate — it reports status even when BC is down.
+  const healthTool = buildHealthTool({ currentSession: () => sessionManager.currentSession, metrics, bc: config.bc });
+  const mcpHandler = new MCPHandler([...lazyTools, healthTool], logger, metrics);
 
   // Read JSON-RPC from stdin, write responses to stdout
   const rl = createInterface({ input: process.stdin, terminal: false });

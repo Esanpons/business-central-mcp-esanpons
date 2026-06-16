@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { load } from 'cheerio';
 import type { BCConfig } from '../core/config.js';
 import type { Logger } from '../core/logger.js';
+import { launchHeadless } from './browser.js';
 
 /**
  * ScreenshotService — captures a REAL screenshot of the BC web client.
@@ -23,11 +24,26 @@ import type { Logger } from '../core/logger.js';
  * "Getting ready..." waiting for an iframe-parent handshake that never arrives.
  */
 
+/** One annotation drawn over a located control (by its visible caption). */
+export interface Annotation {
+  /** Caption / aria-label text of the control to locate. */
+  target: string;
+  /** Optional label/number shown on the callout (e.g. "1", "2"). */
+  label?: string;
+  /** 'box' (red border, default), 'badge' (numbered circle + box), 'arrow' (pointer + label), 'blur' (redact). */
+  style?: 'box' | 'arrow' | 'badge' | 'blur';
+}
+
 export interface CaptureInput {
   pageId: string;
   bookmark?: string;
   company?: string;
-  highlight?: string;
+  /** Normalized annotations to draw (the operation converts the flexible schema input into this). */
+  annotations?: Annotation[];
+  /** Captions to redact (opaque box) — shorthand for { target, style:'blur' }. */
+  redact?: string[];
+  /** Caption(s) to crop the screenshot to (clip = union bbox of the located captions + padding). */
+  crop?: string[];
   out?: string;
   width?: number;
   height?: number;
@@ -42,11 +58,14 @@ export interface CaptureResult {
   pageTitle: string;
   authenticated: boolean;
   spaReady: boolean;
-  highlight?: { requested: string; found: boolean };
+  annotations?: Array<{ target: string; found: boolean }>;
+  cropped?: boolean;
   width: number;
   height: number;
   base64?: string;
 }
+
+interface Rect { x: number; y: number; w: number; h: number; }
 
 interface RawCookie {
   name: string;
@@ -58,22 +77,9 @@ interface RawCookie {
   sameSite: 'None' | 'Lax' | 'Strict';
 }
 
-const CHROME_CANDIDATES = [
-  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-  'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-  'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-  '/usr/bin/google-chrome',
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-];
-
 const GENERIC_TITLE = /^(Dynamics 365 Business Central|Welcome to Dynamics 365 Business Central\.?|)$/i;
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let puppeteerMod: any = null;
 
 export class ScreenshotService {
   constructor(
@@ -87,18 +93,9 @@ export class ScreenshotService {
     const pageId = String(input.pageId).trim();
     const company = input.company || this.getCompany();
     const url = this.deepLink(pageId, input.bookmark, company);
-    const ignoreTls = process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0';
-
-    const puppeteer = await this.loadPuppeteer();
-    const executablePath = this.resolveChrome();
     this.logger.info(`[screenshot] capturing ${url}`);
 
-    const browser = await puppeteer.launch({
-      executablePath,
-      headless: true,
-      acceptInsecureCerts: ignoreTls,
-      args: ['--disable-gpu', '--no-sandbox', '--hide-scrollbars', ...(ignoreTls ? ['--ignore-certificate-errors'] : [])],
-    });
+    const browser = await launchHeadless();
     try {
       const cookies = await this.authCookies();
       const p = await browser.newPage();
@@ -117,14 +114,26 @@ export class ScreenshotService {
 
       const spaReady = await this.waitReady(p);
 
-      let highlight: CaptureResult['highlight'];
-      if (input.highlight) {
-        const found = await this.drawHighlight(p, input.highlight);
-        highlight = { requested: input.highlight, found };
+      // Redacted captions are just blur-style annotations.
+      const annos: Annotation[] = [
+        ...(input.annotations ?? []),
+        ...(input.redact ?? []).map((t) => ({ target: t, style: 'blur' as const })),
+      ];
+      const cropTargets = input.crop ?? [];
+
+      let annotations: CaptureResult['annotations'];
+      let clip: Rect | undefined;
+      if (annos.length || cropTargets.length) {
+        const res = await this.annotate(p, annos, cropTargets, width, height);
+        if (input.annotations?.length) annotations = res.annotations.slice(0, input.annotations.length);
+        clip = res.clip;
       }
 
       const file = this.resolveOut(input.out, pageId);
-      const buf: Uint8Array = await p.screenshot({ path: file, fullPage: input.fullPage ?? false });
+      const buf: Uint8Array = await p.screenshot({
+        path: file,
+        ...(clip ? { clip: { x: clip.x, y: clip.y, width: clip.w, height: clip.h } } : { fullPage: input.fullPage ?? false }),
+      });
       const pageTitle = await p.title();
       const authenticated = !(await this.onSignIn(p));
 
@@ -134,7 +143,8 @@ export class ScreenshotService {
         pageTitle,
         authenticated,
         spaReady,
-        highlight,
+        annotations,
+        cropped: !!clip,
         width,
         height,
         base64: input.inline ? Buffer.from(buf).toString('base64') : undefined,
@@ -250,59 +260,129 @@ export class ScreenshotService {
     return ready;
   }
 
-  // BC renders page content inside an iframe — search every frame for a control
-  // matching the caption (aria-label first, then exact text) and box it.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async drawHighlight(p: any, caption: string): Promise<boolean> {
+  // BC renders page content inside an iframe — search every frame for each control
+  // (by aria-label, then exact text), draw its callout, and collect bounding boxes
+  // (for crop). All caption-geometry based; no dependency on BC exposing DOM ids.
+  private async annotate(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const locator = (cap: string): boolean => {
+    p: any,
+    annotations: Annotation[],
+    cropTargets: string[],
+    width: number,
+    height: number,
+  ): Promise<{ annotations: Array<{ target: string; found: boolean }>; clip?: Rect }> {
+    // Runs inside each frame: draws annotations, returns found-rects + crop-rects.
+    // NOTE: must contain NO named nested functions (no `const f = () => {}`) — under
+    // tsx/esbuild those get wrapped with a `__name` helper that is undefined in the
+    // browser. Only anonymous arrows passed inline to .map are safe.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const inFrame = (spec: { annotations: Annotation[]; cropTargets: string[] }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const doc = (globalThis as any).document;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const els = Array.from(doc.querySelectorAll('*')) as any[];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let target: any = null;
-      for (const el of els) {
-        const aria = el.getAttribute('aria-label');
-        if (aria && aria.trim() === cap) { target = el; break; }
-      }
-      if (!target) {
-        for (const el of els) {
-          if (el.childElementCount === 0 && el.textContent?.trim() === cap) { target = el.closest('[class]') || el; break; }
+      const all: any[] = Array.prototype.slice.call(doc.querySelectorAll('*'));
+      const Z = 2147483647;
+      const pad = 6;
+
+      const drawn = spec.annotations.map((a) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let el: any = null;
+        for (let i = 0; i < all.length; i++) {
+          const ar = all[i].getAttribute('aria-label');
+          if (ar && ar.trim() === a.target) { el = all[i]; break; }
         }
-      }
-      if (!target) return false;
-      const r = target.getBoundingClientRect();
-      if (r.width === 0 || r.height === 0) return false;
-      const box = doc.createElement('div');
-      box.style.cssText = `position:fixed;left:${r.left - 6}px;top:${r.top - 6}px;width:${r.width + 12}px;height:${r.height + 12}px;border:3px solid #e11;border-radius:4px;box-shadow:0 0 0 9999px rgba(0,0,0,.08);z-index:2147483647;pointer-events:none;`;
-      doc.body.appendChild(box);
-      return true;
+        if (!el) for (let i = 0; i < all.length; i++) {
+          const tc = all[i].textContent;
+          if (all[i].childElementCount === 0 && tc && tc.trim() === a.target) { el = all[i].closest('[class]') || all[i]; break; }
+        }
+        if (!el) return { found: false, rect: null };
+        const r = el.getBoundingClientRect();
+        if (!r.width || !r.height) return { found: false, rect: null };
+        const style = a.style || 'box';
+        if (style === 'blur') {
+          const b = doc.createElement('div');
+          b.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;background:#cfd3da;border-radius:3px;z-index:${Z};pointer-events:none;`;
+          doc.body.appendChild(b);
+          return { found: true, rect: { x: r.left, y: r.top, w: r.width, h: r.height } };
+        }
+        const box = doc.createElement('div');
+        box.style.cssText = `position:fixed;left:${r.left - pad}px;top:${r.top - pad}px;width:${r.width + pad * 2}px;height:${r.height + pad * 2}px;border:3px solid #e11;border-radius:4px;z-index:${Z};pointer-events:none;`;
+        doc.body.appendChild(box);
+        if (style === 'badge' && a.label) {
+          const badge = doc.createElement('div');
+          badge.textContent = a.label;
+          badge.style.cssText = `position:fixed;left:${r.left - pad - 13}px;top:${r.top - pad - 13}px;width:24px;height:24px;border-radius:50%;background:#e11;color:#fff;font:bold 14px sans-serif;display:flex;align-items:center;justify-content:center;z-index:${Z};pointer-events:none;box-shadow:0 1px 3px rgba(0,0,0,.4);`;
+          doc.body.appendChild(badge);
+        } else if (a.label) {
+          const chip = doc.createElement('div');
+          chip.textContent = a.label;
+          chip.style.cssText = `position:fixed;left:${r.left - pad}px;top:${r.top - pad - 22}px;background:#e11;color:#fff;font:bold 12px sans-serif;padding:1px 6px;border-radius:3px;z-index:${Z};pointer-events:none;white-space:nowrap;`;
+          doc.body.appendChild(chip);
+        }
+        if (style === 'arrow') {
+          const line = doc.createElement('div');
+          line.style.cssText = `position:fixed;left:${r.left - pad - 50}px;top:${r.top + r.height / 2 - 1}px;width:50px;height:3px;background:#e11;z-index:${Z};pointer-events:none;`;
+          doc.body.appendChild(line);
+          const head = doc.createElement('div');
+          head.style.cssText = `position:fixed;left:${r.left - pad - 9}px;top:${r.top + r.height / 2 - 6}px;width:0;height:0;border-top:6px solid transparent;border-bottom:6px solid transparent;border-left:9px solid #e11;z-index:${Z};pointer-events:none;`;
+          doc.body.appendChild(head);
+        }
+        return { found: true, rect: { x: r.left, y: r.top, w: r.width, h: r.height } };
+      });
+
+      const crops = spec.cropTargets.map((t) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let el: any = null;
+        for (let i = 0; i < all.length; i++) {
+          const ar = all[i].getAttribute('aria-label');
+          if (ar && ar.trim() === t) { el = all[i]; break; }
+        }
+        if (!el) for (let i = 0; i < all.length; i++) {
+          const tc = all[i].textContent;
+          if (all[i].childElementCount === 0 && tc && tc.trim() === t) { el = all[i].closest('[class]') || all[i]; break; }
+        }
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return r.width && r.height ? { x: r.left, y: r.top, w: r.width, h: r.height } : null;
+      });
+
+      return { drawn, crops };
     };
+
+    const perFrame: Array<{ drawn: Array<{ found: boolean; rect: Rect | null }>; crops: Array<Rect | null> }> = [];
     for (const f of p.frames()) {
       try {
-        if (await f.evaluate(locator, caption)) return true;
-      } catch {
-        /* cross-origin frame — skip */
+        perFrame.push(await f.evaluate(inFrame, { annotations, cropTargets }));
+      } catch (e) {
+        // Cross-origin / empty frames are expected — keep this at debug level.
+        this.logger.debug('screenshot', `annotate frame skipped: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
-    return false;
+
+    const annResults = annotations.map((a, i) => ({
+      target: a.target,
+      found: perFrame.some((fr) => fr.drawn[i]?.found),
+    }));
+
+    const cropRects: Rect[] = [];
+    cropTargets.forEach((_, i) => {
+      const rect = perFrame.map((fr) => fr.crops[i]).find((r): r is Rect => !!r);
+      if (rect) cropRects.push(rect);
+    });
+
+    let clip: Rect | undefined;
+    if (cropRects.length) {
+      const pad = 16;
+      const minX = Math.max(0, Math.min(...cropRects.map((r) => r.x)) - pad);
+      const minY = Math.max(0, Math.min(...cropRects.map((r) => r.y)) - pad);
+      const maxX = Math.min(width, Math.max(...cropRects.map((r) => r.x + r.w)) + pad);
+      const maxY = Math.min(height, Math.max(...cropRects.map((r) => r.y + r.h)) + pad);
+      if (maxX > minX && maxY > minY) clip = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+    }
+    return { annotations: annResults, clip };
   }
 
-  // ---------- chrome / output paths ----------
-  private resolveChrome(): string {
-    const override = process.env.BC_SCREENSHOT_CHROME;
-    if (override) {
-      if (!existsSync(override)) throw new Error(`BC_SCREENSHOT_CHROME points to a missing file: ${override}`);
-      return override;
-    }
-    const found = CHROME_CANDIDATES.find((c) => existsSync(c));
-    if (!found) {
-      throw new Error('No Chrome/Edge found for screenshots. Install Chrome or set BC_SCREENSHOT_CHROME to the browser executable path.');
-    }
-    return found;
-  }
-
+  // ---------- output path ----------
   private resolveOut(out: string | undefined, pageId: string): string {
     const dir = isAbsolute(this.screenshotDir) ? this.screenshotDir : resolve(process.cwd(), this.screenshotDir);
     let file: string;
@@ -314,18 +394,5 @@ export class ScreenshotService {
     }
     mkdirSync(resolve(file, '..'), { recursive: true });
     return file;
-  }
-
-  // ---------- lazy puppeteer ----------
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async loadPuppeteer(): Promise<any> {
-    if (!puppeteerMod) {
-      try {
-        puppeteerMod = (await import('puppeteer-core')).default;
-      } catch {
-        throw new Error('puppeteer-core is not installed. Run `npm install puppeteer-core` to enable bc_screenshot.');
-      }
-    }
-    return puppeteerMod;
   }
 }

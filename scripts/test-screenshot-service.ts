@@ -7,16 +7,26 @@ import { ScreenshotService } from '../src/services/screenshot-service.js';
 const config = loadConfig();
 const logger = createLogger(config.logging);
 const svc = new ScreenshotService(config.bc, config.screenshotDir, () => 'CRONUS_01', logger);
+const BOOKMARK = '1B_EgAAAAJ7CDAAMQAxADIAMQAyADEAMg';
 
-const r = await svc.capture({
-  pageId: '21',
-  bookmark: '1B_EgAAAAJ7CDAAMQAxADIAMQAyADEAMg',
-  company: 'CRONUS_01',
-  highlight: 'Name',
-  out: 'tool-test-customer-card.png',
-  inline: true,
+// 1) numbered badges (string[]) + redaction
+const a = await svc.capture({
+  pageId: '21', bookmark: BOOKMARK, company: 'CRONUS_01',
+  annotations: [
+    { target: 'No.', label: '1', style: 'badge' },
+    { target: 'Name', label: '2', style: 'badge' },
+    { target: 'Credit Limit (LCY)', label: '3', style: 'badge' },
+  ],
+  redact: ['Balance (LCY)'],
+  out: 'ws1-badges-redact.png', inline: false,
 });
+console.log('badges/redact:', JSON.stringify({ authenticated: a.authenticated, spaReady: a.spaReady, pageTitle: a.pageTitle, annotations: a.annotations, cropped: a.cropped, path: a.path }));
 
-const { base64, ...rest } = r;
-console.log(JSON.stringify(rest, null, 2));
-console.log('inline base64 length:', base64?.length ?? 0);
+// 2) crop to a field area
+const b = await svc.capture({
+  pageId: '21', bookmark: BOOKMARK, company: 'CRONUS_01',
+  annotations: [{ target: 'Credit Limit (LCY)', style: 'arrow', label: 'set this' }],
+  crop: ['No.', 'Credit Limit (LCY)'],
+  out: 'ws1-crop-arrow.png', inline: false,
+});
+console.log('crop/arrow:', JSON.stringify({ annotations: b.annotations, cropped: b.cropped, path: b.path }));

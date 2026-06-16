@@ -1,12 +1,17 @@
 import { ok, err, type Result } from '../core/result.js';
 import { ProtocolError } from '../core/errors.js';
-import type { ScreenshotService, CaptureInput } from '../services/screenshot-service.js';
+import type { ScreenshotService, CaptureInput, Annotation } from '../services/screenshot-service.js';
+
+/** Flexible highlight input: a caption, a list of captions (auto-numbered), or full annotations. */
+export type HighlightInput = string | string[] | Annotation[];
 
 export interface ScreenshotInput {
   pageId: string | number;
   bookmark?: string;
   company?: string;
-  highlight?: string;
+  highlight?: HighlightInput;
+  redact?: string[];
+  crop?: string | string[];
   out?: string;
   width?: number;
   height?: number;
@@ -21,11 +26,21 @@ export interface ScreenshotOutput {
   pageTitle: string;
   authenticated: boolean;
   spaReady: boolean;
-  highlight?: { requested: string; found: boolean };
+  annotations?: Array<{ target: string; found: boolean }>;
+  cropped?: boolean;
   width: number;
   height: number;
   /** When inline is requested, the PNG is also returned so the caller can see it. */
   __image?: { data: string; mimeType: string };
+}
+
+/** string -> one box; string[] -> numbered badges; Annotation[] -> as given. */
+export function normalizeHighlight(h?: HighlightInput): Annotation[] {
+  if (!h) return [];
+  if (typeof h === 'string') return [{ target: h, style: 'box' }];
+  return h.map((x, i): Annotation =>
+    typeof x === 'string' ? { target: x, label: String(i + 1), style: 'badge' } : x,
+  );
 }
 
 export class ScreenshotOperation {
@@ -37,7 +52,9 @@ export class ScreenshotOperation {
       pageId: String(input.pageId),
       bookmark: input.bookmark,
       company: input.company,
-      highlight: input.highlight,
+      annotations: normalizeHighlight(input.highlight),
+      redact: input.redact,
+      crop: input.crop === undefined ? undefined : Array.isArray(input.crop) ? input.crop : [input.crop],
       out: input.out,
       width: input.width,
       height: input.height,
