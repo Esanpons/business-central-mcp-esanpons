@@ -92,6 +92,8 @@ active values any time with `claude mcp get bc-ws`.
 | `NODE_TLS_REJECT_UNAUTHORIZED` | `0` to accept a self-signed cert | `0` |
 | `BC_SERVER_MAJOR` | BC major version | `27` |
 | `BC_APPLICATION_ID` | OpenSession applicationId (the fix) | `NAV` |
+| `BC_REPORT_DIR` | where `bc_download_report` writes files (default `.arxius/reports`, relative to the server's cwd — set an absolute path to control it) | `D:\BCReports` |
+| `BC_SCREENSHOT_DIR` / `BC_MANUAL_DIR` | where `bc_screenshot` / `bc_build_manual` write (defaults `./screenshots` / `./manuals`) | — |
 
 ### Pointing at a DIFFERENT Docker / server
 

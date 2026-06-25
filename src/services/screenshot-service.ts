@@ -1,9 +1,9 @@
 import { mkdirSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
-import { load } from 'cheerio';
 import type { BCConfig } from '../core/config.js';
 import type { Logger } from '../core/logger.js';
 import { launchHeadless } from './browser.js';
+import { authCookies, deepLinkPage, onSignIn, inPageLogin, waitReady } from './bc-web-auth.js';
 
 /**
  * ScreenshotService — captures a REAL screenshot of the BC web client.
@@ -75,18 +75,6 @@ export interface CaptureResult {
 
 interface Rect { x: number; y: number; w: number; h: number; }
 
-interface RawCookie {
-  name: string;
-  value: string;
-  domain: string;
-  path: string;
-  secure: boolean;
-  httpOnly: boolean;
-  sameSite: 'None' | 'Lax' | 'Strict';
-}
-
-const GENERIC_TITLE = /^(Dynamics 365 Business Central|Welcome to Dynamics 365 Business Central\.?|)$/i;
-
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 export class ScreenshotService {
@@ -100,12 +88,12 @@ export class ScreenshotService {
   async capture(input: CaptureInput): Promise<CaptureResult> {
     const pageId = String(input.pageId).trim();
     const company = input.company || this.getCompany();
-    const url = this.deepLink(pageId, input.bookmark, company);
+    const url = deepLinkPage(this.config, pageId, input.bookmark, company);
     this.logger.info(`[screenshot] capturing ${url}`);
 
     const browser = await launchHeadless();
     try {
-      const cookies = await this.authCookies();
+      const cookies = await authCookies(this.config);
       const p = await browser.newPage();
       const width = input.width ?? 1600;
       const height = input.height ?? 1000;
@@ -115,12 +103,12 @@ export class ScreenshotService {
 
       // Fallback: if cookie injection didn't take, log in once via the bounced
       // SignIn form (its ReturnUrl is our deep link, so BC redirects right back).
-      if (await this.onSignIn(p)) {
+      if (await onSignIn(p)) {
         this.logger.warn('[screenshot] cookie injection landed on SignIn — logging in in-page');
-        await this.inPageLogin(p);
+        await inPageLogin(this.config, p);
       }
 
-      const spaReady = await this.waitReady(p);
+      const spaReady = await waitReady(p, this.logger);
 
       // Explicit reveal: expand all collapsed FastTabs + click all "Show more" up front.
       if (input.expand) {
@@ -163,7 +151,7 @@ export class ScreenshotService {
         ...(clip ? { clip: { x: clip.x, y: clip.y, width: clip.w, height: clip.h } } : { fullPage: input.fullPage ?? false }),
       });
       const pageTitle = await p.title();
-      const authenticated = !(await this.onSignIn(p));
+      const authenticated = !(await onSignIn(p));
 
       return {
         path: file,
@@ -180,112 +168,6 @@ export class ScreenshotService {
     } finally {
       await browser.close();
     }
-  }
-
-  // ---------- deep link ----------
-  private deepLink(pageId: string, bookmark?: string, company?: string): string {
-    const qs = new URLSearchParams();
-    qs.set('page', pageId);
-    qs.set('tenant', this.config.tenantId);
-    if (company) qs.set('company', company);
-    if (bookmark) qs.set('bookmark', bookmark);
-    // NEVER add runinframe=1 — it hangs a top-level load.
-    return `${this.config.baseUrl}/?${qs.toString()}`;
-  }
-
-  // ---------- auth (forms /SignIn -> attributed cookie jar) ----------
-  private async authCookies(): Promise<RawCookie[]> {
-    const host = new URL(this.config.baseUrl).host;
-    const signInUrl = `${this.config.baseUrl}/SignIn?tenant=${encodeURIComponent(this.config.tenantId)}`;
-    const get = await fetch(signInUrl, { redirect: 'manual', headers: { 'User-Agent': 'bc-mcp-screenshot' } });
-    const getCk = get.headers.getSetCookie();
-    const $ = load(await get.text());
-    const token = $('input[name="__RequestVerificationToken"]').attr('value') || '';
-    const body = new URLSearchParams({ UserName: this.config.username, Password: this.config.password, __RequestVerificationToken: token });
-    const post = await fetch(signInUrl, {
-      method: 'POST',
-      redirect: 'manual',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'bc-mcp-screenshot',
-        Cookie: getCk.map((c) => c.split(';')[0]).join('; '),
-      },
-      body: body.toString(),
-    });
-    if (post.status !== 302) {
-      throw new Error(`BC sign-in failed: POST /SignIn returned ${post.status} (expected 302). Check BC_USERNAME / BC_PASSWORD.`);
-    }
-    const map = new Map<string, RawCookie>();
-    for (const line of [...getCk, ...post.headers.getSetCookie()]) {
-      const c = this.parseSetCookie(line, host);
-      map.set(c.name, c);
-    }
-    return [...map.values()];
-  }
-
-  private parseSetCookie(line: string, host: string): RawCookie {
-    const parts = line.split(';').map((s) => s.trim());
-    const nv = parts[0] ?? '';
-    const attrs = parts.slice(1);
-    const eq = nv.indexOf('=');
-    const lower = attrs.map((a) => a.toLowerCase());
-    const pathAttr = attrs.find((a) => a.toLowerCase().startsWith('path='));
-    let sameSite: RawCookie['sameSite'] = 'Lax';
-    const ss = attrs.find((a) => a.toLowerCase().startsWith('samesite='));
-    if (ss) {
-      const v = (ss.split('=')[1] ?? '').toLowerCase();
-      sameSite = v === 'none' ? 'None' : v === 'strict' ? 'Strict' : 'Lax';
-    }
-    return {
-      name: nv.slice(0, eq),
-      value: nv.slice(eq + 1),
-      domain: host,
-      path: pathAttr ? (pathAttr.split('=')[1] ?? '/') : '/',
-      secure: lower.includes('secure'),
-      httpOnly: lower.includes('httponly'),
-      sameSite,
-    };
-  }
-
-  // ---------- browser helpers ----------
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async onSignIn(p: any): Promise<boolean> {
-    if (p.url().includes('SignIn')) return true;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return p.evaluate(() => !!(globalThis as any).document.querySelector('#UserName,#Password')).catch(() => false);
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async inPageLogin(p: any): Promise<void> {
-    await p.waitForSelector('#UserName', { timeout: 15000 });
-    await p.type('#UserName', this.config.username);
-    await p.type('#Password', this.config.password);
-    await Promise.all([
-      p.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 }).catch(() => undefined),
-      p.click('#submitButton'),
-    ]);
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async waitReady(p: any): Promise<boolean> {
-    const deadline = Date.now() + 60000;
-    let ready = false;
-    while (Date.now() < deadline) {
-      const st = await p
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .evaluate((generic: string) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const doc = (globalThis as any).document;
-          const title = (doc.title || '').trim();
-          const sp = doc.querySelector('[class*="spinner"],[class*="Spinner"]');
-          return { spinnerVisible: !!sp && sp.offsetParent !== null, generic: new RegExp(generic, 'i').test(title) };
-        }, GENERIC_TITLE.source)
-        .catch(() => ({ spinnerVisible: true, generic: true }));
-      if (!st.spinnerVisible && !st.generic) { ready = true; break; }
-      await sleep(1000);
-    }
-    await sleep(3500); // settle final layout / data binding
-    return ready;
   }
 
   // BC renders page content inside an iframe — search every frame for each control

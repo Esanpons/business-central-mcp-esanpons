@@ -34,6 +34,7 @@ export interface AppConfig {
   stateDir: string;
   screenshotDir: string;
   manualDir: string;
+  reportDir: string;
 }
 
 function requireEnv(name: string): string {
@@ -100,5 +101,6 @@ export function loadConfig(): AppConfig {
     stateDir: optionalEnv('STATE_DIR', './.state'),
     screenshotDir: optionalEnv('BC_SCREENSHOT_DIR', './screenshots'),
     manualDir: optionalEnv('BC_MANUAL_DIR', './manuals'),
+    reportDir: optionalEnv('BC_REPORT_DIR', '.arxius/reports'),
   };
 }

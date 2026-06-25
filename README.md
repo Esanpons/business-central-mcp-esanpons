@@ -24,8 +24,8 @@
 | npm package | [`business-central-mcp`](https://www.npmjs.com/package/business-central-mcp) |
 | BC versions | BC27, BC28 (wire-compatible) |
 | Auth | NavUserPassword (OAuth on roadmap) |
-| Tools | 15 |
-| Tests | 284 unit/protocol + 111 integration |
+| Tools | 16 |
+| Tests | 343 unit/protocol + integration |
 | License | MIT |
 
 ## Install
@@ -133,6 +133,7 @@ Restart Claude Desktop.
 | `BC_SCREENSHOT_DIR` | No | `./screenshots` | Folder where `bc_screenshot` writes PNGs (relative paths resolve against the server's working dir). |
 | `BC_SCREENSHOT_CHROME` | No | auto-detect | Path to a Chrome/Edge executable for `bc_screenshot` / `bc_build_manual`. Auto-detected on Windows/macOS/Linux if omitted. |
 | `BC_MANUAL_DIR` | No | `./manuals` | Folder where `bc_build_manual` writes the generated Markdown/PDF/DOCX and their images. |
+| `BC_REPORT_DIR` | No | `.arxius/reports` | Folder where `bc_download_report` writes downloaded report files (PDF/Excel/Word). Relative to the server's working directory. |
 
 ## What can it do?
 
@@ -148,17 +149,24 @@ Restart Claude Desktop.
 | `bc_close_page` | Close a page and free server resources |
 | `bc_switch_company` | Switch to a different company mid-session |
 | `bc_list_companies` | Discover available companies |
-| `bc_run_report` | Execute reports and fill request page parameters |
+| `bc_run_report` | Execute reports and fill request page parameters (over the WebSocket). |
+| `bc_download_report` | Render a report and DOWNLOAD its output (PDF/Excel/Word) to disk via the headless browser (CDP download interception). Output-capture companion to `bc_run_report`; out-of-band. Reports needing parameters return `requestPageShown:true`. |
 | `bc_wizard_navigate` | Drive NavigatePage / wizard flows (back / next / finish / cancel) |
 | `bc_screenshot` | Capture a REAL PNG of the BC web client for a page/record. Annotate with highlight callout boxes (single, auto-numbered badges, arrows), redact fields, and crop to a section -- for manuals and docs. Fields in collapsed FastTabs or behind "Show more" are revealed automatically when highlighted (or pass `expand:true`). Saves to disk and returns the image inline. Out-of-band. |
 | `bc_build_manual` | Build a step-by-step user manual (Markdown + PDF + DOCX) with annotated screenshots from a list of steps. The high-level companion to `bc_screenshot`. |
+| `bc_find_object` | Resolve a page/report/table/codeunit by name or keyword to its numeric ID, from a cached object index. Use before `bc_open_page` when you don't know the id. |
+| `bc_refresh_objects` | Refresh the cached object index (reads "All Objects with Caption", page 9174) used by `bc_find_object`. |
 | `bc_health` | Server/session diagnostics: connected?, active company, open forms, modal depth, and metrics (invokes, errors, reconnects, uptime). Answers even when BC is down. |
+
+> **Full per-tool reference:** [`docs/README.md`](docs/README.md) is the documentation index —
+> every tool has its own page under [`docs/tools/`](docs/tools/), with cross-cutting behavior in
+> the [conventions guide](docs/guides/conventions.md) and pending work in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 > **Screenshots for manuals:** `bc_screenshot` renders the real BC web UI (headless system
 > Chrome/Edge) and can draw a highlight callout box around a field. Collapsed FastTabs and
 > "Show more" (Additional) fields are revealed automatically when you highlight/crop them, or
 > pass `expand:true` to capture a fully-expanded page. It runs out-of-band and does not disturb
-> the WebSocket session. See [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md).
+> the WebSocket session. See [docs/tools/bc_screenshot.md](docs/tools/bc_screenshot.md).
 
 ## How it works
 
@@ -231,7 +239,7 @@ Each section carries its own content shape:
 | `manifest.json` | Claude Desktop Extension manifest |
 | `scripts/build-dxt.ts` | Builds `.dxt` artifact for Claude Desktop |
 | `.github/workflows/release.yml` | Builds + attaches `.dxt` on `v*` tag pushes |
-| `ROADMAP.md` | Deferred work (OAuth, Cursor, init wizard) |
+| `docs/` | Documentation set — [index](docs/README.md), per-tool reference, conventions, roadmap |
 
 ## Development
 
@@ -247,7 +255,7 @@ npm run test:integration     # 111 integration tests against real BC (requires r
 ## Roadmap
 
 OAuth, Cursor support, an interactive `init` wizard, and a few protocol gaps.
-See [ROADMAP.md](ROADMAP.md) for the full list and priorities.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the full list, known limitations, and priorities.
 
 ---
 

@@ -44,7 +44,7 @@ describe('Section DTO shape', () => {
   });
 
   it('SectionField carries name, value, editable, type', () => {
-    const f: SectionField = { name: 'No.', value: '10000', editable: false, type: 'sc' };
+    const f: SectionField = { name: 'No.', controlPath: 'server:c[0]', value: '10000', editable: false, type: 'sc' };
     expect(f.name).toBe('No.');
   });
 
@@ -191,6 +191,93 @@ describe('buildSection', () => {
     const section = buildSection(ctx, 'header');
     expect(section!.actions).toHaveLength(2);
     expect(section!.actions![0].name).toBe('New');
+  });
+});
+
+describe('buildSection duplicate-caption disambiguation (P1/P8 regression)', () => {
+  // A Sales-Quote-shaped header: Sell-to / Bill-to / Ship-to groups that each
+  // repeat the captions "Name" and "Address". This is exactly the BC744 case
+  // where bc_write_data wrote to the wrong "Name". Every field must carry a
+  // distinct controlPath and the group caption that disambiguates it.
+  const salesQuoteHeader = {
+    t: 'lf', ServerId: 'root', PageType: 9, Caption: 'Sales Quote',
+    Children: [
+      { t: 'gc', Caption: 'General', Children: [
+        { t: 'sc', Caption: 'No.', StringValue: 'SQ001', Visible: true, Editable: false },
+      ] },
+      { t: 'gc', Caption: 'Sell-to', Children: [
+        { t: 'sc', Caption: 'Name', StringValue: 'FUKUI MURATA MANUFACTURING', Visible: true, Editable: true },
+        { t: 'sc', Caption: 'Address', StringValue: 'Sell St 1', Visible: true, Editable: true },
+      ] },
+      { t: 'gc', Caption: 'Bill-to', Children: [
+        { t: 'sc', Caption: 'Name', StringValue: 'SAN-EI TECH LTD', Visible: true, Editable: true },
+        { t: 'sc', Caption: 'Address', StringValue: 'Bill Ave 9', Visible: true, Editable: true },
+      ] },
+      { t: 'gc', Caption: 'Ship-to', Children: [
+        { t: 'sc', Caption: 'Name', StringValue: 'Some Where', Visible: true, Editable: true },
+      ] },
+    ],
+  };
+
+  function salesQuoteCtx(): PageContext {
+    return makeCtx({
+      rootFormId: 'root',
+      forms: new Map([['root', makeFormState('root', salesQuoteHeader)]]),
+      sections: new Map<string, SectionDescriptor>([['header', {
+        sectionId: 'header', kind: 'header', caption: 'Sales Quote', formId: 'root', valid: true,
+      }]]),
+    });
+  }
+
+  it('exposes a distinct controlPath + group for each duplicate caption', () => {
+    const section = buildSection(salesQuoteCtx(), 'header')!;
+    const names = section.fields!.filter(f => f.name === 'Name');
+    expect(names).toHaveLength(3);
+
+    // controlPaths are all distinct
+    const paths = names.map(f => f.controlPath);
+    expect(new Set(paths).size).toBe(3);
+
+    // each Name is tagged with the group that disambiguates it
+    expect(names.map(f => f.group).sort()).toEqual(['Bill-to', 'Sell-to', 'Ship-to']);
+
+    const billName = names.find(f => f.group === 'Bill-to')!;
+    expect(billName.value).toBe('SAN-EI TECH LTD');
+    expect(billName.controlPath).toMatch(/^server:/);
+  });
+
+  it('tags non-duplicate fields with their group too, and ungrouped fields omit group', () => {
+    const section = buildSection(salesQuoteCtx(), 'header')!;
+    const no = section.fields!.find(f => f.name === 'No.')!;
+    expect(no.group).toBe('General');
+    expect(no.controlPath).toBeTruthy();
+  });
+});
+
+describe('buildSection editable tri-state (P2 regression)', () => {
+  it('reports "unknown" when BC emitted no Editable flag, false/true otherwise', () => {
+    const root = {
+      t: 'lf', ServerId: 'root', PageType: 9, Caption: 'Sales Quote',
+      Children: [
+        { t: 'sc', Caption: 'No.', StringValue: 'SQ001', Visible: true, Editable: false },
+        { t: 'sc', Caption: 'Sell-to Customer Name', StringValue: 'X', Visible: true, Editable: true },
+        // page-variable option control: no Editable on the wire -> "unknown",
+        // NOT false (it is in fact writable and fires OnValidate).
+        { t: 'sec', Caption: 'Ship-to', StringValue: 'Default', Visible: true },
+      ],
+    };
+    const ctx = makeCtx({
+      rootFormId: 'root',
+      forms: new Map([['root', makeFormState('root', root)]]),
+      sections: new Map<string, SectionDescriptor>([['header', {
+        sectionId: 'header', kind: 'header', caption: 'Sales Quote', formId: 'root', valid: true,
+      }]]),
+    });
+    const section = buildSection(ctx, 'header')!;
+    const byName = (n: string) => section.fields!.find(f => f.name === n)!;
+    expect(byName('No.').editable).toBe(false);
+    expect(byName('Sell-to Customer Name').editable).toBe(true);
+    expect(byName('Ship-to').editable).toBe('unknown');
   });
 });
 

@@ -229,7 +229,12 @@ export interface ControlField {
   readonly controlPath: string;
   readonly caption: string;
   readonly type: string;
-  readonly editable: boolean;
+  /**
+   * Tri-state editability (mirrors SectionField.editable). `true`/`false` are
+   * what BC reported; `"unknown"` means BC emitted no Editable flag (common for
+   * page-variable option controls) and must NOT be treated as read-only.
+   */
+  readonly editable: boolean | 'unknown';
   /**
    * The control's own published `Visible` state. The user-visible filter must
    * combine this with every ancestor group's visibility — see
@@ -360,7 +365,7 @@ export function derivePageState(ctx: PageContext): PageState {
       controlPath: f.controlPath,
       caption: f.properties.caption ?? '',
       type: f.type,
-      editable: f.properties.editable ?? false,
+      editable: f.properties.editable === undefined ? 'unknown' : f.properties.editable,
       visible: f.properties.visible ?? true,
       stringValue: f.properties.stringValue,
       value: f.properties.objectValue ?? f.properties.stringValue,

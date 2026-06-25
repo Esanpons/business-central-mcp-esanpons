@@ -27,7 +27,8 @@
     "prepublishOnly": "tsc --noEmit && tsc",
     "validate:dxt": "npx -y @anthropic-ai/dxt validate manifest.json",
     "build:dxt": "tsx scripts/build-dxt.ts",
-    "screenshot:poc": "tsx scripts/screenshot-poc.ts"
+    "screenshot:poc": "tsx scripts/screenshot-poc.ts",
+    "capture:report": "tsx scripts/capture-report-requestpage.ts"
   },
   "keywords": [
     "mcp",

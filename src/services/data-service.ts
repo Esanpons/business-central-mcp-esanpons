@@ -6,7 +6,7 @@ import type { BCEvent, RepeaterRow, ControlField, TabGroup, SaveValueInteraction
 import type { Logger } from '../core/logger.js';
 import { resolveSection } from '../protocol/section-resolver.js';
 import { fields as treeFields, tabs as treeTabs } from '../protocol/form-views.js';
-import { findByControlPath } from '../protocol/form-tree-walk.js';
+import { findByControlPath, findFieldByGroupCaption, nearestGroupCaption } from '../protocol/form-tree-walk.js';
 import { isFieldNode, type FieldNode, type FormNode, type RepeaterNode } from '../protocol/form-node.js';
 import { fieldNodeToControlField } from '../protocol/mcp-adapters.js';
 import { mapRowCellKeys } from '../protocol/row-mapping.js';
@@ -14,9 +14,25 @@ import { mapRowCellKeys } from '../protocol/row-mapping.js';
 export interface FieldWriteResult {
   fieldName: string;
   controlPath: string;
+  /** True when the SaveValue interaction completed without a protocol error. Does NOT mean the value stuck -- check `changed`. */
   success: boolean;
+  /** The value the caller asked to write. */
+  requested?: string;
+  /**
+   * True when the field value actually moved after the write (BC may reformat,
+   * so the final value can differ from `requested` yet still be a real change).
+   * False means the write was a no-op: BC rejected/reverted it or the control
+   * was not editable. Undefined when not determinable (e.g. line-cell writes).
+   */
+  changed?: boolean;
+  /** Why a no-op happened (only set when `changed === false`, or on a not-found error). */
+  reason?: 'not editable' | 'validation reverted' | 'control not found';
   newValue?: string;
   error?: string;
+  /** On a group-targeting miss: the group captions that DO exist on the page (so the caller can retry). */
+  availableGroups?: string[];
+  /** On a group-targeting miss: a remediation hint (use a real group, or the exact controlPath). */
+  hint?: string;
   events?: BCEvent[];
 }
 
@@ -121,7 +137,7 @@ export class DataService {
     pageContextId: string,
     fieldName: string,
     value: string,
-    options?: { sectionId?: string; bookmark?: string; rowIndex?: number },
+    options?: { sectionId?: string; bookmark?: string; rowIndex?: number; group?: string },
   ): Promise<Result<FieldWriteResult, ProtocolError>> {
     const ctx = this.repo.get(pageContextId);
     if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
@@ -140,13 +156,29 @@ export class DataService {
     }
 
     // Header/card field write
-    const fieldNode = this.resolveFieldNode(form.root, fieldName);
+    const fieldNode = this.resolveFieldNode(form.root, fieldName, options?.group);
     if (!fieldNode) {
-      return err(new ProtocolError(`Field not found: ${fieldName}`, {
+      const ctxInfo: Record<string, unknown> = {
         pageContextId,
         availableFields: treeFields(form.root).map(f => f.properties.caption ?? f.controlPath).filter(Boolean),
-      }));
+      };
+      if (options?.group) {
+        // The group either does not exist or has no field with this caption.
+        // Surface the real group labels (BC may use auto-names like "Control41")
+        // and steer the caller to the unambiguous controlPath form.
+        ctxInfo.availableGroups = [...new Set(
+          treeFields(form.root).map(f => nearestGroupCaption(form.root, f.controlPath)).filter(Boolean),
+        )];
+        ctxInfo.hint = `No field "${fieldName}" found in group "${options.group}". Use one of availableGroups, or pass the exact controlPath as the field key (from bc_open_page / bc_read_data).`;
+      }
+      const where = options?.group ? `${fieldName} (group "${options.group}")` : fieldName;
+      return err(new ProtocolError(`Field not found: ${where}`, ctxInfo));
     }
+
+    // Snapshot the pre-write value and editability so we can report whether the
+    // write actually stuck (P6: bc_write_data must not claim success on no-ops).
+    const prevValue = fieldNode.properties.stringValue;
+    const editableBefore = fieldNode.properties.editable;
 
     const interaction: SaveValueInteraction = {
       type: 'SaveValue',
@@ -171,10 +203,22 @@ export class DataService {
     const updatedNode = updatedForm ? findByControlPath(updatedForm.root, fieldNode.controlPath) : undefined;
     const newValue = updatedNode && isFieldNode(updatedNode) ? (updatedNode.properties.stringValue ?? value) : value;
 
+    // P6: did the value actually move? BC may reformat (e.g. customer no -> name),
+    // so we compare against the PRE-write value, not against `value`.
+    const norm = (s?: string) => (s ?? '').trim();
+    const changed = norm(newValue) !== norm(prevValue);
+    let reason: FieldWriteResult['reason'] | undefined;
+    if (!changed) {
+      reason = editableBefore === false ? 'not editable' : 'validation reverted';
+    }
+
     return ok({
       fieldName,
       controlPath: fieldNode.controlPath,
       success: true,
+      requested: value,
+      changed,
+      ...(reason ? { reason } : {}),
       newValue,
       events,
     });
@@ -183,14 +227,32 @@ export class DataService {
   async writeFields(
     pageContextId: string,
     fields: Record<string, string>,
-    options?: { sectionId?: string; bookmark?: string; rowIndex?: number },
+    options?: { sectionId?: string; bookmark?: string; rowIndex?: number; group?: string },
   ): Promise<Result<WriteFieldsResult, ProtocolError>> {
     const results: FieldWriteResult[] = [];
     const allEvents: BCEvent[] = [];
     for (const [name, value] of Object.entries(fields)) {
       const result = await this.writeField(pageContextId, name, value, options);
       if (isErr(result)) {
-        results.push({ fieldName: name, controlPath: '', success: false, error: result.error.message });
+        const notFound = /not found/i.test(result.error.message);
+        // Preserve the diagnostic context (availableGroups / hint) that
+        // writeField attaches on a group-targeting miss -- without this the
+        // per-field result would carry only the bare message.
+        const errCtx = result.error.context as { availableGroups?: unknown; hint?: unknown } | undefined;
+        const availableGroups = Array.isArray(errCtx?.availableGroups)
+          ? (errCtx!.availableGroups as string[]) : undefined;
+        const hint = typeof errCtx?.hint === 'string' ? errCtx.hint : undefined;
+        results.push({
+          fieldName: name,
+          controlPath: '',
+          success: false,
+          requested: value,
+          changed: false,
+          ...(notFound ? { reason: 'control not found' as const } : {}),
+          error: result.error.message,
+          ...(availableGroups ? { availableGroups } : {}),
+          ...(hint ? { hint } : {}),
+        });
       } else {
         results.push(result.value);
         if (result.value.events) allEvents.push(...result.value.events);
@@ -249,14 +311,35 @@ export class DataService {
     if (isErr(saveResult)) return saveResult;
     const allEvents = [...selectResult.value, ...saveResult.value];
     this.repo.applyToPage(pageContextId, saveResult.value);
-    return ok({ fieldName, controlPath: cellPath, success: true, newValue: value, events: allEvents });
+    // Line-cell writes echo the requested value back; `changed` is left undefined
+    // (we do not re-read the cell here, so effect cannot be confirmed cheaply).
+    return ok({ fieldName, controlPath: cellPath, success: true, requested: value, newValue: value, events: allEvents });
   }
 
-  private resolveFieldNode(root: FormNode, fieldName: string): FieldNode | undefined {
+  /**
+   * Resolve a field by (in priority order): exact controlPath, group+caption,
+   * or caption alone. `group` disambiguates duplicate captions (Sell-to /
+   * Bill-to / Ship-to on document headers). Returns undefined when no match.
+   */
+  private resolveFieldNode(root: FormNode, fieldName: string, group?: string): FieldNode | undefined {
+    // 1. Exact controlPath wins -- unambiguous, no group needed.
+    const byPath = treeFields(root).find(f => f.controlPath === fieldName);
+    if (byPath) return byPath;
+
+    // 2. group + caption: pick the field inside the named group. IMPORTANT: when
+    //    a group is given we do NOT fall back to a caption-only match — that
+    //    would silently target a field in the WRONG group (e.g. writing the
+    //    Bill-to value into Sell-to). A miss returns undefined so the caller
+    //    gets an explicit "not found in group" error instead of a wrong write.
+    if (group) {
+      const node = findFieldByGroupCaption(root, group, fieldName);
+      return node && isFieldNode(node) ? node : undefined;
+    }
+
+    // 3. caption alone (no group requested; first match wins).
     const lower = fieldName.toLowerCase();
     for (const f of treeFields(root)) {
       if ((f.properties.caption ?? '').toLowerCase() === lower) return f;
-      if (f.controlPath === fieldName) return f;
     }
     return undefined;
   }

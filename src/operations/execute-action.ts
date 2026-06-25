@@ -15,6 +15,13 @@ export interface ExecuteActionInput {
   section?: string;
   rowIndex?: number;
   bookmark?: string;
+  /**
+   * N3: suppress the full `updatedFields` dump. Document actions ("Editar",
+   * "New") otherwise drag 100+ header fields into the response. With quiet,
+   * only success / changedSections / openedPages / dialog info come back; pull
+   * the fields you need afterwards with bc_read_data (acotat).
+   */
+  quiet?: boolean;
 }
 
 export interface ExecuteActionOutput {
@@ -39,18 +46,18 @@ export class ExecuteActionOperation {
         return err(new ProtocolError('cue requires a section (e.g. "subpage:Activities")'));
       }
       const result = await this.actionService.executeOnCue(input.pageContextId, input.section, input.cue);
-      return mapResult(result, (ar) => this.buildOutput(input.pageContextId, ar));
+      return mapResult(result, (ar) => this.buildOutput(input.pageContextId, ar, input.quiet ?? false));
     }
     if (!input.action) {
       return err(new ProtocolError('Provide exactly one of: action, cue'));
     }
     const result = await this.actionService.executeAction(input.pageContextId, input.action, input.section);
-    return mapResult(result, (ar) => this.buildOutput(input.pageContextId, ar));
+    return mapResult(result, (ar) => this.buildOutput(input.pageContextId, ar, input.quiet ?? false));
   }
 
-  private buildOutput(pageContextId: string, ar: ActionResult): ExecuteActionOutput {
+  private buildOutput(pageContextId: string, ar: ActionResult, quiet: boolean): ExecuteActionOutput {
     let updatedFields: Array<{ name: string; value?: string }> | undefined;
-    if (ar.updatedState) {
+    if (!quiet && ar.updatedState) {
       const resolved = resolveSection(ar.updatedState, 'header');
       if (!('error' in resolved)) {
         const root = resolved.form.root;

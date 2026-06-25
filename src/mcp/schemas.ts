@@ -10,12 +10,21 @@ export const OpenPageSchema = z.object({
   pageId: StringOrNumber.describe('Numeric BC page ID (e.g., 22 for Customer List, 21 for Customer Card). Use bc_search_pages to find IDs.'),
   bookmark: z.string().optional().describe('Open the page to a specific record. Bookmarks come from list row results in bc_open_page or bc_read_data.'),
   tenantId: z.string().optional().describe('BC tenant ID. Defaults to the server-configured tenant. Only needed in multi-tenant deployments.'),
+  sections: z.array(z.string()).optional().describe('Only return these sectionIds (e.g. ["header"]). Use to avoid pulling every line and factbox of a big document. Omit for all sections.'),
+  summary: z.boolean().optional().describe('Return only sectionId/kind/caption (+totalRowCount) per section, with no fields/rows. Best first call on a large page (e.g. page 41 Sales Quote): discover the sections, then pull each with bc_read_data. Avoids token-limit overflows.'),
+  tab: z.string().optional().describe('Filter header fields to a tab (e.g. "General", "Shipping and Billing"). Applies to the header section only.'),
+  columns: z.array(z.string()).optional().describe('Keep only these fields/columns (by caption or controlPath) across all returned sections. Reduces output size.'),
+  range: z.object({
+    offset: z.number().describe('0-based starting row index.'),
+    limit: z.number().describe('Maximum number of rows to return.'),
+  }).optional().describe('Slice already-loaded repeater rows. For deep pagination use bc_read_data (which scrolls to load more).'),
 });
 
 export const ReadDataSchema = z.object({
   pageContextId: z.string().min(1).describe('Page context ID returned by bc_open_page.'),
   section: z.string().optional().describe('sectionId to refresh. Defaults to "header". Examples: "lines" (document line items), "factbox:Customer Statistics" (FactBox). Listed in the bc_open_page sections array.'),
   tab: z.string().optional().describe('Tab name to filter header fields by (e.g., "General", "Invoice Details", "Shipping and Billing"). Omit to return all header fields.'),
+  group: z.string().optional().describe('Restrict returned card fields to those inside the group with this caption (e.g. "Bill-to", "Ship-to"). Use to disambiguate documents whose Sell-to/Bill-to/Ship-to groups repeat captions like "Name"/"Address"/"City". Each returned field also carries its own "group" and "controlPath".'),
   filters: z.array(z.object({
     column: z.string().describe('Column caption name to filter on (e.g., "City", "No.").'),
     value: z.string().describe('Filter value. Supports exact match ("London"), ranges ("10000..20000"), wildcards ("*consulting*"), expressions (">1000").'),
@@ -29,8 +38,9 @@ export const ReadDataSchema = z.object({
 
 export const WriteDataSchema = z.object({
   pageContextId: z.string().min(1).describe('Page context ID returned by bc_open_page.'),
-  fields: z.record(z.string(), z.string()).describe('Key-value pairs of field caption names and string values to write (e.g., { "Name": "Contoso", "City": "London" }).'),
-  section: z.string().optional().describe('Section to write to (e.g., "lines" for document line items). Omit for header fields.'),
+  fields: z.record(z.string(), z.string()).describe('Key-value pairs to write. Each key is a field caption (e.g., { "Name": "Contoso", "City": "London" }) OR a stable controlPath returned by bc_open_page/bc_read_data (e.g. "server:c[4]/c[1]/c[1]/c[0]"). Use the controlPath form (or the "group" param) when several controls share a caption (Sell-to/Bill-to/Ship-to).'),
+  section: z.string().optional().describe('Section to write to (e.g., "lines" for document line items, "factbox:Sales Addresses" for a FactBox). Omit for header fields.'),
+  group: z.string().optional().describe('Disambiguate duplicate captions: resolve every caption-keyed field inside the group with this caption (e.g. "Bill-to"). Ignored for keys given as an explicit controlPath. IMPORTANT: always check each result\'s "changed" flag — "success" only means the interaction completed, not that the value stuck.'),
   rowIndex: z.number().optional().describe('0-based row position in the repeater to write to. Use for line items. Prefer bookmark for stability.'),
   bookmark: z.string().optional().describe('Stable row identifier from bc_read_data results. Preferred over rowIndex when rows may be reordered.'),
 });
@@ -42,6 +52,7 @@ export const ExecuteActionSchema = z.object({
   section: z.string().optional().describe('Section context. Required when using cue; optional for action. Examples: "lines", "subpage:Activities".'),
   rowIndex: z.number().optional().describe('0-based row position for row-scoped actions.'),
   bookmark: z.string().optional().describe('Stable row identifier for row-scoped actions.'),
+  quiet: z.boolean().optional().describe('Suppress the full updatedFields dump. Document actions ("Editar"/"New") otherwise return 100+ header fields. With quiet, only success/changedSections/openedPages/dialog come back; read the fields you need afterwards with bc_read_data.'),
 }).refine(d => !!d.action !== !!d.cue, { message: 'Provide exactly one of: action, cue' });
 
 export const ClosePageSchema = z.object({
@@ -72,6 +83,13 @@ export const SwitchCompanySchema = z.object({
 
 export const RunReportSchema = z.object({
   reportId: StringOrNumber.describe('Numeric BC report ID to execute (e.g., 1306 for Customer Statement, 6 for Trial Balance).'),
+});
+
+export const DownloadReportSchema = z.object({
+  reportId: StringOrNumber.describe('Numeric BC report ID to render and download (e.g., 6 Trial Balance, 1306 Customer Statement).'),
+  company: z.string().optional().describe('Company to run in. Defaults to the session company.'),
+  out: z.string().optional().describe('Output file path. Absolute is used as-is; a relative name goes under BC_REPORT_DIR. Omit to auto-name report-<id>-<timestamp>.<ext>.'),
+  timeoutMs: z.number().optional().describe('How long to wait for the download to complete after the report runs (ms, default 60000).'),
 });
 
 export const ListCompaniesSchema = z.object({});
@@ -160,6 +178,14 @@ export function toMcpJsonSchema(schema: z.ZodType): Record<string, unknown> {
       pageId: StringOrNumberInput.describe('Numeric BC page ID (e.g., 22 for Customer List, 21 for Customer Card). Use bc_search_pages to find IDs.'),
       bookmark: z.string().optional().describe('Open the page to a specific record. Bookmarks come from list row results in bc_open_page or bc_read_data.'),
       tenantId: z.string().optional().describe('BC tenant ID. Defaults to the server-configured tenant. Only needed in multi-tenant deployments.'),
+      sections: z.array(z.string()).optional().describe('Only return these sectionIds (e.g. ["header"]). Use to avoid pulling every line and factbox of a big document. Omit for all sections.'),
+      summary: z.boolean().optional().describe('Return only sectionId/kind/caption (+totalRowCount) per section, with no fields/rows. Best first call on a large page (e.g. page 41 Sales Quote): discover the sections, then pull each with bc_read_data. Avoids token-limit overflows.'),
+      tab: z.string().optional().describe('Filter header fields to a tab (e.g. "General", "Shipping and Billing"). Applies to the header section only.'),
+      columns: z.array(z.string()).optional().describe('Keep only these fields/columns (by caption or controlPath) across all returned sections. Reduces output size.'),
+      range: z.object({
+        offset: z.number().describe('0-based starting row index.'),
+        limit: z.number().describe('Maximum number of rows to return.'),
+      }).optional().describe('Slice already-loaded repeater rows. For deep pagination use bc_read_data (which scrolls to load more).'),
     });
     return z.toJSONSchema(safe) as Record<string, unknown>;
   }
@@ -167,6 +193,16 @@ export function toMcpJsonSchema(schema: z.ZodType): Record<string, unknown> {
   if (schema === RunReportSchema) {
     const safe = z.object({
       reportId: StringOrNumberInput.describe('Numeric BC report ID to execute (e.g., 1306 for Customer Statement, 6 for Trial Balance).'),
+    });
+    return z.toJSONSchema(safe) as Record<string, unknown>;
+  }
+  // DownloadReportSchema uses StringOrNumber with .transform() — use the safe variant
+  if (schema === DownloadReportSchema) {
+    const safe = z.object({
+      reportId: StringOrNumberInput.describe('Numeric BC report ID to render and download (e.g., 6 Trial Balance, 1306 Customer Statement).'),
+      company: z.string().optional().describe('Company to run in. Defaults to the session company.'),
+      out: z.string().optional().describe('Output file path. Absolute is used as-is; a relative name goes under BC_REPORT_DIR. Omit to auto-name report-<id>-<timestamp>.<ext>.'),
+      timeoutMs: z.number().optional().describe('How long to wait for the download to complete after the report runs (ms, default 60000).'),
     });
     return z.toJSONSchema(safe) as Record<string, unknown>;
   }

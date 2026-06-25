@@ -8,10 +8,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 Fork (AESVA / Esanpons): real screenshots of the BC web client, a manual generator,
-and server health/diagnostics. Additive and out-of-band — none of this touches the
-WebSocket protocol path, so the existing data tools keep their full speed.
+server health/diagnostics, report output capture, and the BC744 hardening (field
+disambiguation, write verification, payload control). Additive and out-of-band where
+relevant — none of the browser tooling touches the WebSocket protocol path, so the
+existing data tools keep their full speed.
 
 ### Added
+
+- **`bc_download_report` tool — download a report's rendered output (PDF/Excel/Word).** The
+  output-capture companion to `bc_run_report`. Runs out-of-band in the authenticated headless
+  browser (reusing the `bc_screenshot` cookie-injection auth, extracted to
+  `src/services/bc-web-auth.ts`) and intercepts the browser download via CDP
+  (`Page.setDownloadBehavior`). Drives the report's request page end-to-end — clicks the
+  toolbar's "Send to…"/"Enviar a…" (located by visible text), waits for the format dialog, then
+  clicks "Aceptar"/"OK" and captures the download. Verified live on `devel1`: report 6 →
+  `Trial Balance.pdf`. Saves to `BC_REPORT_DIR` / `out`; returns `downloaded` + `path`, or
+  `requestPageShown: true` + `note` when a report needs a non-default format/parameter selection.
+  Files: `src/services/report-download-service.ts`, `src/operations/download-report.ts`,
+  diagnostic `scripts/capture-report-requestpage.ts`.
+- **`bc_find_object` + `bc_refresh_objects` tools — resolve BC objects by name to numeric ID.**
+  `bc_refresh_objects` scans the "All Objects with Caption" system page (9174) for a range of
+  Object IDs and caches `id` + `name` + `caption` + `app` to a local JSON; `bc_find_object`
+  resolves a page/report/table/codeunit by name, caption, keyword, or numeric id against that
+  cached index (no live BC call), so you can look up a page ID before `bc_open_page`. Files:
+  `src/services/object-index-service.ts`, `src/operations/find-object.ts`,
+  `src/operations/refresh-objects.ts`.
+- **Field disambiguation for duplicate captions (P1/P8).** `bc_open_page` / `bc_read_data`
+  now return a stable `controlPath` and the enclosing `group` caption per field;
+  `bc_write_data` / `bc_read_data` accept a `group` (and `bc_write_data` accepts a
+  `controlPath` as the field key) to target the right control among repeated captions
+  (Sell-to / Bill-to / Ship-to). Files: `src/protocol/section-dto.ts`,
+  `src/protocol/form-tree-walk.ts`, `src/services/data-service.ts`.
+- **Write verification (P6).** `bc_write_data` results carry `requested` / `changed` /
+  `reason`; `allSucceeded` only holds when the value actually changed (no more false
+  positives on no-op writes).
+- **`editable` tri-state (P2).** Fields report `true | false | "unknown"`; `"unknown"`
+  (BC sent no flag, common for page-variable option controls) is not read-only.
+- **Payload control (P7/N3).** `bc_open_page` accepts `summary` / `sections` / `tab` /
+  `columns` / `range`; `bc_execute_action` accepts `quiet`. Avoids token-limit overflows on
+  large documents/lists. Shared narrowing in `src/protocol/section-filters.ts`.
+- **`PAGE_NOT_MATERIALIZED` error (N1).** `bc_open_page` returns an explicit reason when BC
+  can't produce a usable page (Unknown type / no sections / opened a dialog).
+- **New env var:** `BC_REPORT_DIR` (default `./reports`) for `bc_download_report`.
+- **Documentation architecture.** A coherent `docs/` set: an index ([`docs/README.md`](docs/README.md)),
+  one reference per tool under `docs/tools/`, a cross-cutting [conventions guide](docs/guides/conventions.md),
+  and a consolidated [`docs/ROADMAP.md`](docs/ROADMAP.md) (limitations + backlog). Replaces the
+  ad-hoc `limits.md`, root `ROADMAP.md`, `docs/SCREENSHOTS.md`, `docs/BC-WS-MEJORAS.md`,
+  `docs/WHATS-NEW-BC744.md`, and `SESSION-HANDOFF.md`.
 
 - **`bc_screenshot` tool — real PNG screenshots of the BC web client.** Captures the
   actual rendered web UI (not synthetic HTML) for a page/record. Engine = cookie
@@ -23,7 +66,7 @@ WebSocket protocol path, so the existing data tools keep their full speed.
   login page. Writes the PNG to disk (`BC_SCREENSHOT_DIR` / `out`) and returns it inline
   in the MCP response. Files: `src/services/screenshot-service.ts`,
   `src/operations/screenshot.ts`, `src/services/browser.ts`, `src/mcp/handler.ts`
-  (inline image content block). Reference: `docs/SCREENSHOTS.md`.
+  (inline image content block). Reference: `docs/tools/bc_screenshot.md`.
 - **Annotation & crop options on `bc_screenshot`.** `highlight` accepts a caption (one
   red box), a list of captions (auto-numbered badges 1,2,3… for ordered manual steps), or
   `{target,label,style}` objects (style `box` / `badge` / `arrow` / `blur`). `redact`

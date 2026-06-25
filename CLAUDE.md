@@ -323,6 +323,34 @@ Following Anthropic's official guidance:
 
 Source: https://platform.claude.com/docs/en/docs/agents-and-tools/tool-use/define-tools
 
+## Field targeting, write verification & payload control (Fork additions — BC744)
+
+Hardening derived from task BC744 (full reference: [`docs/guides/conventions.md`](docs/guides/conventions.md);
+pending items in [`docs/ROADMAP.md`](docs/ROADMAP.md); execution record in `docs/Plans/bc-ws-mejoras-bc744.md`).
+Agent rules of thumb:
+
+- **Duplicate captions (P1/P8).** Document headers repeat captions across groups (Sell-to / Bill-to /
+  Ship-to all have `Name`, `Address`, `City`, …). `bc_open_page` / `bc_read_data` now return, per field,
+  a stable `controlPath` and the enclosing `group` caption. To target one unambiguously, EITHER pass the
+  `controlPath` as the `fields` key in `bc_write_data` (`{ "server:c[4]/c[1]/c[1]/c[0]": "2000008" }`),
+  OR pass `group: "Bill-to"` alongside caption-keyed fields. `bc_read_data` also accepts `group` to filter.
+- **Never trust `success` alone (P6).** `bc_write_data` results carry `requested` / `changed` / `reason`.
+  `success:true` only means the SaveValue interaction completed; a no-op (rejected / reverted / not editable)
+  returns `changed:false` + a `reason`. `allSucceeded` is false unless every write actually changed. Always
+  branch on `changed`, not `success`.
+- **`editable` is tri-state (P2).** A field may report `editable: true | false | "unknown"`. `"unknown"`
+  (BC emitted no flag — common for page-variable option controls like Ship-to/Bill-to) is NOT read-only:
+  attempt the write and confirm via `changed`.
+- **Acotar big pages (P7/N3).** `bc_open_page` accepts `summary:true` (sections identity only),
+  `sections:["header"]`, `tab`, `columns`, `range`. `bc_execute_action` accepts `quiet:true` to suppress
+  the 100+ field `updatedFields` dump. Use these to avoid token-limit overflows on documents/lists.
+- **`bc_open_page` failures are explicit (N1).** When BC can't materialize a usable page it returns a
+  `PAGE_NOT_MATERIALIZED` error with a `reason` (Unknown / no sections / opened a dialog) instead of a silent
+  empty shell.
+- **Report output (P9).** `bc_download_report { reportId }` renders and downloads a report's PDF/Excel/Word
+  out-of-band via the headless browser (does not touch the WS session). Check `downloaded`; if
+  `requestPageShown:true` the report needs parameters — fill them via `bc_run_report` (WS request page).
+
 ## Screenshot Capture (`bc_screenshot`) — Fork addition
 
 `bc_screenshot` (the 13th tool) captures a REAL PNG of the BC web client for a page/record,
@@ -356,7 +384,7 @@ runtime dependency, lazy-imported so it never affects startup.
 Files: `src/services/screenshot-service.ts`, `src/operations/screenshot.ts`,
 `src/mcp/schemas.ts` (`ScreenshotSchema`), `src/mcp/tool-registry.ts`, `src/mcp/handler.ts`
 (inline image block), `src/core/config.ts`. Comparison harness: `scripts/screenshot-poc.ts`
-(`npm run screenshot:poc`). Full reference: `docs/SCREENSHOTS.md`.
+(`npm run screenshot:poc`). Full reference: `docs/tools/bc_screenshot.md`.
 
 **Revealing collapsed FastTabs & "Show more" (screenshot-only).** Card/document pages hide
 fields two ways in the web client: collapsed FastTabs/groups, and per-tab "Show more"

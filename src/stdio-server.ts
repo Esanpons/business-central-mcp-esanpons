@@ -17,6 +17,7 @@ import { FilterService } from './services/filter-service.js';
 import { NavigationService } from './services/navigation-service.js';
 import { SearchService } from './services/search-service.js';
 import { ScreenshotService } from './services/screenshot-service.js';
+import { ReportDownloadService } from './services/report-download-service.js';
 import { ManualService } from './services/manual-service.js';
 import { ObjectIndexService } from './services/object-index-service.js';
 import { OpenPageOperation } from './operations/open-page.js';
@@ -30,6 +31,7 @@ import { RespondDialogOperation } from './operations/respond-dialog.js';
 import { SwitchCompanyOperation } from './operations/switch-company.js';
 import { ListCompaniesOperation } from './operations/list-companies.js';
 import { RunReportOperation } from './operations/run-report.js';
+import { DownloadReportOperation } from './operations/download-report.js';
 import { WizardNavigateOperation } from './operations/wizard-navigate.js';
 import { ScreenshotOperation } from './operations/screenshot.js';
 import { BuildManualOperation } from './operations/build-manual.js';
@@ -82,6 +84,7 @@ async function main() {
     const navigationService = new NavigationService(s, pageContextRepo, logger);
     const searchService = new SearchService(s, logger);
     const screenshotService = new ScreenshotService(config.bc, config.screenshotDir, () => s.companyName, logger);
+    const reportDownloadService = new ReportDownloadService(config.bc, config.reportDir, () => s.companyName, logger);
     const objectIndexService = new ObjectIndexService(pageService, config.stateDir, config.bc.baseUrl, config.bc.tenantId, logger);
 
     const operations: Operations = {
@@ -96,6 +99,7 @@ async function main() {
       switchCompany: new SwitchCompanyOperation(s, pageContextRepo, logger),
       listCompanies: new ListCompaniesOperation(pageService, dataService, () => s.companyName, logger),
       runReport: new RunReportOperation(s),
+      downloadReport: new DownloadReportOperation(reportDownloadService),
       wizardNavigate: new WizardNavigateOperation(actionService, pageContextRepo),
       screenshot: new ScreenshotOperation(screenshotService),
       buildManual: new BuildManualOperation(new ManualService(screenshotService, config.manualDir, logger)),

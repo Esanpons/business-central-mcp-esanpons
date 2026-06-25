@@ -4,11 +4,14 @@ import type { DataService } from '../services/data-service.js';
 import type { FilterService } from '../services/filter-service.js';
 import type { PageContextRepository } from '../protocol/page-context-repo.js';
 import { buildSection, type Section } from '../protocol/section-dto.js';
+import { filterFieldsByGroup, filterColumns, sliceRows } from '../protocol/section-filters.js';
 
 export interface ReadDataInput {
   pageContextId: string;
   section?: string;
   tab?: string;
+  /** Restrict card fields to those whose nearest enclosing group caption matches (case-insensitive). */
+  group?: string;
   filters?: Array<{ column: string; value: string }>;
   columns?: string[];
   range?: { offset: number; limit: number };
@@ -88,30 +91,16 @@ export class ReadDataOperation {
       }
     }
 
-    if (input.columns && input.columns.length > 0) {
-      const wanted = new Set(input.columns.map(c => c.toLowerCase()));
-      if (materialized.rows) {
-        materialized = {
-          ...materialized,
-          rows: materialized.rows.map(r => ({
-            bookmark: r.bookmark,
-            cells: Object.fromEntries(Object.entries(r.cells).filter(([k]) => wanted.has(k.toLowerCase()))),
-          })),
-        };
-      }
-      if (materialized.fields) {
-        materialized = {
-          ...materialized,
-          fields: materialized.fields.filter(f => wanted.has(f.name.toLowerCase())),
-        };
-      }
+    if (input.group) {
+      materialized = filterFieldsByGroup(materialized, input.group);
     }
 
-    if (input.range && materialized.rows) {
-      materialized = {
-        ...materialized,
-        rows: materialized.rows.slice(input.range.offset, input.range.offset + input.range.limit),
-      };
+    if (input.columns && input.columns.length > 0) {
+      materialized = filterColumns(materialized, input.columns);
+    }
+
+    if (input.range) {
+      materialized = sliceRows(materialized, input.range);
     }
 
     return ok({ section: materialized });

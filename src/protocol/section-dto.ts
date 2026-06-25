@@ -18,6 +18,7 @@ import {
   cues as treeCues,
 } from './form-views.js';
 import { isEffectivelyVisible } from './visibility.js';
+import { nearestGroupCaption } from './form-tree-walk.js';
 import { mapRowCellKeys } from './row-mapping.js';
 import { classifyWizardNav } from './wizard-classify.js';
 import type { PageContext } from './page-context.js';
@@ -25,9 +26,30 @@ import type { PageContext } from './page-context.js';
 export interface SectionField {
   /** Field caption as shown in the BC client. Display label only. */
   readonly name: string;
+  /**
+   * Stable control path (e.g. "server:c[4]/c[1]/c[1]/c[0]"). Unique per control
+   * even when several fields share the same caption. Pass it straight back as
+   * the field key to bc_write_data / bc_read_data to target this exact control,
+   * bypassing caption ambiguity.
+   */
+  readonly controlPath: string;
+  /**
+   * Caption of the innermost enclosing group (e.g. "Bill-to", "Ship-to"),
+   * when the field sits inside one. Disambiguates duplicate captions: the three
+   * `Name` controls on a Sales Quote header differ only by this group.
+   */
+  readonly group?: string;
   /** Display string. Undefined for fields that have no string projection (e.g. boolean tristate). */
   readonly value?: string;
-  readonly editable: boolean;
+  /**
+   * Tri-state editability. `true`/`false` reflect what BC reported; `"unknown"`
+   * means BC has not (yet) emitted an Editable flag for this control. Page
+   * variables backing option controls (Ship-to / Bill-to selectors) frequently
+   * arrive as `"unknown"` yet ARE writable -- do not treat `"unknown"` as
+   * read-only. After a write, trust the `changed` flag from bc_write_data over
+   * this hint (P2/P6).
+   */
+  readonly editable: boolean | 'unknown';
   /** Wire-level BC field type. See FieldType union in protocol/form-node.ts. */
   readonly type: FieldType;
   /** True if BC marked the field as mandatory. */
@@ -138,14 +160,19 @@ export function buildSection(ctx: PageContext, sectionId: string): Section | nul
   } else {
     out.fields = treeFields(root)
       .filter(f => f.properties.caption && isEffectivelyVisible(root, f.controlPath, groupVis, ws))
-      .map(f => ({
-        name: f.properties.caption!,
-        value: f.properties.stringValue,
-        editable: f.properties.editable ?? false,
-        type: f.type,
-        ...(f.properties.showMandatory ? { showMandatory: true as const } : {}),
-        ...(f.hasLookup ? { isLookup: true as const } : {}),
-      }));
+      .map(f => {
+        const group = nearestGroupCaption(root, f.controlPath);
+        return {
+          name: f.properties.caption!,
+          controlPath: f.controlPath,
+          ...(group ? { group } : {}),
+          value: f.properties.stringValue,
+          editable: f.properties.editable === undefined ? ('unknown' as const) : f.properties.editable,
+          type: f.type,
+          ...(f.properties.showMandatory ? { showMandatory: true as const } : {}),
+          ...(f.hasLookup ? { isLookup: true as const } : {}),
+        };
+      });
   }
 
   if (isHeader) {

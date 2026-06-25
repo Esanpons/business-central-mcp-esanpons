@@ -69,10 +69,24 @@ export class InputValidationError extends BCError {
  * another page that embeds it).
  *
  * Verified-non-reproducing on stock BC28 (pages 1310, 9061, 9152 all return
- * full content). Reproduces on some vertical-app environments per limits.md #1.
+ * full content). Reproduces on some vertical-app environments (Continia/CDO);
+ * see docs/tools/bc_open_page.md.
  */
 export class CardPartStubError extends ProtocolError {
   constructor(message: string, context: { pageId: string; hostHint: string }) {
     super(message, context, 'CARDPART_STUB');
+  }
+}
+/**
+ * Returned by bc_open_page when the requested page could not be materialized
+ * into a usable page: BC returned an `Unknown` pageType, no sections, or opened
+ * a dialog instead of a standalone form (N1). The `reason` in context tells the
+ * caller why so they stop guessing. Common cause: the id is not a directly
+ * openable standalone page (e.g. a list-part / sub-object), or opening it
+ * triggered a modal dialog that must be handled with bc_respond_dialog.
+ */
+export class PageNotMaterializedError extends ProtocolError {
+  constructor(message: string, context: { pageId: string; pageType: string; caption: string; isModal: boolean; reason: string }) {
+    super(message, context, 'PAGE_NOT_MATERIALIZED');
   }
 }

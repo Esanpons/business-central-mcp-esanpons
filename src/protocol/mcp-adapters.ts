@@ -13,7 +13,8 @@ export function fieldNodeToControlField(root: FormNode, f: FieldNode): ControlFi
     controlPath: f.controlPath,
     caption: f.properties.caption ?? '',
     type: f.type,
-    editable: f.properties.editable ?? false,
+    // Tri-state: undefined -> "unknown" (BC sent no Editable flag), not false.
+    editable: f.properties.editable === undefined ? 'unknown' : f.properties.editable,
     visible: f.properties.visible ?? true,
     stringValue: f.properties.stringValue,
     value: f.properties.objectValue ?? f.properties.stringValue,

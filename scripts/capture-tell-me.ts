@@ -7,7 +7,7 @@
 //
 // SaveValue against server:c[0]/c[0] (the actual sc text input), NOT
 // server:c[0] (the gc container). The wrong path returns InvokeCompleted
-// with no DataLoaded events. See limits.md #5 + src/protocol/captures/README.md.
+// with no DataLoaded events. See src/protocol/captures/README.md and docs/tools/bc_search_pages.md.
 
 import { config as dotenvConfig } from 'dotenv';
 import { writeFileSync, mkdirSync } from 'node:fs';

@@ -10,6 +10,13 @@ export interface WriteDataInput {
   section?: string;
   rowIndex?: number;
   bookmark?: string;
+  /**
+   * Disambiguates duplicate captions on document headers (e.g. the three `Name`
+   * controls in Sell-to / Bill-to / Ship-to groups). When set, each field key is
+   * resolved inside the group with this caption. Ignored for keys that are an
+   * exact controlPath (those are already unambiguous).
+   */
+  group?: string;
 }
 
 export interface WriteDataOutput {
@@ -31,6 +38,7 @@ export class WriteDataOperation {
       sectionId: input.section,
       rowIndex: input.rowIndex,
       bookmark: input.bookmark,
+      group: input.group,
     });
     if (!isOk(result)) return result;
 
@@ -41,7 +49,11 @@ export class WriteDataOperation {
 
     return ok({
       results,
-      allSucceeded: results.every(r => r.success),
+      // A write only "succeeds" if the interaction completed AND the value
+      // actually moved. `changed === false` is a no-op (rejected/reverted/not
+      // editable) and must not be reported as success (P6). `changed`
+      // undefined (line cells) is treated as success-by-interaction.
+      allSucceeded: results.every(r => r.success && r.changed !== false),
       changedSections,
       dialogsOpened,
       requiresDialogResponse: dialogsOpened.length > 0,

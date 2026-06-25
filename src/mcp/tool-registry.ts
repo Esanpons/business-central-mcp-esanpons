@@ -11,6 +11,7 @@ import {
   SwitchCompanySchema,
   ListCompaniesSchema,
   RunReportSchema,
+  DownloadReportSchema,
   WizardNavigateSchema,
   ScreenshotSchema,
   BuildManualSchema,
@@ -33,6 +34,7 @@ import type { RespondDialogOperation } from '../operations/respond-dialog.js';
 import type { SwitchCompanyOperation } from '../operations/switch-company.js';
 import type { ListCompaniesOperation } from '../operations/list-companies.js';
 import type { RunReportOperation } from '../operations/run-report.js';
+import type { DownloadReportOperation } from '../operations/download-report.js';
 import type { WizardNavigateOperation } from '../operations/wizard-navigate.js';
 import type { ScreenshotOperation } from '../operations/screenshot.js';
 import type { BuildManualOperation } from '../operations/build-manual.js';
@@ -57,6 +59,7 @@ export interface Operations {
   switchCompany: SwitchCompanyOperation;
   listCompanies: ListCompaniesOperation;
   runReport: RunReportOperation;
+  downloadReport: DownloadReportOperation;
   wizardNavigate: WizardNavigateOperation;
   screenshot: ScreenshotOperation;
   buildManual: BuildManualOperation;
@@ -241,7 +244,7 @@ Do NOT use this if you already know the company name -- call bc_switch_company d
       name: 'bc_run_report',
       description: `Execute a Business Central report by its numeric report ID. If the report has a request page (parameter/filter dialog), it will be returned with its fields so you can fill in parameters using bc_write_data and then execute the report by responding with bc_respond_dialog (response: "ok"). The report runs server-side on the BC service tier.
 
-Output capture (downloading the rendered PDF, Excel, or Word document) is not yet supported. Use this tool for reports that perform server-side actions (batch posting via Report 295, inventory adjustments, data processing) or to inspect and fill request page parameters. Common reports: 1306 (Customer Statement), 120 (Aged Accounts Receivable), 6 (Trial Balance), 295 (Batch Post Sales Orders).
+To DOWNLOAD the rendered output (PDF/Excel/Word), use bc_download_report instead -- this tool fills request-page parameters over the WebSocket but does not capture the binary. Use this tool for reports that perform server-side actions (batch posting via Report 295, inventory adjustments, data processing) or to inspect and fill request page parameters. Common reports: 1306 (Customer Statement), 120 (Aged Accounts Receivable), 6 (Trial Balance), 295 (Batch Post Sales Orders).
 
 Do NOT use this for viewing data -- use bc_open_page and bc_read_data for data retrieval. Do NOT confuse reports with pages -- reports are processing/printing objects, pages are UI views.
 
@@ -249,6 +252,21 @@ Example: { "reportId": 6 }`,
       inputSchema: toMcpJsonSchema(RunReportSchema),
       zodSchema: RunReportSchema,
       execute: (input) => ops.runReport.execute(input as Parameters<typeof ops.runReport.execute>[0]),
+    },
+    {
+      name: 'bc_download_report',
+      description: `Renders a Business Central report and DOWNLOADS its output file (PDF / Excel / Word) to disk, returning the saved path. This is the output-capture companion to bc_run_report. Like bc_screenshot it runs OUT-OF-BAND in an authenticated headless browser (system Chrome/Edge) and does NOT touch the WebSocket session your other bc_ tools use -- BC delivers the rendered report as a normal browser download, which this tool intercepts via CDP.
+
+Pass reportId (required). Optionally company (defaults to the session company), out (file path; absolute used as-is, relative goes under BC_REPORT_DIR; omit to auto-name), and timeoutMs (how long to wait for the download, default 60000).
+
+Reports that run with no required parameters download immediately. Reports that need parameters return downloaded:false with requestPageShown:true -- in that case fill the parameters via bc_run_report (which exposes the request page over the WebSocket) and re-run, or extend this call once request-page parameterisation is supported. Always check the downloaded flag; the saved file path is in "path" when downloaded is true.
+
+Requires Chrome or Edge installed (or BC_SCREENSHOT_CHROME set). Do NOT use this for server-side processing reports (batch posting) -- use bc_run_report. Do NOT use it for reading data -- use bc_open_page / bc_read_data.
+
+Example: { "reportId": 6 } -> { "downloaded": true, "path": "C:/.../report-6-....pdf", "fileName": "Trial Balance.pdf" }`,
+      inputSchema: toMcpJsonSchema(DownloadReportSchema),
+      zodSchema: DownloadReportSchema,
+      execute: (input) => ops.downloadReport.execute(input as Parameters<typeof ops.downloadReport.execute>[0]),
     },
     {
       name: 'bc_wizard_navigate',

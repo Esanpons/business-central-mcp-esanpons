@@ -31,8 +31,9 @@ server:c[2]   rc (secondary results repeater — reports and other run-targets)
 
 **Critical:** the search input is at `server:c[0]/c[0]`, NOT `server:c[0]`.
 SaveValue against the gc container at `server:c[0]` returns `InvokeCompleted`
-only — no `DataLoaded`, no rows. This is the limits.md #5 root cause for the
-default-profile env: the SearchService was sending against the wrong path.
+only — no `DataLoaded`, no rows. This was the Tell Me empty-results root cause
+for the default-profile env (the SearchService sent against the wrong path; now
+fixed — see docs/tools/bc_search_pages.md).
 
 ### Result row shape
 

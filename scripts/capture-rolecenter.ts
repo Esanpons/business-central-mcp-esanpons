@@ -6,7 +6,7 @@
 // Then, for one of the hosted CardParts, attempt to open it standalone (via
 // numeric page id) and save the result to
 //   src/protocol/captures/cuegroup-cardpart-standalone-2026-04-28.json
-// to characterise the standalone-CardPart-stub symptom (limits.md #1).
+// to characterise the standalone-CardPart-stub symptom (see docs/tools/bc_open_page.md).
 //
 // Run with:
 //   BC_PROFILE="BUSINESS MANAGER" npx tsx scripts/capture-rolecenter.ts
@@ -287,7 +287,7 @@ async function main(): Promise<void> {
     // no numeric id field exposed on the wire.
     //
     // Known standard CardPart page ids on a default BC28 install (used here
-    // to characterise the standalone-stub symptom from limits.md #1):
+    // to characterise the standalone-stub symptom; see docs/tools/bc_open_page.md):
     //   1310  -- O365 Activities (the role-center Activities cuegroup)
     //   9061  -- Sales Cue
     //   9043  -- Purchase Cue
