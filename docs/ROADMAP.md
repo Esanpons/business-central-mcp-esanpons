@@ -55,18 +55,18 @@ the Job-Queue dispatcher draining `CDO Queue Entry` is AL behavior, not bc-ws.
 ### Report / output & files
 The headless browser (added for `bc_screenshot`) is in the stack, so these no longer require
 reverse-engineering BC's WCF `StreamTransfer` channel.
-- **`bc_download_report` format/parameter selection** (L5) — the default "Send to → Aceptar" flow
-  already downloads request-page reports (DONE, verified live: reports 6 and 120). Two follow-ups:
-  - **Explicit output format** (`format: "pdf"|"excel"|"word"`). *Small.* The Send-to dialog
-    exposes a radio group (`name="b13"`, options `b13_0..b13_5`) + an "Aceptar" confirm. Lead:
-    run `scripts/capture-report-requestpage.ts <id>` (it now resolves each field's `label`), map
-    the format → radio index, then select that radio before clicking Aceptar in
-    `ReportDownloadService.driveRequestPage`.
-  - **Mandatory request-page parameters** (e.g. per-customer statements 116 / 1316 need a
-    customer + period). *Large / per-report.* Each report has different parameters, so this needs
-    a real design (accept a `parameters` map keyed by request-page caption, set each field in the
-    browser before running). Until then these reports correctly return `requestPageShown:true`;
-    fill them via `bc_run_report`.
+  `bc_download_report` already downloads request-page reports via the default "Send to → Aceptar"
+  flow (DONE, verified live: reports 6 and 120). Two distinct follow-ups remain:
+- **TODO — `bc_download_report` explicit output format** (`format: "pdf" | "excel" | "word"`). *Small.*
+  The "Send to…" dialog exposes a radio group (`name="b13"`, options `b13_0..b13_5`) + an "Aceptar"
+  confirm. Lead: run `scripts/capture-report-requestpage.ts <id>` (it resolves each field's `label`),
+  map format → radio index, then select that radio before clicking Aceptar in
+  `ReportDownloadService.driveRequestPage`. Today the default format (PDF) is used.
+- **TODO — `bc_download_report` mandatory request-page parameters** (e.g. per-customer statements
+  116 / 1316 need a customer + period). *Large / per-report.* Each report's parameters differ, so this
+  needs a real design (accept a `parameters` map keyed by request-page caption and set each field in
+  the browser before running). Until then these reports correctly return `requestPageShown:true`; fill
+  them via `bc_run_report`.
 - **File upload** — drive `<input type="file">` for BC's upload flow (symmetric to download).
 - **P3 — capture live/transient state.** Render the in-memory `FormState` (which holds unsaved
   changes) to HTML/PNG so unsaved fields/dialogs can be documented without an external browser.
