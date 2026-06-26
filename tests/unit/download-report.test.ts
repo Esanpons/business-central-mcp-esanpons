@@ -36,6 +36,25 @@ describe('DownloadReportOperation (P9)', () => {
     expect(r.value.requestPageShown).toBe(true);
   });
 
+  it('forwards filters to the service (document report filtered by No.)', async () => {
+    let seen: unknown;
+    const op = new DownloadReportOperation({
+      download: async (inp: unknown) => {
+        seen = inp;
+        return {
+          reportId: '50002', url: 'u', authenticated: true, downloaded: false,
+          requestPageShown: true, pageTitle: 't',
+          filtersApplied: [{ caption: 'No.', matched: true, matchedLabel: 'Nº' }],
+        } as DownloadReportResult;
+      },
+    } as unknown as ReportDownloadService);
+    const r = await op.execute({ reportId: 50002, company: 'CRONUS_04', filters: { 'No.': '2000052' } });
+    expect((seen as { filters?: Record<string, string> }).filters).toEqual({ 'No.': '2000052' });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.filtersApplied?.[0]).toMatchObject({ caption: 'No.', matched: true });
+  });
+
   it('translates a thrown service error to REPORT_DOWNLOAD_ERROR', async () => {
     const r = await opWith(async () => { throw new Error('No Chrome/Edge found'); }).execute({ reportId: 6 });
     expect(r.ok).toBe(false);

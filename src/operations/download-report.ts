@@ -7,6 +7,7 @@ export interface DownloadReportOperationInput {
   company?: string;
   out?: string;
   timeoutMs?: number;
+  filters?: Record<string, string>;
 }
 
 export type DownloadReportOutput = DownloadReportResult;
@@ -20,6 +21,7 @@ export class DownloadReportOperation {
       company: input.company,
       out: input.out,
       timeoutMs: input.timeoutMs,
+      filters: input.filters,
     };
     try {
       const r = await this.service.download(dlInput);

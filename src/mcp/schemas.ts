@@ -45,15 +45,23 @@ export const WriteDataSchema = z.object({
   bookmark: z.string().optional().describe('Stable row identifier from bc_read_data results. Preferred over rowIndex when rows may be reordered.'),
 });
 
+// action/cue are each individually optional; the .refine() enforces "exactly one".
+// IMPORTANT: keep this a FLAT object schema. Do NOT express the exclusivity as a
+// JSON Schema oneOf/anyOf/allOf in toMcpJsonSchema -- Claude Code's MCP client
+// drops any tool whose inputSchema uses a top-level combinator, which made
+// bc_execute_action disappear entirely (verified live, BC745). The constraint
+// lives in the refine (runtime) + the field descriptions (for the model).
 export const ExecuteActionSchema = z.object({
   pageContextId: z.string().min(1).describe('Page context ID returned by bc_open_page.'),
-  action: z.string().min(1).optional().describe('Action caption name to execute (case-insensitive). Use action OR cue, not both. Must match a visible, enabled action from bc_open_page response.'),
-  cue: z.string().min(1).optional().describe('Cue tile name to drill down on (e.g. "Sales Quotes", "Pending Approvals"). Use with section pointing at the subpage that owns the cuegroup. Use action OR cue, not both.'),
+  action: z.string().min(1).optional().describe('Action caption name to execute (case-insensitive). Provide EXACTLY ONE of action or cue -- never both, never neither, and do NOT send a placeholder for the unused one (omit it). Must match a visible, enabled action from bc_open_page response.'),
+  cue: z.string().min(1).optional().describe('Cue tile name to drill down on (e.g. "Sales Quotes", "Pending Approvals"). Use with section pointing at the subpage that owns the cuegroup. Provide EXACTLY ONE of action or cue -- never both, never neither, and do NOT send a placeholder for the unused one (omit it).'),
   section: z.string().optional().describe('Section context. Required when using cue; optional for action. Examples: "lines", "subpage:Activities".'),
   rowIndex: z.number().optional().describe('0-based row position for row-scoped actions.'),
   bookmark: z.string().optional().describe('Stable row identifier for row-scoped actions.'),
   quiet: z.boolean().optional().describe('Suppress the full updatedFields dump. Document actions ("Editar"/"New") otherwise return 100+ header fields. With quiet, only success/changedSections/openedPages/dialog come back; read the fields you need afterwards with bc_read_data.'),
-}).refine(d => !!d.action !== !!d.cue, { message: 'Provide exactly one of: action, cue' });
+}).refine(d => !!d.action !== !!d.cue, {
+  message: 'Provide exactly one of action or cue (you passed both or neither). Pass ONLY one and omit the other -- do not send a placeholder.',
+});
 
 export const ClosePageSchema = z.object({
   pageContextId: z.string().min(1).describe('Page context ID returned by bc_open_page. Becomes invalid after closing.'),
@@ -90,6 +98,7 @@ export const DownloadReportSchema = z.object({
   company: z.string().optional().describe('Company to run in. Defaults to the session company.'),
   out: z.string().optional().describe('Output file path. Absolute is used as-is; a relative name goes under BC_REPORT_DIR. Omit to auto-name report-<id>-<timestamp>.<ext>.'),
   timeoutMs: z.number().optional().describe('How long to wait for the download to complete after the report runs (ms, default 60000).'),
+  filters: z.record(z.string(), z.string()).optional().describe('Request-page filters to set before running, keyed by the filter field caption shown on the report request page (e.g. { "No.": "2000052" }). Needed to print ONE specific document for reports whose RequestFilterFields expose a key like "No." but that have no mandatory parameters — without it the report runs unfiltered and no usable file is produced (requestPageShown:true). Pass the caption exactly as the request page displays it (locale-dependent, e.g. "Nº"); if it does not match, the result\'s availableFilterLabels lists the fields found so you can retry with the exact caption.'),
 });
 
 export const ListCompaniesSchema = z.object({});
@@ -203,8 +212,13 @@ export function toMcpJsonSchema(schema: z.ZodType): Record<string, unknown> {
       company: z.string().optional().describe('Company to run in. Defaults to the session company.'),
       out: z.string().optional().describe('Output file path. Absolute is used as-is; a relative name goes under BC_REPORT_DIR. Omit to auto-name report-<id>-<timestamp>.<ext>.'),
       timeoutMs: z.number().optional().describe('How long to wait for the download to complete after the report runs (ms, default 60000).'),
+      filters: z.record(z.string(), z.string()).optional().describe('Request-page filters to set before running, keyed by the filter field caption shown on the report request page (e.g. { "No.": "2000052" }). Needed to print ONE specific document for reports whose RequestFilterFields expose a key like "No." but that have no mandatory parameters. Pass the caption exactly as the request page displays it (locale-dependent, e.g. "Nº"); if it does not match, the result\'s availableFilterLabels lists the fields found so you can retry.'),
     });
     return z.toJSONSchema(safe) as Record<string, unknown>;
   }
+  // NOTE: ExecuteActionSchema's action/cue exclusivity is intentionally NOT
+  // emitted as JSON Schema oneOf/anyOf here -- a top-level combinator makes
+  // Claude Code's MCP client drop the whole tool (verified live, BC745). The
+  // refine enforces it at runtime; the field descriptions guide the model.
   return z.toJSONSchema(schema) as Record<string, unknown>;
 }

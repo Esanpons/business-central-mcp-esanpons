@@ -125,10 +125,19 @@ export async function inPageLogin(config: BCConfig, p: any): Promise<void> {
   ]);
 }
 
-/** Poll until the SPA settles (no spinner, non-generic title), then a final settle wait. */
+/**
+ * Poll until the SPA settles (no spinner, non-generic title), then a final settle
+ * wait. `opts.timeoutMs`/`opts.settleMs` bound the poll and the trailing settle.
+ *
+ * Reports must pass a SHORT timeoutMs: a report request page keeps the generic
+ * "Dynamics 365 Business Central" title forever (it never gets a page caption), so
+ * the readiness probe never trips and otherwise burns the full default 60s for
+ * nothing (BC745: that single wait was the bulk of a ~97s download). The caller
+ * (report download) drives the request page right after regardless of the return.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function waitReady(p: any, _logger?: Logger): Promise<boolean> {
-  const deadline = Date.now() + 60000;
+export async function waitReady(p: any, _logger?: Logger, opts?: { timeoutMs?: number; settleMs?: number }): Promise<boolean> {
+  const deadline = Date.now() + (opts?.timeoutMs ?? 60000);
   let ready = false;
   while (Date.now() < deadline) {
     const st = await p
@@ -143,6 +152,6 @@ export async function waitReady(p: any, _logger?: Logger): Promise<boolean> {
     if (!st.spinnerVisible && !st.generic) { ready = true; break; }
     await sleep(1000);
   }
-  await sleep(3500); // settle final layout / data binding
+  await sleep(opts?.settleMs ?? 3500); // settle final layout / data binding
   return ready;
 }

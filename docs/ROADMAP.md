@@ -56,16 +56,23 @@ the Job-Queue dispatcher draining `CDO Queue Entry` is AL behavior, not bc-ws.
 The headless browser (added for `bc_screenshot`) is in the stack, so these no longer require
 reverse-engineering BC's WCF `StreamTransfer` channel.
   `bc_download_report` already downloads request-page reports via the default "Send to → Aceptar"
-  flow (DONE, verified live: reports 6 and 120). Two distinct follow-ups remain:
+  flow (DONE, verified live: reports 6 and 120). Remaining follow-ups:
+- **DONE — `bc_download_report` request-page FILTER fields** (`filters` map keyed by the filter field
+  caption, e.g. `{ "No.": "2000052" }`). Sets each `RequestFilterField` in the browser before running,
+  so a document report prints one specific record instead of returning `requestPageShown:true`.
+  Locale-tolerant caption match (folds `Nº`→`No.`); a miss returns `availableFilterLabels` for a retry.
+  Verified live on devel1 (report 50002 Sales Quote → 1-page PDF for quote 2000052, BC745).
+  Impl: `ReportDownloadService.applyFilters`.
 - **TODO — `bc_download_report` explicit output format** (`format: "pdf" | "excel" | "word"`). *Small.*
   The "Send to…" dialog exposes a radio group (`name="b13"`, options `b13_0..b13_5`) + an "Aceptar"
   confirm. Lead: run `scripts/capture-report-requestpage.ts <id>` (it resolves each field's `label`),
   map format → radio index, then select that radio before clicking Aceptar in
   `ReportDownloadService.driveRequestPage`. Today the default format (PDF) is used.
-- **TODO — `bc_download_report` mandatory request-page parameters** (e.g. per-customer statements
-  116 / 1316 need a customer + period). *Large / per-report.* Each report's parameters differ, so this
-  needs a real design (accept a `parameters` map keyed by request-page caption and set each field in
-  the browser before running). Until then these reports correctly return `requestPageShown:true`; fill
+- **TODO — `bc_download_report` Options-area request-page parameters** (non-filter inputs on the
+  Options FastTab: dates, booleans, option/dropdowns — e.g. per-customer statements 116 / 1316 need a
+  customer + period). *Medium / per-report.* The `filters` map already covers `RequestFilterField`
+  inputs; extend the same browser-set approach to typed Options controls (or reuse the `filters` field
+  setter with a richer value coercion). Until then these correctly return `requestPageShown:true`; fill
   them via `bc_run_report`.
 - **File upload** — drive `<input type="file">` for BC's upload flow (symmetric to download).
 - **P3 — capture live/transient state.** Render the in-memory `FormState` (which holds unsaved
