@@ -2,8 +2,8 @@ import { existsSync } from 'node:fs';
 
 /**
  * Shared headless-browser launcher (system Chrome/Edge via puppeteer-core, no bundled
- * download). Used by both ScreenshotService (capture) and the manual PDF renderer.
- * Lazy-imports puppeteer-core so it never affects server startup.
+ * download). Used by ScreenshotService (capture), the report downloader and the
+ * manual layout verifier. Lazy-imports puppeteer-core so it never affects server startup.
  */
 
 const CHROME_CANDIDATES = [

@@ -48,12 +48,18 @@ cross-cutting conventions, setup, and the roadmap.
 | `bc_wizard_navigate` | Drive a NavigatePage/wizard by step (back/next/finish/cancel). | [tools/bc_wizard_navigate.md](tools/bc_wizard_navigate.md) |
 
 ### Visual & documentation (out-of-band, headless browser)
+> Producing docs, screenshots or a manual? Read the **[documentation guide](guides/documenting.md)**
+> first — it is the decision table for which tool and which output format to use.
+
 | Tool | What it does | Doc |
 |------|--------------|-----|
 | `bc_screenshot` | Capture a real PNG of the BC web client, with highlight/redact/crop and FastTab reveal. | [tools/bc_screenshot.md](tools/bc_screenshot.md) |
-| `bc_build_manual` | Assemble annotated screenshots + prose into a Markdown/PDF/DOCX user manual. | [tools/bc_build_manual.md](tools/bc_build_manual.md) |
+| `bc_build_manual` | Assemble annotated screenshots + prose into a Markdown and/or printable A4 (Ctrl+P) user manual. | [tools/bc_build_manual.md](tools/bc_build_manual.md) |
 
 ## Guides & reference
+- **[Documenting BC](guides/documenting.md)** — which tool and which output format for screenshots,
+  manuals and printable A4 docs; the standard recipe, the Markdown subset allowed in prose, and
+  what to do when a capture or a highlight fails.
 - **[Conventions](guides/conventions.md)** — `pageContextId` lifecycle, the Section model, field
   targeting (`controlPath`/`group`), write verification (`changed`/`reason`), the `editable`
   tri-state, payload control (`summary`/`sections`/`columns`/`range`/`quiet`), and error codes.

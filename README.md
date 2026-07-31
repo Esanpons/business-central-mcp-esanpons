@@ -132,7 +132,7 @@ Restart Claude Desktop.
 | `BC_RECONNECT_BASE_DELAY` | No | `1000` | Base delay (ms) for exponential reconnect backoff. |
 | `BC_SCREENSHOT_DIR` | No | `./screenshots` | Folder where `bc_screenshot` writes PNGs (relative paths resolve against the server's working dir). |
 | `BC_SCREENSHOT_CHROME` | No | auto-detect | Path to a Chrome/Edge executable for `bc_screenshot` / `bc_build_manual`. Auto-detected on Windows/macOS/Linux if omitted. |
-| `BC_MANUAL_DIR` | No | `./manuals` | Folder where `bc_build_manual` writes the generated Markdown/PDF/DOCX and their images. |
+| `BC_MANUAL_DIR` | No | `./manuals` | Folder where `bc_build_manual` writes the generated Markdown / printable A4 HTML and their images. |
 | `BC_REPORT_DIR` | No | `.arxius/reports` | Folder where `bc_download_report` writes downloaded report files (PDF/Excel/Word). Relative to the server's working directory. |
 
 ## What can it do?
@@ -153,7 +153,7 @@ Restart Claude Desktop.
 | `bc_download_report` | Render a report and DOWNLOAD its output (PDF/Excel/Word) to disk via the headless browser (CDP download interception). Output-capture companion to `bc_run_report`; out-of-band. Reports needing parameters return `requestPageShown:true`. |
 | `bc_wizard_navigate` | Drive NavigatePage / wizard flows (back / next / finish / cancel) |
 | `bc_screenshot` | Capture a REAL PNG of the BC web client for a page/record. Annotate with highlight callout boxes (single, auto-numbered badges, arrows), redact fields, and crop to a section -- for manuals and docs. Fields in collapsed FastTabs or behind "Show more" are revealed automatically when highlighted (or pass `expand:true`). Saves to disk and returns the image inline. Out-of-band. |
-| `bc_build_manual` | Build a step-by-step user manual (Markdown + PDF + DOCX) with annotated screenshots from a list of steps. The high-level companion to `bc_screenshot`. |
+| `bc_build_manual` | Build a step-by-step user manual with annotated screenshots from a list of steps. Outputs Markdown (default) and/or a printable A4 web page -- real 210x297mm sheets with cover, index and page numbers, so Ctrl+P prints it or saves it as a paged PDF. The high-level companion to `bc_screenshot`. |
 | `bc_find_object` | Resolve a page/report/table/codeunit by name or keyword to its numeric ID, from a cached object index. Use before `bc_open_page` when you don't know the id. |
 | `bc_refresh_objects` | Refresh the cached object index (reads "All Objects with Caption", page 9174) used by `bc_find_object`. |
 | `bc_health` | Server/session diagnostics: connected?, active company, open forms, modal depth, and metrics (invokes, errors, reconnects, uptime). Answers even when BC is down. |
@@ -162,11 +162,13 @@ Restart Claude Desktop.
 > every tool has its own page under [`docs/tools/`](docs/tools/), with cross-cutting behavior in
 > the [conventions guide](docs/guides/conventions.md) and pending work in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
-> **Screenshots for manuals:** `bc_screenshot` renders the real BC web UI (headless system
-> Chrome/Edge) and can draw a highlight callout box around a field. Collapsed FastTabs and
-> "Show more" (Additional) fields are revealed automatically when you highlight/crop them, or
-> pass `expand:true` to capture a fully-expanded page. It runs out-of-band and does not disturb
-> the WebSocket session. See [docs/tools/bc_screenshot.md](docs/tools/bc_screenshot.md).
+> **Screenshots & manuals — which one do I use?** The
+> [documentation guide](docs/guides/documenting.md) is the decision table: one image →
+> `bc_screenshot`; a whole process → `bc_build_manual`; `md` for repos/wikis, `html` for anything a
+> human reads or prints (real A4 sheets with cover, index and page numbers — Ctrl+P gives the paged
+> PDF). Collapsed FastTabs and "Show more" (Additional) fields are revealed automatically when you
+> highlight/crop them, or pass `expand:true` for a fully-expanded page. Both tools run out-of-band
+> and never disturb the WebSocket session.
 
 ## How it works
 

@@ -7,6 +7,8 @@
 ## When to use / when NOT to use
 Use it to produce screenshots for user manuals (typically together with `bc_build_manual`), to attach a visual to a bug report, or to visually confirm what a page/record looks like in the web client. It is ideal for "click here" manual steps via `highlight`, and for capturing a single field/section via `crop`.
 
+Use it for **one** image. The moment you need several images with prose around them -- a process, a how-to, training material -- call `bc_build_manual` instead: it drives this same capture engine per step and assembles the whole document (with an A4 printable layout if you ask for `formats: ["html"]`). Do NOT capture N screenshots here and stitch them together by hand.
+
 Do NOT use it to read or extract data — `bc_open_page`, `bc_read_data`, and `bc_navigate` already return all fields as structured JSON (including fields hidden behind collapsed FastTabs and "Show more", which are a purely visual web-client concern). Do NOT use it on a machine without Chrome/Edge installed (or `BC_SCREENSHOT_CHROME` set) or without `puppeteer-core` installed. It is slower than the protocol tools (it launches a browser and waits up to ~60s for the SPA to settle), so prefer the data tools when you only need values.
 
 ## Parameters
@@ -93,7 +95,7 @@ On failure the operation returns a `ProtocolError` with code `SCREENSHOT_ERROR` 
 - **Failure signals.** `authenticated: false` -> wrong credentials or BC unreachable. `highlight.found: false` (i.e. an `annotations[].found` of `false`) -> the caption didn't match a control even after the automatic reveal pass; use the exact visible caption, otherwise the field is genuinely absent for that record. A screenshot stuck on "Getting ready…" means a cold BC session is still compiling — retry (the tool waits up to ~60s and never sends `runinframe`).
 
 ## Related tools
-- [bc_build_manual](./bc_build_manual.md) — assembles step-by-step manuals (Markdown + PDF + DOCX) reusing this exact capture engine for each step's screenshot.
+- [bc_build_manual](./bc_build_manual.md) — assembles step-by-step manuals (Markdown and/or printable A4 HTML) reusing this exact capture engine for each step's screenshot. Reach for it as soon as you need **more than one** image with prose around it — see the [documentation guide](../guides/documenting.md).
 - [bc_open_page](./bc_open_page.md) — open a page and get its structured fields/sections plus row bookmarks (the source of the `bookmark` parameter).
 - [bc_read_data](./bc_read_data.md) — read repeater rows and their bookmarks; returns all fields regardless of collapse/"Show more" state.
 - [bc_navigate](./bc_navigate.md) — navigate the page tree; also returns all fields without needing the visual reveal.

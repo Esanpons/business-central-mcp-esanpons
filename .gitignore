@@ -10,6 +10,7 @@ coverage/
 dist-dxt/
 .poc/
 screenshots/
+manuals/_verify/
 .arxius/
 .report-capture/
 .secrets/

@@ -3,11 +3,11 @@ import { isAbsolute, resolve, relative } from 'node:path';
 import type { Logger } from '../core/logger.js';
 import type { ScreenshotService } from './screenshot-service.js';
 import { normalizeHighlight, type HighlightInput } from '../operations/screenshot.js';
-import { launchHeadless } from './browser.js';
 import {
-  renderMarkdown, renderHtml, renderPdf, renderDocx, pngSize,
+  renderMarkdown, pngSize,
   type ManualModel, type ManualStepModel, type ManualImage,
 } from './manual-render.js';
+import { renderHtmlDocument, type ManualAssets } from './manual-html.js';
 
 export interface ManualScreenshotSpec {
   pageId: string | number;
@@ -31,19 +31,31 @@ export interface ManualStepInput {
   image?: string;
 }
 
+export type ManualFormat = 'md' | 'html';
+
 export interface BuildManualInput {
   title: string;
   intro?: string;
   steps: ManualStepInput[];
-  formats?: Array<'md' | 'pdf' | 'docx'>;
+  formats?: ManualFormat[];
   outDir?: string;
   name?: string;
+  /** HTML only: self-contained single file (default) or separate .css/.js/PNG files. */
+  assets?: ManualAssets;
+  /** HTML only: language of the generated chrome (cover, index, footer). Default `ca`. */
+  lang?: string;
+  /** HTML only: emit a cover sheet. Default true. */
+  cover?: boolean;
+  /** HTML only: emit an index sheet. Default: only from 4 steps up. */
+  toc?: boolean;
 }
 
 export interface BuildManualOutput {
   md?: string;
-  pdf?: string;
-  docx?: string;
+  html?: string;
+  /** Only when HTML was built with `assets: "files"`. */
+  css?: string;
+  js?: string;
   images: string[];
   steps: number;
 }
@@ -55,7 +67,10 @@ function slugify(s: string): string {
 /**
  * Builds a step-by-step manual from a list of steps. For each step with a screenshot
  * spec it captures an annotated PNG (reusing ScreenshotService), then renders the whole
- * document to the requested formats (Markdown / PDF / DOCX). Additive and out-of-band.
+ * document to the requested formats. Additive and out-of-band.
+ *
+ * Two outputs share one authoring model: `md` (plain Markdown, images linked) and
+ * `html` (a printable A4 web page -- open it and Ctrl+P for a paged PDF).
  */
 export class ManualService {
   constructor(
@@ -65,7 +80,7 @@ export class ManualService {
   ) {}
 
   async build(input: BuildManualInput): Promise<BuildManualOutput> {
-    const formats = (input.formats && input.formats.length ? input.formats : ['md', 'pdf', 'docx']) as Array<'md' | 'pdf' | 'docx'>;
+    const formats: ManualFormat[] = input.formats && input.formats.length ? input.formats : ['md'];
     const slug = slugify(input.name || input.title);
     const baseDir = isAbsolute(this.manualDir) ? this.manualDir : resolve(process.cwd(), this.manualDir);
     const dir = input.outDir ? (isAbsolute(input.outDir) ? input.outDir : resolve(baseDir, input.outDir)) : baseDir;
@@ -118,24 +133,30 @@ export class ManualService {
       writeFileSync(p, renderMarkdown(model));
       out.md = p;
     }
-    if (formats.includes('docx')) {
-      const p = resolve(dir, `${slug}.docx`);
-      writeFileSync(p, await renderDocx(model));
-      out.docx = p;
-    }
-    if (formats.includes('pdf')) {
-      const browser = await launchHeadless();
-      try {
-        const pdf = await renderPdf(browser, renderHtml(model));
-        const p = resolve(dir, `${slug}.pdf`);
-        writeFileSync(p, Buffer.from(pdf));
-        out.pdf = p;
-      } finally {
-        await browser.close();
+    if (formats.includes('html')) {
+      const doc = renderHtmlDocument(model, {
+        assets: input.assets ?? 'inline',
+        lang: input.lang,
+        cover: input.cover,
+        toc: input.toc,
+        assetBase: slug,
+      });
+      const p = resolve(dir, `${slug}.html`);
+      writeFileSync(p, doc.html, 'utf8');
+      out.html = p;
+      if (doc.css !== undefined) {
+        const c = resolve(dir, `${slug}.css`);
+        writeFileSync(c, doc.css, 'utf8');
+        out.css = c;
+      }
+      if (doc.js !== undefined) {
+        const j = resolve(dir, `${slug}.js`);
+        writeFileSync(j, doc.js, 'utf8');
+        out.js = j;
       }
     }
 
-    this.logger.info(`[manual] built "${input.title}" (${out.steps} steps) -> ${[out.md, out.pdf, out.docx].filter(Boolean).join(', ')}`);
+    this.logger.info(`[manual] built "${input.title}" (${out.steps} steps) -> ${[out.md, out.html].filter(Boolean).join(', ')}`);
     return out;
   }
 }

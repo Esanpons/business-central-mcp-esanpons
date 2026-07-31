@@ -31,6 +31,17 @@ Full findings and remaining work: [`docs/Plans/2026-07-04-auditoria-completa-mil
 
 ### Changed
 
+- **`bc_build_manual` now renders a printable A4 web page, and no longer renders PDF or DOCX.**
+  One authoring model, two outputs selected by `formats` (default `["md"]`): `md` as before, and
+  the new `html` — real 210x297mm sheets with a cover, an index with resolved page numbers,
+  running headers and `N / total` footers. The on-screen page IS the printed page, so Ctrl+P
+  produces the paged PDF; a bundled paginator measures each block against the sheet and keeps a
+  step heading with its screenshot. New HTML-only options: `assets` (`inline` single file /
+  `files` separate css+js+png), `lang` (ca/es/en chrome), `cover`, `toc`. Prose (`intro`, step
+  `body`) now accepts a small Markdown subset (lists, `>` notes, bold/italic/code/links) rendered
+  in both outputs. The `docx` dependency and both the PDF and DOCX renderers are gone.
+  Layout is guarded by `npm run verify:manual-html` (paginates in a real browser and asserts no
+  sheet overflows and one printed page per sheet). See [`docs/tools/bc_build_manual.md`](docs/tools/bc_build_manual.md).
 - `bc_navigate` dropped the unimplemented `lookup` action and the unused `field` parameter (kept `select` / `drill_down`).
 - Package renamed to `business-central-mcp-esanpons` with fork author/repository metadata; removed the unused `zod-to-json-schema` dependency.
 - Incorporates the request-page `filters` map + BC745 flat-schema fix from commit `db78c03` into this changelog.

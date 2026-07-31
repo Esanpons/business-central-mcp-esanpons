@@ -1,4 +1,5 @@
-// Functional test of the ManualService (md/pdf/docx). Run: tsx scripts/test-manual.ts
+// Functional test of the ManualService against live BC (md + printable A4 html).
+// Run: tsx scripts/test-manual.ts   -- for a BC-free layout check use scripts/verify-manual-html.ts
 import { loadConfig } from '../src/core/config.js';
 import { createLogger } from '../src/core/logger.js';
 import { ScreenshotService } from '../src/services/screenshot-service.js';
@@ -21,6 +22,6 @@ const r = await ms.build({
       screenshot: { pageId: 21, bookmark: '1B_EgAAAAJ7CDAAMQAxADIAMQAyADEAMg', company: 'CRONUS_01', highlight: ['Name', 'Credit Limit (LCY)'] },
     },
   ],
-  formats: ['md', 'pdf', 'docx'],
+  formats: ['md', 'html'],
 });
 console.log(JSON.stringify(r, null, 2));

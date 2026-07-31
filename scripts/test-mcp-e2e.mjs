@@ -56,7 +56,7 @@ const manual = await rpc('tools/call', {
   arguments: {
     title: 'E2E smoke manual', name: 'e2e-smoke',
     steps: [{ heading: 'Customer list', body: 'The customer list.', screenshot: { pageId: 22 } }],
-    formats: ['md', 'pdf', 'docx'],
+    formats: ['md', 'html'],
   },
 });
 console.log('\n[bc_build_manual]\n', textOf(manual));

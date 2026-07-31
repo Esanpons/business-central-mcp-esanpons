@@ -412,12 +412,56 @@ box of the given caption(s). All locate controls by visible caption (no dependen
 ids). The in-browser annotate function must contain NO named nested functions — under tsx/esbuild
 those get a `__name` wrapper that is undefined in the browser (`drawn`/`crops` use inline `.map`).
 
-**`bc_build_manual`** (`src/services/manual-service.ts`, `manual-render.ts`, `operations/build-manual.ts`)
-builds a step-by-step manual to Markdown + PDF + DOCX. MD = text + relative image links; PDF =
-the assembled HTML rendered via the shared headless browser (`src/services/browser.ts`,
-`page.pdf()`); DOCX = the `docx` package (lazy-imported). Output under `BC_MANUAL_DIR` (default
-`./manuals`). A user-scope skill `~/.claude/skills/bc-manual/SKILL.md` guides Claude to gather
-steps and call it.
+**Producing documentation? Read [`docs/guides/documenting.md`](docs/guides/documenting.md) first.**
+It is the decision table any agent should follow: one image -> `bc_screenshot`; a process ->
+`bc_build_manual`; `md` for repos/wikis, `html` for anything a human reads or prints; a PDF is
+the HTML plus Ctrl+P (there is no PDF or DOCX output); page data -> `bc_open_page`/`bc_read_data`,
+never a screenshot. The rest of this section is the implementation.
+
+**`bc_build_manual`** (`src/services/manual-service.ts`, `operations/build-manual.ts`) builds a
+step-by-step manual from ONE authoring model (`ManualModel` in `manual-render.ts`) to two outputs
+selected by `formats` (default `["md"]`):
+
+- **`md`** -- `renderMarkdown` (`manual-render.ts`): text + relative image links.
+- **`html`** -- `renderHtmlDocument` (`manual-html.ts`): a **printable A4 web page**. There is no
+  PDF/DOCX renderer any more (the `docx` dependency is gone) -- the HTML is the print path, so
+  Ctrl+P on it yields the paged PDF.
+
+Output under `BC_MANUAL_DIR` (default `./manuals`). A user-scope skill
+`~/.claude/skills/bc-manual/SKILL.md` guides Claude to gather steps and call it.
+
+**Printable A4 HTML — how it holds together.** The renderer does NOT emit a flowing document. It
+emits a flat list of measurable units in a hidden `#flow`, an empty `#doc`, and a `<template>` for
+one sheet; a bundled paginator (`manual-html-paginator.ts`, a plain JS **string**) measures each
+unit against the real `clientHeight` of a `.sheet-body` and distributes them into 210x297mm
+`.sheet` elements, then numbers pages and resolves the index. Load-bearing details:
+
+- A step's heading and its figure share a `data-group` -> never split; a group that doesn't fit
+  moves whole to the next sheet, and only a group too tall for an empty sheet is split unit by unit.
+  `data-break="after"` on a group's last unit closes the sheet (used by the index).
+- Sheet geometry is a CSS grid `head / 1fr / foot`; `.sheet-body { min-height: 0 }` is what keeps
+  `clientHeight` equal to the real usable space -- without it the grid stretches and pagination
+  silently overflows.
+- Print: `@page { size: A4; margin: 0 }` + one break per sheet, and the sheet is
+  `calc(297mm - 0.2mm)` when printing -- that hair is what stops Chrome interleaving blank pages.
+- `--fig-max-h: 180mm` guarantees any capture fits one sheet; `<img>` carries the intrinsic
+  width/height from `pngSize` so the measured layout is stable before decode.
+- The paginator is kept as a string (never a serialized TS function) for the same reason as the
+  screenshot annotator: tsx/esbuild wraps nested named functions in an undefined `__name` helper.
+- Narrow windows scale the whole doc AFTER pagination (measurement always happens at true A4), so
+  the print result never depends on the reader's window size. No JS -> `#flow` is the readable
+  fallback.
+- `assets: 'inline'` (default) embeds CSS/JS/PNGs in one file; `'files'` writes `.html`+`.css`+`.js`
+  and links the PNGs. `lang` (ca/es/en) only switches the generated chrome. Every colour/metric is a
+  `:root` CSS variable in `manual-html-theme.ts`.
+- Prose (`intro`, step `body`) goes through `markdown-inline.ts` -- a deliberately tiny Markdown
+  subset (paragraphs, lists, `>` notes, bold/italic/code/links) that escapes first, so prose can
+  never inject markup.
+
+Layout regressions: `npm run verify:manual-html` (`scripts/verify-manual-html.ts`) builds a
+synthetic multi-page manual from PNGs on disk, paginates it in a real browser and asserts no sheet
+overflows, every step is placed, the index resolves, and `page.pdf()` yields exactly one page per
+sheet. It writes `manuals/_verify/` (gitignored) with a PNG per sheet for eyeballing.
 
 **`bc_health`** (`src/operations/health.ts`, `src/services/metrics.ts`) reports connection,
 company, open forms, modal depth, and metrics (invokes / errors-by-code / reconnects / uptime).

@@ -287,6 +287,8 @@ Example: { "pageContextId": "abc", "action": "next" }`,
       name: 'bc_screenshot',
       description: `Captures a REAL screenshot (PNG) of the Business Central web client for a given page, optionally pointing at a specific record and drawing a highlight callout box. Use this to produce images for user manuals, documentation, bug reports, or to visually confirm what a page looks like. Unlike every other bc_ tool, this renders the actual BC web UI in a headless browser -- it does NOT return structured data. For reading or editing data use bc_open_page / bc_read_data / bc_write_data instead.
 
+Use this for ONE image. As soon as you need several images with prose around them -- documenting a process, a how-to, training material -- call bc_build_manual instead: it drives this same capture engine once per step and assembles the whole document, including a printable A4 layout when you pass formats:["html"]. Do NOT call this repeatedly and stitch a manual together by hand.
+
 This is additive and out-of-band: it runs an independent headless browser session and does NOT disturb the WebSocket session your other bc_ tools use. It authenticates by itself (reusing the configured BC credentials), opens a deep-link URL, waits for the BC single-page app to finish rendering, optionally annotates, then captures.
 
 Targeting: pass pageId (required). Add bookmark to open a specific record's Card (bookmarks come from list rows returned by bc_open_page / bc_read_data). Add company to pin a company (defaults to the session's current company). For a clean manual sequence, open a list, grab the row's bookmark, then bc_screenshot the Card page id with that bookmark.
@@ -314,23 +316,25 @@ Examples:
     },
     {
       name: 'bc_build_manual',
-      description: `Builds a step-by-step USER MANUAL of Business Central and writes it as Markdown, PDF, and/or DOCX. You provide the ordered steps (each a heading, optional prose, and an optional screenshot spec); the tool captures the annotated screenshots and assembles the document. This is the high-level companion to bc_screenshot -- use it to produce shareable documentation, training material, or onboarding guides.
+      description: `Builds a step-by-step USER MANUAL of Business Central and writes it as Markdown and/or a printable A4 web page. You provide the ordered steps (each a heading, optional prose, and an optional screenshot spec); the tool captures the annotated screenshots and assembles the document. This is the high-level companion to bc_screenshot -- use it to produce shareable documentation, training material, or onboarding guides.
 
 Each step's screenshot spec is the same shape as bc_screenshot (pageId, bookmark, company, highlight, redact, crop, expand): highlight a list of captions to get auto-numbered "click here" callouts. Fields hidden in collapsed FastTabs or behind "Show more" are revealed automatically when you highlight/crop them; pass expand:true on a step to force its page fully expanded. Alternatively a step can reference an existing PNG via image, or carry only prose (no screenshot).
 
-Output: files are written under BC_MANUAL_DIR (or outDir), named from the title (or name). formats defaults to all three: md (images as relative links), pdf (rendered via the headless browser), docx (images embedded). The response returns the file paths and the captured image paths. This runs out-of-band (its own browser) and does not disturb the WebSocket session.
+Output formats (formats, defaults to ["md"]): "md" is plain Markdown with the images linked relatively -- right for repos, wikis and further editing. "html" is a self-contained printable web page laid out as real A4 sheets with a cover, an index with page numbers, running headers and page footers; it looks on screen exactly like it prints, so the reader just opens it and presses Ctrl+P to print it or save it as a paged PDF. Prefer "html" whenever the manual is meant to be read, handed to an end user, or printed; add "md" too when it must also live in a repo. Tune the HTML with assets (inline single file vs separate css/js/png), lang (ca/es/en chrome), cover and toc. No PDF or DOCX is produced -- the HTML is the print path.
+
+Files are written under BC_MANUAL_DIR (or outDir), named from the title (or name). The response returns the written file paths and the captured image paths. Runs out-of-band (its own headless browser for the captures) and does not disturb the WebSocket session.
 
 Typical use: open a list with bc_open_page, grab the record bookmark, then call bc_build_manual with a few steps that screenshot the card and highlight the fields the reader must fill in. Requires Chrome/Edge installed (same as bc_screenshot).
 
 Example:
 {
-  "title": "How to create a customer",
-  "intro": "This guide shows how to register a new customer.",
+  "title": "Com crear un client",
+  "intro": "Aquesta guia mostra com donar d'alta un client nou.",
   "steps": [
-    { "heading": "Open the customer list", "body": "Search for Customers and open the list.", "screenshot": { "pageId": 22 } },
-    { "heading": "Fill in the key fields", "body": "Enter the name and credit limit.", "screenshot": { "pageId": 21, "bookmark": "1B_Eg...", "highlight": ["Name", "Credit Limit (LCY)"] } }
+    { "heading": "Obre la llista de clients", "body": "Busca **Clients** i obre la llista.", "screenshot": { "pageId": 22 } },
+    { "heading": "Omple els camps clau", "body": "Introdueix el nom i el limit de credit.", "screenshot": { "pageId": 21, "bookmark": "1B_Eg...", "highlight": ["Name", "Credit Limit (LCY)"] } }
   ],
-  "formats": ["md", "pdf", "docx"]
+  "formats": ["html"]
 }`,
       inputSchema: toMcpJsonSchema(BuildManualSchema),
       zodSchema: BuildManualSchema,

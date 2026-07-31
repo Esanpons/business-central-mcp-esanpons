@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderMarkdown, renderHtml, pngSize } from '../../src/services/manual-render.js';
+import { renderMarkdown, pngSize } from '../../src/services/manual-render.js';
 
 const model = {
   title: 'How to X',
@@ -19,15 +19,6 @@ describe('renderMarkdown', () => {
     expect(md).toContain('Do this.');
     expect(md).toContain('![First step](x-img/step-1.png)');
     expect(md).toContain('## 2. Second step');
-  });
-});
-
-describe('renderHtml', () => {
-  it('escapes text and produces a full HTML document', () => {
-    const html = renderHtml({ title: 'A & B', steps: [{ heading: '<x>' }] });
-    expect(html).toContain('<!doctype html>');
-    expect(html).toContain('A &amp; B');
-    expect(html).toContain('1. &lt;x&gt;');
   });
 });
 
