@@ -116,8 +116,10 @@ export class BCWebSocket {
     for (const handler of handlers) {
       try {
         handler(parsed);
-      } catch {
-        // handler errors don't break routing
+      } catch (e) {
+        // A buggy consumer must not break routing, but swallowing silently hides
+        // real decoder bugs -- log it.
+        this.logger.error(`Message handler threw: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
 

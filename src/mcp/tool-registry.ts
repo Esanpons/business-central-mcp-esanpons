@@ -242,9 +242,9 @@ Do NOT use this if you already know the company name -- call bc_switch_company d
     },
     {
       name: 'bc_run_report',
-      description: `Execute a Business Central report by its numeric report ID. If the report has a request page (parameter/filter dialog), it will be returned with its fields so you can fill in parameters using bc_write_data and then execute the report by responding with bc_respond_dialog (response: "ok"). The report runs server-side on the BC service tier.
+      description: `Execute a Business Central report by its numeric report ID. If the report has a request page (parameter/filter dialog), it is returned with its fields (formId + fields) so you can INSPECT the parameters it expects. The report runs server-side on the BC service tier.
 
-To DOWNLOAD the rendered output (PDF/Excel/Word), use bc_download_report instead -- this tool fills request-page parameters over the WebSocket but does not capture the binary. Use this tool for reports that perform server-side actions (batch posting via Report 295, inventory adjustments, data processing) or to inspect and fill request page parameters. Common reports: 1306 (Customer Statement), 120 (Aged Accounts Receivable), 6 (Trial Balance), 295 (Batch Post Sales Orders).
+IMPORTANT: this tool cannot fill the request page. The request page is a modal dialog that is not exposed as a writable page context, so bc_write_data / bc_respond_dialog cannot set its parameters. To actually run a PARAMETERIZED report and capture its output, use bc_download_report with its "filters" map (keyed by the request-page field caption, e.g. { "No.": "2000052" }). Use bc_run_report for reports that run with their defaults or that perform server-side actions (batch posting via Report 295, inventory adjustments, data processing), and to inspect what a request page asks for. Common reports: 1306 (Customer Statement), 120 (Aged Accounts Receivable), 6 (Trial Balance), 295 (Batch Post Sales Orders).
 
 Do NOT use this for viewing data -- use bc_open_page and bc_read_data for data retrieval. Do NOT confuse reports with pages -- reports are processing/printing objects, pages are UI views.
 

@@ -19,7 +19,13 @@ export class FilterService {
     private readonly session: BCSession,
     private readonly repo: PageContextRepository,
     private readonly logger: Logger,
+    private readonly redactValues: boolean = false,
   ) {}
+
+  /** Mask a filter value in logs when LOG_REDACT_VALUES is enabled. */
+  private redact(value: unknown): string {
+    return this.redactValues ? '<redacted>' : String(value);
+  }
 
   async applyFilter(pageContextId: string, columnName: string, value: string, sectionId?: string): Promise<Result<PageContext, ProtocolError>> {
     return this.applyFilters(pageContextId, [{ column: columnName, value }], sectionId);
@@ -27,7 +33,7 @@ export class FilterService {
 
   async applyFilters(pageContextId: string, filters: Filter[], sectionId?: string): Promise<Result<PageContext, ProtocolError>> {
     const ctx = this.repo.get(pageContextId);
-    if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
+    if (!ctx) return err(this.repo.notFoundError(pageContextId));
 
     const resolved = resolveSection(ctx, sectionId);
     if ('error' in resolved) return err(new ProtocolError(resolved.error, { availableSections: resolved.availableSections }));
@@ -71,7 +77,7 @@ export class FilterService {
         filterColumnId: columnBinderPath,
         filterValue: filter.value,
       };
-      this.logger.info(`[Filter] Filter(AddLine) on ${fpath}, column=${columnBinderPath}, value="${filter.value}"`);
+      this.logger.info(`[Filter] Filter(AddLine) on ${fpath}, column=${columnBinderPath}, value="${this.redact(filter.value)}"`);
       this.logger.info(`[Filter] repeater.controlPath=${currentResolved.repeater.controlPath}, formId=${currentResolved.form.formId}`);
 
       const addResult = await this.session.invoke(
@@ -84,13 +90,13 @@ export class FilterService {
 
     const updatedCtx = this.repo.get(pageContextId);
     if (!updatedCtx) return err(new ProtocolError('State lost after filter'));
-    this.logger.info(`[Filter] Filters applied on ${pageContextId}: ${filters.map(f => `${f.column}=${f.value}`).join(', ')}`);
+    this.logger.info(`[Filter] Filters applied on ${pageContextId}: ${filters.map(f => `${f.column}=${this.redact(f.value)}`).join(', ')}`);
     return ok(updatedCtx);
   }
 
   async clearFilters(pageContextId: string, sectionId?: string): Promise<Result<PageContext, ProtocolError>> {
     const ctx = this.repo.get(pageContextId);
-    if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
+    if (!ctx) return err(this.repo.notFoundError(pageContextId));
 
     const resolved = resolveSection(ctx, sectionId);
     if ('error' in resolved) return err(new ProtocolError(resolved.error, { availableSections: resolved.availableSections }));

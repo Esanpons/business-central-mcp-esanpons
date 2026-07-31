@@ -183,6 +183,12 @@ cross-referenced, not repeated.
 
 ## 4. Future audits
 
+> **2026-07-04 audit completed.** Full findings (4 critical bugs, ~19 medium, ~19 low,
+> tests/docs drift) and the SaaS/AAD implementation plan — with the hard requirement that
+> Docker/on-prem NavUserPassword mode keeps working unchanged — live in
+> [`docs/Plans/2026-07-04-auditoria-completa-millores.md`](./Plans/2026-07-04-auditoria-completa-millores.md).
+> Work from that document; graduate items here as they are scheduled/completed.
+
 When auditing the MCP for new gaps, focus areas in rough priority: OAuth/SaaS reach, the
 remaining ~10% of the web client not covered by the current tools, report request-page
 parameterisation (L5), and the live/transient capture (P3). Capture findings as new entries

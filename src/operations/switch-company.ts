@@ -40,14 +40,22 @@ export class SwitchCompanyOperation {
 
     if (!isOk(result)) return result;
 
+    // BC accepted the switch: reflect it on the session so companyName (and thus
+    // bc_health + the screenshot/report deep-links) stop reporting the old
+    // company. Then refine with the server-confirmed company if the response
+    // carried a SessionSettingsChanged handler.
+    this.session.setCompany(input.companyName);
+    this.session.applySessionInfo(result.value);
+    const newCompany = this.session.companyName;
+
     // Invalidate all page contexts -- company switch resets server-side page state
     this.repo.clearAll();
 
-    this.logger.info(`Switched company from "${previousCompany}" to "${input.companyName}"`);
+    this.logger.info(`Switched company from "${previousCompany}" to "${newCompany}"`);
 
     return ok({
       previousCompany,
-      newCompany: input.companyName,
+      newCompany,
       invalidatedPageContextIds: invalidatedIds,
     });
   }

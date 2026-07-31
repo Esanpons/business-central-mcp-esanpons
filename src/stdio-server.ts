@@ -77,10 +77,10 @@ async function main() {
 
   // Services — built once after session is available
   function buildServices(s: BCSession): ReturnType<typeof buildToolRegistry> {
-    const pageService = new PageService(s, pageContextRepo, logger);
-    const dataService = new DataService(s, pageContextRepo, logger);
+    const pageService = new PageService(s, pageContextRepo, logger, { tenantId: config.bc.tenantId });
+    const dataService = new DataService(s, pageContextRepo, logger, config.logging.redactValues);
     const actionService = new ActionService(s, pageContextRepo, logger);
-    const filterService = new FilterService(s, pageContextRepo, logger);
+    const filterService = new FilterService(s, pageContextRepo, logger, config.logging.redactValues);
     const navigationService = new NavigationService(s, pageContextRepo, logger);
     const searchService = new SearchService(s, logger);
     const screenshotService = new ScreenshotService(config.bc, config.screenshotDir, () => s.companyName, logger);

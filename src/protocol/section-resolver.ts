@@ -1,5 +1,5 @@
 // src/protocol/section-resolver.ts
-import { buildFormTree } from './form-tree-builder.js';
+import { tryBuildFormTree } from './form-tree-builder.js';
 import { repeaters as treeRepeaters } from './form-views.js';
 import type { PageContext } from './page-context.js';
 import type { FormState } from './form-state.js';
@@ -34,10 +34,16 @@ export class SectionResolver {
     childFormId: string,
     childControlTree: unknown,
   ): SectionDescriptor {
-    // Build the child form's tree to inspect repeater structure. Note: BC sends
-    // child form trees as raw lf JSON in FormCreated/DialogOpened payloads,
-    // which is exactly what buildFormTree expects.
-    const childRoot = buildFormTree(childControlTree);
+    // Build the child form's tree to inspect repeater structure. BC normally
+    // sends child form trees as raw lf JSON, but occasionally a partial/placeholder
+    // payload arrives (the same case tryBuildFormTree tolerates elsewhere). A hard
+    // throw here would abort the whole event batch and leave the page context
+    // half-updated, so fall back to a plain subpage descriptor instead.
+    const childRoot = tryBuildFormTree(childControlTree);
+    if (!childRoot) {
+      const id = this.uniqueSectionId(parentPageContext, 'subpage');
+      return { sectionId: id, kind: 'subpage', caption: 'Subpage', formId: childFormId, valid: true };
+    }
     const reps = treeRepeaters(childRoot);
 
     if (reps.size > 0) {

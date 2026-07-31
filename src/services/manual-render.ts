@@ -47,7 +47,10 @@ export function renderMarkdown(model: ManualModel): string {
 }
 
 function esc(s: string): string {
-  return s.replace(/[&<>]/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'));
+  // Escape quotes too: esc() output is also interpolated into attribute values
+  // (e.g. alt="..."), where an unescaped " would break out of the attribute.
+  return s.replace(/[&<>"']/g, (c) =>
+    c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '"' ? '&quot;' : '&#39;');
 }
 
 export function renderHtml(model: ManualModel): string {

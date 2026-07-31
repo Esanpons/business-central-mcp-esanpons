@@ -49,11 +49,16 @@ function optionalEnv(name: string, fallback: string): string {
   return process.env[name] || fallback;
 }
 
-function optionalEnvInt(name: string, fallback: number): number {
+function optionalEnvInt(name: string, fallback: number, opts?: { min?: number }): number {
   const raw = process.env[name];
   if (!raw) return fallback;
   const parsed = parseInt(raw, 10);
   if (isNaN(parsed)) throw new Error(`${name} must be an integer, got: ${raw}`);
+  // Guard against nonsensical values: a zero/negative timeout would fire every
+  // operation's deadline immediately; a negative retry count disables recovery.
+  if (opts?.min !== undefined && parsed < opts.min) {
+    throw new Error(`${name} must be >= ${opts.min}, got: ${parsed}`);
+  }
   return parsed;
 }
 
@@ -81,10 +86,10 @@ export function loadConfig(): AppConfig {
       clientVersionString: optionalEnv('BC_CLIENT_VERSION', '27.0.0.0'),
       serverMajor: optionalEnvInt('BC_SERVER_MAJOR', 27),
       applicationId: optionalEnv('BC_APPLICATION_ID', 'NAV'),
-      timeoutMs: optionalEnvInt('BC_TIMEOUT', 120000),
-      invokeTimeoutMs: optionalEnvInt('BC_INVOKE_TIMEOUT', 30000),
-      reconnectMaxRetries: optionalEnvInt('BC_RECONNECT_MAX_RETRIES', 6),
-      reconnectBaseDelayMs: optionalEnvInt('BC_RECONNECT_BASE_DELAY', 2000),
+      timeoutMs: optionalEnvInt('BC_TIMEOUT', 120000, { min: 1 }),
+      invokeTimeoutMs: optionalEnvInt('BC_INVOKE_TIMEOUT', 30000, { min: 1 }),
+      reconnectMaxRetries: optionalEnvInt('BC_RECONNECT_MAX_RETRIES', 6, { min: 0 }),
+      reconnectBaseDelayMs: optionalEnvInt('BC_RECONNECT_BASE_DELAY', 2000, { min: 1 }),
     },
     logging: {
       level: optionalEnv('LOG_LEVEL', 'info'),

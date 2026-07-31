@@ -54,12 +54,14 @@ export function createApiRoutes(ops: Operations, logger: Logger): Map<string, Ro
 }
 
 function sendResult(res: ServerResponse, result: unknown): void {
-  const r = result as { ok: boolean; value?: unknown; error?: { message: string; code: string } };
+  const r = result as { ok: boolean; value?: unknown; error?: { message?: string; code?: string; context?: Record<string, unknown> } };
   if (r.ok) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(r.value));
   } else {
     res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: r.error?.message, code: r.error?.code }));
+    // Surface the diagnostic context (availableActions / availableSections / ...)
+    // alongside message + code so REST callers get the same self-correction hints.
+    res.end(JSON.stringify({ error: r.error?.message, code: r.error?.code, context: r.error?.context }));
   }
 }

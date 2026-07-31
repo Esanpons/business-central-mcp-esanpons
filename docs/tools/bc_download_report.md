@@ -10,7 +10,7 @@ Renders a Business Central report by its numeric report ID and downloads the ren
 - USE it as the binary-capture step after exploring/filling a request page with `bc_run_report`.
 - Do NOT use it for server-side **processing** reports (batch posting, inventory adjustment, data processing such as report 295) — those have no downloadable output; use `bc_run_report`.
 - Do NOT use it to read or extract data — use `bc_open_page` / `bc_read_data`.
-- Do NOT use it for reports that require parameters expecting an immediate file: it cannot fill request-page parameters over the browser path (it only best-effort clicks a default output trigger). Fill parameters with `bc_run_report` first.
+- For reports whose request page exposes filter fields (e.g. a `No.` on a document report), pass the `filters` map to print one specific record. What is NOT yet supported: **mandatory** non-filter parameters (dates/options on the Options FastTab — e.g. per-customer statements 116/1316) and forcing a specific output format; those still return `requestPageShown: true`.
 - Requires Chrome or Edge installed on the host running the server (or `BC_SCREENSHOT_CHROME` set to a browser path).
 
 ## Parameters
@@ -21,6 +21,7 @@ Renders a Business Central report by its numeric report ID and downloads the ren
 | `company` | string | No | Company to run in. Defaults to the session company. |
 | `out` | string | No | Output file path. Absolute is used as-is; a relative name goes under `BC_REPORT_DIR`. Omit to auto-name `report-<id>-<timestamp>.<ext>`. |
 | `timeoutMs` | number | No | How long to wait for the download to complete after the report runs (ms, default 60000). |
+| `filters` | record<string, string \| number \| boolean> | No | Request-page **filter** fields to set before running, keyed by the filter field caption shown on the report request page (e.g. `{ "No.": "2000052" }`). Locale-tolerant caption match (folds `Nº`→`No.`). Values are coerced to text. Use it to print ONE specific document. |
 
 `reportId` is accepted as a string or a number; internally it is coerced to a trimmed string before building the deep link.
 
@@ -36,6 +37,7 @@ The operation returns the `DownloadReportResult` shape (`src/services/report-dow
 | `path` | string (optional) | Absolute path of the saved file. Present only when `downloaded` is true. |
 | `fileName` | string (optional) | Original download filename as Chrome named it. Present only when `downloaded` is true. |
 | `requestPageShown` | boolean | True when BC showed a request page (parameters needed) instead of downloading. Set when no file was captured AND no output trigger was clicked. |
+| `availableFilterLabels` | string[] (optional) | When a `filters` key did not match any request-page filter field, the list of filter captions that WERE found — retry with one of these. |
 | `pageTitle` | string | The document title of the loaded page after the SPA settled. |
 
 On failure the operation returns an error with code `REPORT_DOWNLOAD_ERROR`. Note: a `downloaded: false` / `requestPageShown: true` result is NOT treated as an error — it is returned as a successful result describing that BC needs parameters, so the caller can fall back to `bc_run_report`.

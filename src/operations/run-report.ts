@@ -1,5 +1,5 @@
-import { ok, isErr, type Result } from '../core/result.js';
-import type { ProtocolError } from '../core/errors.js';
+import { ok, err, isErr, type Result } from '../core/result.js';
+import { ProtocolError } from '../core/errors.js';
 import type { BCSession } from '../session/bc-session.js';
 import type { ControlField } from '../protocol/types.js';
 import { detectDialogs } from '../protocol/mutation-result.js';
@@ -27,6 +27,9 @@ export class RunReportOperation {
 
   async execute(input: RunReportInput): Promise<Result<RunReportOutput, ProtocolError>> {
     const reportId = parseInt(input.reportId, 10);
+    if (isNaN(reportId)) {
+      return err(new ProtocolError(`Invalid reportId "${input.reportId}": expected a numeric BC report id (e.g. 6, 1306).`));
+    }
 
     const result = await this.session.runReport(reportId);
 

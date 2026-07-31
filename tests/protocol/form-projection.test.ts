@@ -88,6 +88,47 @@ describe('FormProjection', () => {
     expect(rows[1]!.cells['No.']).toBe('20000');
   });
 
+  it('appends a newly inserted row on currentRowOnly (M11)', () => {
+    const base = makeRepeaterForm();
+    const form: FormState = {
+      ...base,
+      rows: new Map([['server:c[1]', [
+        { bookmark: 'bm1', cells: { 'No.': '10000' } },
+      ]]]),
+    };
+    // A new line created via New arrives as currentRowOnly with a bookmark not
+    // yet present. The old merge dropped it; now it must be appended.
+    const event: BCEvent = {
+      type: 'DataLoaded', formId: 'f1', controlPath: 'server:c[1]',
+      currentRowOnly: true,
+      rows: [{ t: 'DataRowInserted', DataRowInserted: [1, { cells: { 'No.': '20000' }, bookmark: 'bm2' }] }],
+    };
+    const updated = projection.apply(form, event);
+    const rows = updated.rows.get('server:c[1]')!;
+    expect(rows).toHaveLength(2);
+    expect(rows[1]!.bookmark).toBe('bm2');
+  });
+
+  it('drops an explicitly removed row on currentRowOnly (M10, best-effort)', () => {
+    const base = makeRepeaterForm();
+    const form: FormState = {
+      ...base,
+      rows: new Map([['server:c[1]', [
+        { bookmark: 'bm1', cells: { 'No.': '10000' } },
+        { bookmark: 'bm2', cells: { 'No.': '20000' } },
+      ]]]),
+    };
+    const event: BCEvent = {
+      type: 'DataLoaded', formId: 'f1', controlPath: 'server:c[1]',
+      currentRowOnly: true,
+      rows: [{ t: 'DataRowRemoved', DataRowRemoved: [1, { bookmark: 'bm2' }] }],
+    };
+    const updated = projection.apply(form, event);
+    const rows = updated.rows.get('server:c[1]')!;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.bookmark).toBe('bm1');
+  });
+
   it('applies PropertyChanged TotalRowCount to repeater', () => {
     const form = makeRepeaterForm();
     const event: BCEvent = {

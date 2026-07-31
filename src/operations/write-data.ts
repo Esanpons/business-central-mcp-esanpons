@@ -6,7 +6,8 @@ import { detectChangedSections, detectDialogs } from '../protocol/mutation-resul
 
 export interface WriteDataInput {
   pageContextId: string;
-  fields: Record<string, string>;
+  /** Values may arrive as string | number | boolean; coerced to text before writing. */
+  fields: Record<string, string | number | boolean>;
   section?: string;
   rowIndex?: number;
   bookmark?: string;
@@ -34,7 +35,12 @@ export class WriteDataOperation {
   ) {}
 
   async execute(input: WriteDataInput): Promise<Result<WriteDataOutput, ProtocolError>> {
-    const result = await this.dataService.writeFields(input.pageContextId, input.fields, {
+    // Coerce number/boolean values to their string form; BC SaveValue is text-based.
+    const fields: Record<string, string> = {};
+    for (const [k, v] of Object.entries(input.fields)) {
+      fields[k] = typeof v === 'string' ? v : String(v);
+    }
+    const result = await this.dataService.writeFields(input.pageContextId, fields, {
       sectionId: input.section,
       rowIndex: input.rowIndex,
       bookmark: input.bookmark,

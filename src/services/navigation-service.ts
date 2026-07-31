@@ -19,7 +19,7 @@ export class NavigationService {
   /** Select a row by bookmark (positions cursor without opening) */
   async selectRow(pageContextId: string, bookmark: string, sectionId?: string): Promise<Result<PageContext, ProtocolError>> {
     const ctx = this.repo.get(pageContextId);
-    if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
+    if (!ctx) return err(this.repo.notFoundError(pageContextId));
     const resolved = resolveSection(ctx, sectionId);
     if ('error' in resolved) return err(new ProtocolError(resolved.error, { availableSections: resolved.availableSections }));
     if (!resolved.repeater) return err(new ProtocolError('Page has no repeater'));

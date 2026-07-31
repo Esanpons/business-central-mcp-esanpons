@@ -1,11 +1,12 @@
 // src/protocol/page-context-repo.ts
+import { ProtocolError } from '../core/errors.js';
 import type { BCEvent } from './types.js';
 import type { PageContext } from './page-context.js';
 import type { FormState } from './form-state.js';
 import { FormProjection } from './form-state.js';
 import { SectionResolver } from './section-resolver.js';
-import { buildFormTree } from './form-tree-builder.js';
-import { isLogicalFormNode, type FormNode } from './form-node.js';
+import { tryBuildFormTree } from './form-tree-builder.js';
+import { isLogicalFormNode } from './form-node.js';
 import {
   fields as treeFields, repeaters as treeRepeaters,
 } from './form-views.js';
@@ -22,13 +23,6 @@ export interface DiscoveredChildForm {
   readonly controlTree: unknown;   // raw lf node, built into a FormState separately
   readonly isSubForm: boolean;     // true for lines subpages
   readonly isPart: boolean;        // true for factboxes and parts
-}
-
-/** Build a FormNode tree from a raw control tree, returning null if the input is absent or lacks the lf wrapper. */
-function tryBuildFormTree(raw: unknown): FormNode | null {
-  if (!raw || typeof raw !== 'object') return null;
-  if ((raw as Record<string, unknown>).t !== 'lf') return null;
-  return buildFormTree(raw); // any throw here = real bug, surface it
 }
 
 export class PageContextRepository {
@@ -323,9 +317,23 @@ export class PageContextRepository {
         changed = true;
       }
     }
-    if (!changed) return;
 
-    this.pages.set(pcId, { ...page, sections });
+    // Prune the closed form from the append-only bookkeeping so long-lived
+    // contexts don't accumulate dead dialog control trees and stale form
+    // references for the life of the process (M12). The root form is left in
+    // place — the page stays addressable until it is explicitly closed.
+    const dialogs = page.dialogs.filter(d => d.formId !== formId);
+    const ownedFormIds = formId !== page.rootFormId
+      ? page.ownedFormIds.filter(f => f !== formId)
+      : page.ownedFormIds;
+    if (formId !== page.rootFormId && this.formIdIndex.get(formId) === pcId) {
+      this.formIdIndex.delete(formId);
+    }
+
+    const pruned = dialogs.length !== page.dialogs.length || ownedFormIds.length !== page.ownedFormIds.length;
+    if (!changed && !pruned) return;
+
+    this.pages.set(pcId, { ...page, sections, dialogs, ownedFormIds });
   }
 
   private addDialog(pcId: string, event: BCEvent & { type: 'DialogOpened' }): void {
@@ -442,5 +450,23 @@ export class PageContextRepository {
       caption: ctx.caption || `Page (${ctx.pageType})`,
     }));
   }
+
+  /**
+   * Build the canonical "unknown page context" error, listing the page contexts
+   * that ARE open so the caller can pick a valid one (or re-open) in a single
+   * turn instead of a discovery round-trip. The open list is also attached as
+   * `availablePageContexts` context for machine consumption.
+   */
+  notFoundError(pageContextId: string): ProtocolError {
+    const open = this.listPageContextSummaries();
+    const list = open.length > 0
+      ? open.map(p => `"${p.id}" (${p.caption})`).join(', ')
+      : 'none are open';
+    return new ProtocolError(
+      `Page context not found: ${pageContextId}. Open page contexts: ${list}. Open one with bc_open_page first.`,
+      { availablePageContexts: open },
+    );
+  }
+
   get size(): number { return this.pages.size; }
 }

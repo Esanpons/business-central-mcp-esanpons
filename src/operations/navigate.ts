@@ -6,9 +6,8 @@ import { buildAllSections, buildSection, type Section } from '../protocol/sectio
 export interface NavigateInput {
   pageContextId: string;
   bookmark: string;
-  action?: 'drill_down' | 'select' | 'lookup';
+  action?: 'drill_down' | 'select';
   section?: string;
-  field?: string;
 }
 
 export interface NavigateOutput {

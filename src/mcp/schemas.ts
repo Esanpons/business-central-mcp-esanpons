@@ -6,6 +6,12 @@ import { z } from 'zod';
 const StringOrNumber = z.union([z.string(), z.number()]).transform(v => String(v).trim());
 const StringOrNumberInput = z.union([z.string(), z.number()]);
 
+// Field / filter values: an agent naturally sends { "Quantity": 5, "Blocked": true },
+// not { "Quantity": "5" }. Accept string|number|boolean and coerce to string at the
+// operation boundary. Kept WITHOUT .transform() so z.toJSONSchema() can represent it
+// (a value-level union is fine; only a ROOT-level combinator breaks the MCP client).
+const WriteValue = z.union([z.string(), z.number(), z.boolean()]);
+
 export const OpenPageSchema = z.object({
   pageId: StringOrNumber.describe('Numeric BC page ID (e.g., 22 for Customer List, 21 for Customer Card). Use bc_search_pages to find IDs.'),
   bookmark: z.string().optional().describe('Open the page to a specific record. Bookmarks come from list row results in bc_open_page or bc_read_data.'),
@@ -28,7 +34,8 @@ export const ReadDataSchema = z.object({
   filters: z.array(z.object({
     column: z.string().describe('Column caption name to filter on (e.g., "City", "No.").'),
     value: z.string().describe('Filter value. Supports exact match ("London"), ranges ("10000..20000"), wildcards ("*consulting*"), expressions (">1000").'),
-  })).optional().describe('Server-side filters to apply before reading. Multiple filters combine with AND logic.'),
+  })).optional().describe('Server-side filters to apply before reading. Multiple filters combine with AND logic. By DEFAULT these REPLACE any filters already applied to this page context (previous filter lines are reset first).'),
+  appendFilters: z.boolean().optional().describe('Set true to AND the filters on top of the ones already applied to this page context, instead of replacing them. Default false (replace).'),
   columns: z.array(z.string()).optional().describe('Column caption names to include in results. Omit to return all columns. Reduces output size.'),
   range: z.object({
     offset: z.number().describe('0-based starting row index.'),
@@ -38,7 +45,7 @@ export const ReadDataSchema = z.object({
 
 export const WriteDataSchema = z.object({
   pageContextId: z.string().min(1).describe('Page context ID returned by bc_open_page.'),
-  fields: z.record(z.string(), z.string()).describe('Key-value pairs to write. Each key is a field caption (e.g., { "Name": "Contoso", "City": "London" }) OR a stable controlPath returned by bc_open_page/bc_read_data (e.g. "server:c[4]/c[1]/c[1]/c[0]"). Use the controlPath form (or the "group" param) when several controls share a caption (Sell-to/Bill-to/Ship-to).'),
+  fields: z.record(z.string(), WriteValue).describe('Key-value pairs to write. Values may be strings, numbers or booleans (e.g. { "Name": "Contoso", "Quantity": 5, "Blocked": true }) — they are coerced to text. Each key is a field caption OR a stable controlPath returned by bc_open_page/bc_read_data (e.g. "server:c[4]/c[1]/c[1]/c[0]"). Use the controlPath form (or the "group" param) when several controls share a caption (Sell-to/Bill-to/Ship-to).'),
   section: z.string().optional().describe('Section to write to (e.g., "lines" for document line items, "factbox:Sales Addresses" for a FactBox). Omit for header fields.'),
   group: z.string().optional().describe('Disambiguate duplicate captions: resolve every caption-keyed field inside the group with this caption (e.g. "Bill-to"). Ignored for keys given as an explicit controlPath. IMPORTANT: always check each result\'s "changed" flag — "success" only means the interaction completed, not that the value stuck.'),
   rowIndex: z.number().optional().describe('0-based row position in the repeater to write to. Use for line items. Prefer bookmark for stability.'),
@@ -65,6 +72,7 @@ export const ExecuteActionSchema = z.object({
 
 export const ClosePageSchema = z.object({
   pageContextId: z.string().min(1).describe('Page context ID returned by bc_open_page. Becomes invalid after closing.'),
+  discardChanges: z.boolean().optional().describe('If the page has unsaved changes, BC shows a "save changes?" dialog on close. Set true to auto-discard (answer No) and complete the close. Omit to have the dialog surfaced (requiresDialogResponse:true) so you can answer it with bc_respond_dialog.'),
 });
 
 export const SearchPagesSchema = z.object({
@@ -74,9 +82,8 @@ export const SearchPagesSchema = z.object({
 export const NavigateSchema = z.object({
   pageContextId: z.string().min(1).describe('Page context ID of the List or Document page containing the row to navigate to.'),
   bookmark: z.string().min(1).describe('Row bookmark from bc_open_page or bc_read_data results identifying which record to navigate to.'),
-  action: z.enum(['drill_down', 'select', 'lookup']).optional().describe('"select" moves cursor to row (default). "drill_down" opens the record detail page (returns new pageContextId). "lookup" triggers field lookup.'),
+  action: z.enum(['drill_down', 'select']).optional().describe('"select" moves the cursor to the row (default). "drill_down" opens the record detail page (returns a new pageContextId).'),
   section: z.string().optional().describe('Section containing the row (e.g., "lines" for document line items). Omit for header/default repeater.'),
-  field: z.string().optional().describe('Column caption to drill down or look up from (e.g., "No." to drill down on item number). Omit to use the default drill-down column.'),
 });
 
 export const RespondDialogSchema = z.object({
@@ -98,7 +105,7 @@ export const DownloadReportSchema = z.object({
   company: z.string().optional().describe('Company to run in. Defaults to the session company.'),
   out: z.string().optional().describe('Output file path. Absolute is used as-is; a relative name goes under BC_REPORT_DIR. Omit to auto-name report-<id>-<timestamp>.<ext>.'),
   timeoutMs: z.number().optional().describe('How long to wait for the download to complete after the report runs (ms, default 60000).'),
-  filters: z.record(z.string(), z.string()).optional().describe('Request-page filters to set before running, keyed by the filter field caption shown on the report request page (e.g. { "No.": "2000052" }). Needed to print ONE specific document for reports whose RequestFilterFields expose a key like "No." but that have no mandatory parameters — without it the report runs unfiltered and no usable file is produced (requestPageShown:true). Pass the caption exactly as the request page displays it (locale-dependent, e.g. "Nº"); if it does not match, the result\'s availableFilterLabels lists the fields found so you can retry with the exact caption.'),
+  filters: z.record(z.string(), WriteValue).optional().describe('Request-page filters to set before running, keyed by the filter field caption shown on the report request page (e.g. { "No.": "2000052" }). Values may be strings, numbers or booleans. Needed to print ONE specific document for reports whose RequestFilterFields expose a key like "No." but that have no mandatory parameters — without it the report runs unfiltered and no usable file is produced (requestPageShown:true). Pass the caption exactly as the request page displays it (locale-dependent, e.g. "Nº"); if it does not match, the result\'s availableFilterLabels lists the fields found so you can retry with the exact caption.'),
 });
 
 export const ListCompaniesSchema = z.object({});
@@ -212,7 +219,7 @@ export function toMcpJsonSchema(schema: z.ZodType): Record<string, unknown> {
       company: z.string().optional().describe('Company to run in. Defaults to the session company.'),
       out: z.string().optional().describe('Output file path. Absolute is used as-is; a relative name goes under BC_REPORT_DIR. Omit to auto-name report-<id>-<timestamp>.<ext>.'),
       timeoutMs: z.number().optional().describe('How long to wait for the download to complete after the report runs (ms, default 60000).'),
-      filters: z.record(z.string(), z.string()).optional().describe('Request-page filters to set before running, keyed by the filter field caption shown on the report request page (e.g. { "No.": "2000052" }). Needed to print ONE specific document for reports whose RequestFilterFields expose a key like "No." but that have no mandatory parameters. Pass the caption exactly as the request page displays it (locale-dependent, e.g. "Nº"); if it does not match, the result\'s availableFilterLabels lists the fields found so you can retry.'),
+      filters: z.record(z.string(), WriteValue).optional().describe('Request-page filters to set before running, keyed by the filter field caption shown on the report request page (e.g. { "No.": "2000052" }). Values may be strings, numbers or booleans. Needed to print ONE specific document for reports whose RequestFilterFields expose a key like "No." but that have no mandatory parameters. Pass the caption exactly as the request page displays it (locale-dependent, e.g. "Nº"); if it does not match, the result\'s availableFilterLabels lists the fields found so you can retry.'),
     });
     return z.toJSONSchema(safe) as Record<string, unknown>;
   }

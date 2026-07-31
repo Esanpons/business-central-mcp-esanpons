@@ -81,10 +81,10 @@ async function main() {
 
   // Services — built once after session is available
   function buildServices(s: BCSession): { operations: Operations; tools: ReturnType<typeof buildToolRegistry> } {
-    const pageService = new PageService(s, pageContextRepo, logger);
-    const dataService = new DataService(s, pageContextRepo, logger);
+    const pageService = new PageService(s, pageContextRepo, logger, { tenantId: config.bc.tenantId });
+    const dataService = new DataService(s, pageContextRepo, logger, config.logging.redactValues);
     const actionService = new ActionService(s, pageContextRepo, logger);
-    const filterService = new FilterService(s, pageContextRepo, logger);
+    const filterService = new FilterService(s, pageContextRepo, logger, config.logging.redactValues);
     const navigationService = new NavigationService(s, pageContextRepo, logger);
     const searchService = new SearchService(s, logger);
     const screenshotService = new ScreenshotService(config.bc, config.screenshotDir, () => s.companyName, logger);
@@ -138,10 +138,12 @@ async function main() {
 
     const method = req.method ?? 'GET';
     const url = req.url ?? '/';
+    const pathname = url.split('?')[0];
 
     try {
-      // Health check (no session needed)
-      if (url === '/health' && method === 'GET') {
+      // Health check (no session needed). Match by pathname so /health?foo also
+      // hits the real health op instead of falling through to a static route.
+      if (pathname === '/health' && method === 'GET') {
         const h = await healthOp.execute();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(h.ok ? h.value : { status: 'disconnected' }));
@@ -149,7 +151,7 @@ async function main() {
       }
 
       // MCP endpoint
-      if (url === '/mcp' && method === 'POST') {
+      if (pathname === '/mcp' && method === 'POST') {
         await ensureReady();
         const body = await parseJsonBody(req) as Parameters<MCPHandler['handleRequest']>[0];
         const response = await mcpHandler!.handleRequest(body);
@@ -158,11 +160,13 @@ async function main() {
         return;
       }
 
-      // REST API routes
-      await ensureReady();
-      const routeKey = `${method} ${url.split('?')[0]}`;
+      // REST API routes — resolve the handler BEFORE forcing a session so an
+      // unknown URL (port scan, browser probe) gets a fast 404 instead of
+      // triggering a full BC login + WebSocket connect.
+      const routeKey = `${method} ${pathname}`;
       const handler = apiRoutes!.get(routeKey);
       if (handler) {
+        await ensureReady();
         const body = method === 'POST' ? await parseJsonBody(req) : {};
         await handler(req, res, body);
         return;
@@ -177,6 +181,15 @@ async function main() {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: e instanceof Error ? e.message : 'Internal error' }));
     }
+  });
+
+  server.on('error', (e: NodeJS.ErrnoException) => {
+    if (e.code === 'EADDRINUSE') {
+      process.stderr.write(`[FATAL] Port ${config.port} is already in use on ${config.server.bindAddress}. Set PORT to a free port or stop the other process.\n`);
+    } else {
+      process.stderr.write(`[FATAL] HTTP server error: ${e.message}\n`);
+    }
+    process.exit(1);
   });
 
   server.listen(config.port, config.server.bindAddress, () => {

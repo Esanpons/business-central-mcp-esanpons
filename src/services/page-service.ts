@@ -64,18 +64,21 @@ export const DEFAULT_AUTO_LOAD_SECTIONS: readonly SectionKind[] = ['header', 'li
 
 export class PageService {
   private readonly autoLoadSections: readonly SectionKind[];
+  private readonly defaultTenantId: string;
 
   constructor(
     private readonly session: BCSession,
     private readonly repo: PageContextRepository,
     private readonly logger: Logger,
-    options?: { autoLoadSections?: readonly SectionKind[] },
+    options?: { autoLoadSections?: readonly SectionKind[]; tenantId?: string },
   ) {
     this.autoLoadSections = options?.autoLoadSections ?? DEFAULT_AUTO_LOAD_SECTIONS;
+    this.defaultTenantId = options?.tenantId ?? 'default';
   }
 
   async openPage(pageId: string, options?: { bookmark?: string; tenantId?: string; filter?: string }): Promise<Result<PageContext, ProtocolError>> {
-    const tenantId = options?.tenantId ?? 'default';
+    // Precedence: explicit per-call tenant > server-configured tenant > 'default'.
+    const tenantId = options?.tenantId ?? this.defaultTenantId;
     let query = `page=${pageId}&tenant=${tenantId}`;
     if (options?.bookmark) {
       query += `&bookmark=${encodeURIComponent(options.bookmark)}`;
@@ -346,9 +349,10 @@ export class PageService {
 
   async closePage(pageContextId: string, options?: { discardChanges?: boolean }): Promise<Result<ClosePageResult, ProtocolError>> {
     const ctx = this.repo.get(pageContextId);
-    if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
+    if (!ctx) return err(this.repo.notFoundError(pageContextId));
 
     const allEvents: BCEvent[] = [];
+    let pendingDialog = false;
     for (const formId of ctx.ownedFormIds) {
       const closeInteraction: CloseFormInteraction = { type: 'CloseForm', formId };
       const result = await this.session.invoke(closeInteraction, (event) => event.type === 'InvokeCompleted');
@@ -356,11 +360,10 @@ export class PageService {
         allEvents.push(...result.value);
 
         // Handle "save changes?" dialogs triggered by CloseForm.
-        // When discardChanges is true, auto-dismiss with "no" to complete the close.
-        // Otherwise, the dialog info is returned in events for the caller to handle.
-        if (options?.discardChanges) {
-          for (const event of result.value) {
-            if (event.type === 'DialogOpened' && event.formId) {
+        for (const event of result.value) {
+          if (event.type === 'DialogOpened' && event.formId) {
+            if (options?.discardChanges) {
+              // Auto-dismiss with "No" to discard and complete the close.
               this.logger.info(`Close triggered dialog (formId=${event.formId}), dismissing with "no"`);
               const dismissResult = await this.session.invoke(
                 { type: 'InvokeAction', formId: event.formId, controlPath: 'server:', systemAction: 390 } as InvokeActionInteraction, // No=390
@@ -370,11 +373,25 @@ export class PageService {
                 allEvents.push(...dismissResult.value);
               }
               this.session.removeOpenForm(event.formId);
+            } else {
+              // Leave the save-changes dialog open for the caller to answer via
+              // bc_respond_dialog. We must NOT remove the page context in this
+              // case: that tool needs a live pageContextId, and removing it here
+              // would strand the dialog server-side -> the next invoke dies with
+              // LogicalModalityViolationException (MODAL_STUCK). The caller either
+              // answers the dialog, or re-calls bc_close_page with discardChanges.
+              pendingDialog = true;
             }
           }
         }
       }
+      if (pendingDialog) break;      // stop; wait for the caller to resolve the dialog
       this.session.removeOpenForm(formId);
+    }
+
+    if (pendingDialog) {
+      this.logger.info(`Close of ${pageContextId} left a save-changes dialog open; keeping the context so bc_respond_dialog can answer it (or re-call bc_close_page with discardChanges).`);
+      return ok({ events: allEvents });
     }
 
     this.repo.remove(pageContextId);

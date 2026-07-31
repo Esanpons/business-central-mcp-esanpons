@@ -1,7 +1,7 @@
 {
-  "name": "business-central-mcp",
+  "name": "business-central-mcp-esanpons",
   "version": "1.1.0",
-  "description": "MCP server for Microsoft Dynamics 365 Business Central -- speaks BC's native WebSocket protocol directly",
+  "description": "MCP server for Microsoft Dynamics 365 Business Central -- speaks BC's native WebSocket protocol directly. AESVA fork of SShadowS/business-central-mcp.",
   "main": "dist/server.js",
   "type": "module",
   "bin": {
@@ -40,11 +40,14 @@
     "claude",
     "ai"
   ],
-  "author": "Torben Leth",
+  "author": "Esteve Sanpons (AESVA) <esteve@aesva.es>",
+  "contributors": [
+    "Torben Leth (upstream SShadowS/business-central-mcp)"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/SShadowS/business-central-mcp"
+    "url": "https://github.com/Esanpons/business-central-mcp-esanpons"
   },
   "dependencies": {
     "cheerio": "^1.2.0",
@@ -52,8 +55,7 @@
     "puppeteer-core": "^25.1.0",
     "uuid": "^13.0.0",
     "ws": "^8.20.0",
-    "zod": "^4.3.6",
-    "zod-to-json-schema": "^3.25.2"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/archiver": "^7.0.0",

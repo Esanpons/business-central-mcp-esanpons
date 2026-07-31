@@ -82,24 +82,23 @@ describe('MCP Endpoint (integration)', () => {
     expect(result.result.capabilities.tools).toBeDefined();
   }, 60_000);
 
-  it('lists 12 tools', async () => {
+  it('lists all registered tools', async () => {
     const result = await mcpCall('tools/list') as any;
     const tools = result.result.tools;
-    expect(tools).toHaveLength(12);
+    const names: string[] = tools.map((t: any) => t.name);
 
-    const names = tools.map((t: any) => t.name);
-    expect(names).toContain('bc_open_page');
-    expect(names).toContain('bc_read_data');
-    expect(names).toContain('bc_write_data');
-    expect(names).toContain('bc_execute_action');
-    expect(names).toContain('bc_close_page');
-    expect(names).toContain('bc_search_pages');
-    expect(names).toContain('bc_navigate');
-    expect(names).toContain('bc_respond_dialog');
-    expect(names).toContain('bc_switch_company');
-    expect(names).toContain('bc_list_companies');
-    expect(names).toContain('bc_run_report');
-    expect(names).toContain('bc_wizard_navigate');
+    // Assert the known surface is present rather than a brittle exact count.
+    const expected = [
+      'bc_open_page', 'bc_read_data', 'bc_write_data', 'bc_execute_action',
+      'bc_close_page', 'bc_search_pages', 'bc_navigate', 'bc_respond_dialog',
+      'bc_switch_company', 'bc_list_companies', 'bc_run_report', 'bc_wizard_navigate',
+      'bc_find_object', 'bc_refresh_objects', 'bc_download_report', 'bc_screenshot',
+      'bc_build_manual', 'bc_health',
+    ];
+    for (const name of expected) {
+      expect(names).toContain(name);
+    }
+    expect(tools.length).toBeGreaterThanOrEqual(expected.length);
 
     console.error('Tools:', names.join(', '));
   });

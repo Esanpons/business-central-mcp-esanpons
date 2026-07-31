@@ -29,12 +29,16 @@ export class ListCompaniesOperation {
       const readResult = this.dataService.readRows(pageContextId);
       if (!isOk(readResult)) return readResult;
 
-      // Extract company names from rows
+      // Extract company names from rows. Prefer an explicit Name / Display Name
+      // column over "the first string cell", which returns the wrong value when
+      // the first string column is a badge/evaluation flag rather than the name.
       const companies = readResult.value.map(row => {
         const cells = row.cells as Record<string, unknown>;
-        // Find the cell that contains the company name
-        const name = Object.values(cells).find(v => typeof v === 'string') as string ?? '';
-        return { name, displayName: name };
+        const entries = Object.entries(cells).filter(([, v]) => typeof v === 'string' && v) as Array<[string, string]>;
+        const byKey = (re: RegExp) => entries.find(([k]) => re.test(k))?.[1];
+        const name = byKey(/^(company\s*)?name$/i) ?? byKey(/name/i) ?? entries[0]?.[1] ?? '';
+        const displayName = byKey(/display\s*name/i) ?? name;
+        return { name, displayName };
       });
 
       this.logger.info(`Listed ${companies.length} companies (current: ${this.getCurrentCompany()})`);

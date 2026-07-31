@@ -46,11 +46,17 @@ export class DataService {
     private readonly session: BCSession,
     private readonly repo: PageContextRepository,
     private readonly logger: Logger,
+    private readonly redactValues: boolean = false,
   ) {}
+
+  /** Mask a business value in logs when LOG_REDACT_VALUES is enabled. */
+  private redact(value: unknown): string {
+    return this.redactValues ? '<redacted>' : String(value);
+  }
 
   readRows(pageContextId: string, sectionId?: string): Result<RepeaterRow[], ProtocolError> {
     const ctx = this.repo.get(pageContextId);
-    if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
+    if (!ctx) return err(this.repo.notFoundError(pageContextId));
     const resolved = resolveSection(ctx, sectionId);
     if ('error' in resolved) return err(new ProtocolError(resolved.error, { availableSections: resolved.availableSections }));
     if (!resolved.repeater) return ok([]);
@@ -74,7 +80,7 @@ export class DataService {
 
   getTabs(pageContextId: string, sectionId?: string): Result<TabGroup[] | undefined, ProtocolError> {
     const ctx = this.repo.get(pageContextId);
-    if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
+    if (!ctx) return err(this.repo.notFoundError(pageContextId));
     const resolved = resolveSection(ctx, sectionId, 'header');
     if ('error' in resolved) return err(new ProtocolError(resolved.error, { availableSections: resolved.availableSections }));
     const ts = treeTabs(resolved.form.root);
@@ -92,7 +98,7 @@ export class DataService {
    */
   async scrollRepeater(pageContextId: string, delta: number, sectionId?: string): Promise<Result<RepeaterRow[], ProtocolError>> {
     const ctx = this.repo.get(pageContextId);
-    if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
+    if (!ctx) return err(this.repo.notFoundError(pageContextId));
     const resolved = resolveSection(ctx, sectionId);
     if ('error' in resolved) return err(new ProtocolError(resolved.error, { availableSections: resolved.availableSections }));
     if (!resolved.repeater) return ok([]);
@@ -118,7 +124,7 @@ export class DataService {
 
   readField(pageContextId: string, fieldName: string, sectionId?: string): Result<ControlField | undefined, ProtocolError> {
     const ctx = this.repo.get(pageContextId);
-    if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
+    if (!ctx) return err(this.repo.notFoundError(pageContextId));
     const resolved = resolveSection(ctx, sectionId, 'header');
     if ('error' in resolved) return err(new ProtocolError(resolved.error, { availableSections: resolved.availableSections }));
     const node = this.resolveFieldNode(resolved.form.root, fieldName);
@@ -127,7 +133,7 @@ export class DataService {
 
   getFields(pageContextId: string, sectionId?: string): Result<ControlField[], ProtocolError> {
     const ctx = this.repo.get(pageContextId);
-    if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
+    if (!ctx) return err(this.repo.notFoundError(pageContextId));
     const resolved = resolveSection(ctx, sectionId, 'header');
     if ('error' in resolved) return err(new ProtocolError(resolved.error, { availableSections: resolved.availableSections }));
     return ok(treeFields(resolved.form.root).map(f => fieldNodeToControlField(resolved.form.root, f)));
@@ -140,7 +146,7 @@ export class DataService {
     options?: { sectionId?: string; bookmark?: string; rowIndex?: number; group?: string },
   ): Promise<Result<FieldWriteResult, ProtocolError>> {
     const ctx = this.repo.get(pageContextId);
-    if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
+    if (!ctx) return err(this.repo.notFoundError(pageContextId));
     const resolved = resolveSection(ctx, options?.sectionId, 'header');
     if ('error' in resolved) return err(new ProtocolError(resolved.error, { availableSections: resolved.availableSections }));
 
@@ -187,7 +193,7 @@ export class DataService {
       newValue: value,
     };
 
-    this.logger.debug('data', `writeField: ${fieldName} = ${value}`, { pageContextId, controlPath: fieldNode.controlPath });
+    this.logger.debug('data', `writeField: ${fieldName} = ${this.redact(value)}`, { pageContextId, controlPath: fieldNode.controlPath });
 
     const result = await this.session.invoke(
       interaction,
@@ -303,7 +309,7 @@ export class DataService {
     const saveInteraction: SaveValueInteraction = {
       type: 'SaveValue', formId, controlPath: cellPath, newValue: value,
     };
-    this.logger.info(`writeLineCell: ${fieldName} = ${value} at ${cellPath} (formId=${formId})`);
+    this.logger.info(`writeLineCell: ${fieldName} = ${this.redact(value)} at ${cellPath} (formId=${formId})`);
     const saveResult = await this.session.invoke(
       saveInteraction,
       (event) => event.type === 'InvokeCompleted' || event.type === 'PropertyChanged',

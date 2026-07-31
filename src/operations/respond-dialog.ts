@@ -35,7 +35,7 @@ export class RespondDialogOperation {
 
   async execute(input: RespondDialogInput): Promise<Result<RespondDialogOutput, ProtocolError>> {
     const ctx = this.repo.get(input.pageContextId);
-    if (!ctx) return err(new ProtocolError(`Page context not found: ${input.pageContextId}`));
+    if (!ctx) return err(this.repo.notFoundError(input.pageContextId));
 
     // "close" uses CloseForm instead of InvokeAction
     if (input.response === 'close') {
@@ -44,6 +44,11 @@ export class RespondDialogOperation {
         (event) => event.type === 'InvokeCompleted',
       );
       if (!isOk(closeResult)) return closeResult;
+
+      // Apply the close events to the page context so the closed dialog form is
+      // pruned and section validity is recomputed. Without this, detectChangedSections
+      // runs against pre-close state and the context keeps tracking the dead form.
+      this.repo.applyToPage(input.pageContextId, closeResult.value);
 
       const updatedCtx = this.repo.get(input.pageContextId);
       const changedSections = updatedCtx ? detectChangedSections(updatedCtx, closeResult.value) : [];

@@ -21,11 +21,11 @@
 | Property | Value |
 |----------|-------|
 | Language | TypeScript / Node 20+ |
-| npm package | [`business-central-mcp`](https://www.npmjs.com/package/business-central-mcp) |
+| npm package | `business-central-mcp-esanpons` (AESVA fork) |
 | BC versions | BC27, BC28 (wire-compatible) |
-| Auth | NavUserPassword (OAuth on roadmap) |
-| Tools | 16 |
-| Tests | 343 unit/protocol + integration |
+| Auth | NavUserPassword (OAuth/SaaS on roadmap) |
+| Tools | 18 |
+| Tests | 370 unit/protocol + integration |
 | License | MIT |
 
 ## Install

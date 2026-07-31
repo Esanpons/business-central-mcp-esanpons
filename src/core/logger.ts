@@ -16,9 +16,27 @@ export function createLogger(config: LoggingConfig): Logger {
   const stderrLevel = LEVELS[config.level as LogLevel] ?? LEVELS.info;
   const enabledChannels = new Set(config.channels ? config.channels.split(',').map(c => c.trim()) : []);
 
-  mkdirSync(config.dir, { recursive: true });
-  const serverLog = createWriteStream(join(config.dir, 'server.log'), { flags: 'a' });
-  const protocolLog = createWriteStream(join(config.dir, 'protocol.log'), { flags: 'a' });
+  // File logging is best-effort. If the log dir can't be created or opened (an
+  // unwritable cwd — common when a stdio client launches the server from a system
+  // directory), degrade to stderr-only instead of crashing the whole server at
+  // startup.
+  let serverLog: WriteStream | null = null;
+  let protocolLog: WriteStream | null = null;
+  try {
+    mkdirSync(config.dir, { recursive: true });
+    serverLog = createWriteStream(join(config.dir, 'server.log'), { flags: 'a' });
+    protocolLog = createWriteStream(join(config.dir, 'protocol.log'), { flags: 'a' });
+    // Without an 'error' handler, a runtime write failure (disk full, EACCES, the
+    // log dir deleted under us) emits an unhandled 'error' event that crashes the
+    // whole process. Downgrade it to a one-line stderr notice instead.
+    for (const stream of [serverLog, protocolLog]) {
+      stream.on('error', (e: Error) => {
+        process.stderr.write(`[ERROR] log stream write failed: ${e.message}\n`);
+      });
+    }
+  } catch (e) {
+    process.stderr.write(`[WARN] file logging disabled (cannot write to ${config.dir}): ${e instanceof Error ? e.message : String(e)}\n`);
+  }
 
   function writeStderr(level: LogLevel, msg: string): void {
     if (LEVELS[level] >= stderrLevel) {
@@ -26,7 +44,8 @@ export function createLogger(config: LoggingConfig): Logger {
     }
   }
 
-  function writeLog(stream: WriteStream, level: LogLevel, msg: string, context?: Record<string, unknown>): void {
+  function writeLog(stream: WriteStream | null, level: LogLevel, msg: string, context?: Record<string, unknown>): void {
+    if (!stream) return;
     const entry = JSON.stringify({ timestamp: new Date().toISOString(), level, msg, ...context });
     stream.write(entry + '\n');
   }

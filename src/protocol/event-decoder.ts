@@ -25,6 +25,10 @@ export class EventDecoder {
             break;
           case HANDLER_TYPES.CachedSessionInit:
           case HANDLER_TYPES.SessionInit:
+          // SessionSettingsChanged carries the new company/timezone/locale after a
+          // ChangeCompany (SystemAction 500). Decoding it as SessionInfo lets the
+          // session refresh its company name from the server's confirmation.
+          case HANDLER_TYPES.SessionSettingsChanged:
             events.push(...this.decodeSessionInfo(h.parameters));
             break;
         }

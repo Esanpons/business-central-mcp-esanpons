@@ -178,7 +178,7 @@ describe('BCSession invoke with auto-recovery', () => {
 
     (s as any).reconcileModalStack = vi.fn(async () => {
       s.feed([{ type: 'FormClosed', formId: 'M1' }]);
-      return ok(undefined);
+      return ok([{ type: 'FormClosed', formId: 'M1' }]);
     });
 
     const result = await s.invoke(
@@ -197,7 +197,7 @@ describe('BCSession invoke with auto-recovery', () => {
     (s as any).ws.sendRpc = vi.fn(async () => ({
       ok: false, error: { message: 'LogicalModalityViolationException: persistent' },
     }));
-    (s as any).reconcileModalStack = vi.fn(async () => ok(undefined));
+    (s as any).reconcileModalStack = vi.fn(async () => ok([]));
 
     const result = await s.invoke(
       { type: 'OpenForm', query: 'page=22&tenant=default' } as any,
@@ -243,6 +243,28 @@ describe('BCSession invoke with auto-recovery', () => {
     );
     expect(result.ok).toBe(false);
     expect((s as any).reconcileModalStack).not.toHaveBeenCalled();
+  });
+});
+
+describe('BCSession fatal-error detection (B4)', () => {
+  it('marks the session dead on JSON-RPC code 1', async () => {
+    const s = new ReconcileProbe();
+    (s as any).ws.sendRpc = vi.fn(async () => ({
+      ok: false, error: { message: 'JSON-RPC error: {"code":1,"message":"InvalidSession"}' },
+    }));
+    const result = await s.invoke({ type: 'OpenForm', query: 'x' } as any, () => true);
+    expect(result.ok).toBe(false);
+    expect((s as any).dead).toBe(true);
+  });
+
+  it('does NOT mark the session dead on code 12 (non-fatal, was a false positive)', async () => {
+    const s = new ReconcileProbe();
+    (s as any).ws.sendRpc = vi.fn(async () => ({
+      ok: false, error: { message: 'JSON-RPC error: {"code":12,"message":"SomeValidation"}' },
+    }));
+    const result = await s.invoke({ type: 'OpenForm', query: 'x' } as any, () => true);
+    expect(result.ok).toBe(false);
+    expect((s as any).dead).toBe(false);
   });
 });
 

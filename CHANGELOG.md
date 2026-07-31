@@ -13,6 +13,28 @@ disambiguation, write verification, payload control). Additive and out-of-band w
 relevant — none of the browser tooling touches the WebSocket protocol path, so the
 existing data tools keep their full speed.
 
+### Fixed (2026-07-04 audit)
+
+Full findings and remaining work: [`docs/Plans/2026-07-04-auditoria-completa-millores.md`](docs/Plans/2026-07-04-auditoria-completa-millores.md).
+
+- **`bc_execute_action` now honours `bookmark`/`rowIndex` for row-scoped actions** (Delete/Edit/View/DrillDown/New). Previously these were silently ignored and the action hit whatever row BC had selected — a Delete could remove the wrong record while reporting success. The cursor is now positioned on the requested row first.
+- **Concurrent tool calls no longer kill a healthy session.** The invoke timeout clock started when a call was *enqueued*, so time spent waiting behind other queued invokes counted against it; a queued call could time out and tear down a live session. The timeout now starts when the interaction is actually sent.
+- **`bc_read_data` filters no longer accumulate.** Filters passed to a page context now REPLACE the previous ones by default (BC ANDs filter lines, so a second read used to intersect with the first and return zero rows). New `appendFilters: true` opts back into accumulation.
+- **Non-fatal errors no longer tear down the session.** A substring match on `"code":1` also matched codes 10/12/19/100…; now matched exactly (word boundary), as the error translator already did.
+- **Error diagnostics reach the caller.** `bc_*` errors now surface their typed `code` and diagnostic `context` (availableActions / availableSections / availableFields / hostHint / availablePageContexts …) so an agent can self-correct in one turn instead of extra discovery calls (MCP + REST paths).
+- **`bc_write_data` / `bc_download_report` accept numbers & booleans** in `fields`/`filters` (coerced to text) instead of failing Zod validation on `{ "Quantity": 5 }`.
+- **`bc_switch_company` reflects the switch** on the session, so `bc_health` and the screenshot/report deep-links stop targeting the previous company.
+- **`bc_close_page` on a page with unsaved changes** no longer strands the save-changes dialog (which caused `MODAL_STUCK` on the next invoke). The dialog is surfaced with a live `pageContextId`, or auto-discarded with the new `discardChanges: true`.
+- **Actions that open a page** (e.g. `New` on a list, cue drill-downs) now always return a usable `pageContextId` in `openedPages`.
+- **Wrong-password sign-in is detected** up front (clear `AuthenticationError`) instead of surfacing later as an opaque WebSocket error; CSRF cookie identified by name (`.AspNetCore.Antiforgery.*`).
+- Other correctness fixes: modal-reconcile events reach the page context; `bc_search_pages` closes its Tell Me form; closed dialogs are pruned from page-context bookkeeping; tolerant child-form parsing; async messages captured during session init; `bc_run_report` NaN guard; `PageService` uses the configured tenant; log value redaction (`LOG_REDACT_VALUES`) now works; HTTP token compared in constant time + request body size cap; logger stream error handling; unknown URLs 404 without forcing a BC session; `EADDRINUSE` reported clearly.
+
+### Changed
+
+- `bc_navigate` dropped the unimplemented `lookup` action and the unused `field` parameter (kept `select` / `drill_down`).
+- Package renamed to `business-central-mcp-esanpons` with fork author/repository metadata; removed the unused `zod-to-json-schema` dependency.
+- Incorporates the request-page `filters` map + BC745 flat-schema fix from commit `db78c03` into this changelog.
+
 ### Added
 
 - **`bc_download_report` tool — download a report's rendered output (PDF/Excel/Word).** The

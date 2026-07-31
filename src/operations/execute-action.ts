@@ -51,7 +51,10 @@ export class ExecuteActionOperation {
     if (!input.action) {
       return err(new ProtocolError('Provide exactly one of: action, cue'));
     }
-    const result = await this.actionService.executeAction(input.pageContextId, input.action, input.section);
+    const result = await this.actionService.executeAction(input.pageContextId, input.action, input.section, {
+      bookmark: input.bookmark,
+      rowIndex: input.rowIndex,
+    });
     return mapResult(result, (ar) => this.buildOutput(input.pageContextId, ar, input.quiet ?? false));
   }
 

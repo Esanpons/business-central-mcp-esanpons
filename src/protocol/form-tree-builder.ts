@@ -35,6 +35,18 @@ export function buildFormTree(raw: unknown): FormNode {
   return buildLogicalForm(obj);
 }
 
+/**
+ * Build a FormNode tree, returning null when the input is absent or is not an
+ * `lf` root node (rather than throwing). A genuinely malformed `lf` node still
+ * throws — that is a real bug worth surfacing. Use this at boundaries where BC
+ * may deliver a placeholder/partial control tree that must be tolerated.
+ */
+export function tryBuildFormTree(raw: unknown): FormNode | null {
+  if (!raw || typeof raw !== 'object') return null;
+  if ((raw as Record<string, unknown>).t !== 'lf') return null;
+  return buildFormTree(raw);
+}
+
 function buildLogicalForm(obj: Record<string, unknown>): LogicalFormNode {
   const props = readProperties(obj);
   const children = buildChildren(obj.Children, 'server:', false);

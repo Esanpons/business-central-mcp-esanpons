@@ -13,6 +13,14 @@ export interface ReadDataInput {
   /** Restrict card fields to those whose nearest enclosing group caption matches (case-insensitive). */
   group?: string;
   filters?: Array<{ column: string; value: string }>;
+  /**
+   * By default, `filters` REPLACES any filters already applied to this page
+   * context (the previous filter lines are reset first). Set `appendFilters:
+   * true` to AND the new filters on top of the existing ones instead. Without
+   * the reset, successive reads silently accumulate filters and eventually
+   * return zero rows with no indication why.
+   */
+  appendFilters?: boolean;
   columns?: string[];
   range?: { offset: number; limit: number };
 }
@@ -37,6 +45,14 @@ export class ReadDataOperation {
     }
 
     if (input.filters && input.filters.length > 0) {
+      // Reset previously-applied filter lines first (unless the caller opted
+      // into accumulation). BC ANDs filter lines together, so without this a
+      // second read with a different value would intersect with the first and
+      // return zero rows.
+      if (!input.appendFilters) {
+        const clearResult = await this.filterService.clearFilters(input.pageContextId, input.section);
+        if (isErr(clearResult)) return clearResult;
+      }
       const filterResult = await this.filterService.applyFilters(input.pageContextId, input.filters, input.section);
       if (isErr(filterResult)) return filterResult;
     }

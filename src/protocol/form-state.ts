@@ -51,14 +51,28 @@ export class FormProjection {
     const repeaterNode = treeRepeaters(form.root).get(event.controlPath);
     if (!repeaterNode) return form;
 
-    const extractedRows = this.extractRows(event.rows);
+    const { upserts, removedBookmarks } = this.extractRowChanges(event.rows);
+    const removed = new Set(removedBookmarks);
 
     let newRows: readonly RepeaterRow[];
     if (event.currentRowOnly) {
+      // Incremental update: patch existing rows by bookmark, drop any explicitly
+      // removed, and APPEND rows whose bookmark is new (e.g. a line just created
+      // via New). The previous code only patched existing rows and silently
+      // discarded inserts/removals, so a freshly inserted row vanished until a
+      // full refresh.
       const existing = form.rows.get(event.controlPath) ?? [];
-      newRows = existing.map(r => extractedRows.find(x => x.bookmark === r.bookmark) ?? r);
+      const existingBookmarks = new Set(existing.map(r => r.bookmark));
+      const merged = existing
+        .filter(r => !removed.has(r.bookmark))
+        .map(r => upserts.find(x => x.bookmark === r.bookmark) ?? r);
+      for (const x of upserts) {
+        if (!existingBookmarks.has(x.bookmark) && !removed.has(x.bookmark)) merged.push(x);
+      }
+      newRows = merged;
     } else {
-      newRows = extractedRows;
+      // Full refresh: the upserts are the new row set, minus any explicit removal.
+      newRows = removed.size > 0 ? upserts.filter(r => !removed.has(r.bookmark)) : upserts;
     }
 
     const newRowsMap = new Map(form.rows);
@@ -93,20 +107,39 @@ export class FormProjection {
     return { ...form, root: newRoot };
   }
 
-  private extractRows(rawRows: unknown[]): RepeaterRow[] {
-    const rows: RepeaterRow[] = [];
+  /**
+   * Split a DataLoaded RowChanges array into upserted rows (Inserted/Updated) and
+   * the bookmarks of removed rows.
+   *
+   * DataRowRemoved handling is BEST-EFFORT: BC's exact removal payload shape is
+   * not verified against decompiled source here, so it is parsed defensively — a
+   * shape mismatch yields no removals (never a wrong removal). The row index
+   * (rowData[0]) is not used for ordering; new rows are appended, which is correct
+   * for the common append-at-end insert.
+   */
+  private extractRowChanges(rawRows: unknown[]): { upserts: RepeaterRow[]; removedBookmarks: string[] } {
+    const upserts: RepeaterRow[] = [];
+    const removedBookmarks: string[] = [];
     for (const raw of rawRows) {
       if (!raw || typeof raw !== 'object') continue;
       const r = raw as Record<string, unknown>;
-      const rowData = (r['DataRowInserted'] ?? r['DataRowUpdated']) as unknown[] | undefined;
-      if (Array.isArray(rowData) && rowData.length >= 2) {
-        const payload = rowData[1] as Record<string, unknown>;
-        rows.push({
+      const upsert = (r['DataRowInserted'] ?? r['DataRowUpdated']) as unknown[] | undefined;
+      if (Array.isArray(upsert) && upsert.length >= 2) {
+        const payload = upsert[1] as Record<string, unknown>;
+        upserts.push({
           bookmark: (payload['bookmark'] ?? payload['Bookmark'] ?? '') as string,
           cells: (payload['cells'] ?? payload['Cells'] ?? {}) as Record<string, unknown>,
         });
+        continue;
+      }
+      const removed = r['DataRowRemoved'] as unknown[] | undefined;
+      if (Array.isArray(removed)) {
+        const payload = removed[1] as Record<string, unknown> | undefined;
+        const bm = (payload?.['bookmark'] ?? payload?.['Bookmark']
+          ?? (typeof removed[0] === 'string' ? removed[0] : undefined)) as string | undefined;
+        if (bm) removedBookmarks.push(bm);
       }
     }
-    return rows;
+    return { upserts, removedBookmarks };
   }
 }

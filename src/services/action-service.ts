@@ -4,7 +4,7 @@ import { ProtocolError } from '../core/errors.js';
 import type { BCSession } from '../session/bc-session.js';
 import type { PageContextRepository } from '../protocol/page-context-repo.js';
 import type { PageContext } from '../protocol/page-context.js';
-import type { BCEvent, InvokeActionInteraction } from '../protocol/types.js';
+import type { BCEvent, InvokeActionInteraction, SetCurrentRowInteraction, RepeaterRow } from '../protocol/types.js';
 import { SystemAction } from '../protocol/types.js';
 import { resolveSection } from '../protocol/section-resolver.js';
 import type { FormState } from '../protocol/form-state.js';
@@ -42,9 +42,14 @@ export class ActionService {
     private readonly logger: Logger,
   ) {}
 
-  async executeAction(pageContextId: string, actionName: string, sectionId?: string): Promise<Result<ActionResult, ProtocolError>> {
+  async executeAction(
+    pageContextId: string,
+    actionName: string,
+    sectionId?: string,
+    row?: { bookmark?: string; rowIndex?: number },
+  ): Promise<Result<ActionResult, ProtocolError>> {
     const ctx = this.repo.get(pageContextId);
-    if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
+    if (!ctx) return err(this.repo.notFoundError(pageContextId));
 
     // Resolve the section to find actions in that form
     const resolved = resolveSection(ctx, sectionId, 'header');
@@ -56,7 +61,7 @@ export class ActionService {
     // Well-known SystemAction fast path
     const systemActionByName = SYSTEM_ACTION_NAMES.get(actionName.toLowerCase());
     if (systemActionByName !== undefined) {
-      return this.executeSystemAction(pageContextId, systemActionByName, sectionId);
+      return this.executeSystemAction(pageContextId, systemActionByName, sectionId, row);
     }
 
     const lower = actionName.toLowerCase();
@@ -84,6 +89,25 @@ export class ActionService {
     if (actionNode.properties.enabled === false) {
       return err(new ProtocolError(`Action is disabled: ${actionName}`));
     }
+
+    // If the caller named a specific row for this (row-scoped) action, position
+    // the cursor there first, then re-find the action on the refreshed tree so
+    // it operates on THAT row instead of whatever row BC currently has selected.
+    if (row && (row.bookmark !== undefined || row.rowIndex !== undefined) && resolved.repeater) {
+      const bm = this.resolveBookmark(resolved.rows, row.bookmark, row.rowIndex);
+      if (isErr(bm)) return bm;
+      const pos = await this.positionRow(pageContextId, form.formId, resolved.repeater.controlPath, bm.value);
+      if (isErr(pos)) return pos;
+      const ctx2 = this.repo.get(pageContextId);
+      const re = ctx2 ? resolveSection(ctx2, sectionId, 'header') : undefined;
+      if (re && !('error' in re)) {
+        const refreshed = treeActions(re.form.root).find(a => (a.properties.caption ?? '').toLowerCase() === lower);
+        if (refreshed) {
+          return this.invokeAction(pageContextId, re.form, refreshed.controlPath, refreshed.systemAction);
+        }
+      }
+    }
+
     return this.invokeAction(pageContextId, form, actionNode.controlPath, actionNode.systemAction);
   }
 
@@ -101,7 +125,7 @@ export class ActionService {
     cueName: string,
   ): Promise<Result<ActionResult, ProtocolError>> {
     const ctx = this.repo.get(pageContextId);
-    if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
+    if (!ctx) return err(this.repo.notFoundError(pageContextId));
 
     const section = ctx.sections.get(sectionId);
     if (!section || !section.valid) {
@@ -125,27 +149,11 @@ export class ActionService {
       return err(new ProtocolError(`Cue '${cueName}' is not drill-downable (HasAction=false).`));
     }
 
-    const result = await this.invokeAction(pageContextId, form, cue.controlPath, SystemAction.DrillDown);
-    if (isErr(result)) return result;
-
     // Cue drill-down opens an underlying list page as a top-level FormCreated
-    // event (no parentFormId). The page-context-repo's applyEvent treats
-    // ownerless FormCreated as "update existing form" -- so without an
-    // explicit registration here, the new list page never gets a
-    // pageContextId, and ExecuteActionOperation.openedPages stays empty.
-    // Mirror NavigationService.drillDown: create a new page context for
-    // each ownerless FormCreated whose formId is unknown to the repo.
-    for (const event of result.value.events) {
-      if (event.type !== 'FormCreated') continue;
-      if (event.parentFormId) continue;
-      if (event.formId === form.formId) continue;
-      if (this.repo.getByFormId(event.formId)) continue;
-      const newPcId = `session:page:cue:${uuid().substring(0, 8)}`;
-      this.repo.create(newPcId, event.formId);
-      this.repo.applyToPage(newPcId, result.value.events);
-    }
-
-    return result;
+    // event (no parentFormId). invokeAction registers each ownerless FormCreated
+    // as its own page context (prefix "cue"), so ExecuteActionOperation.openedPages
+    // picks it up. Without that the new list page never gets a pageContextId.
+    return this.invokeAction(pageContextId, form, cue.controlPath, SystemAction.DrillDown, 'cue');
   }
 
   /**
@@ -160,7 +168,7 @@ export class ActionService {
     nav: 'back' | 'next' | 'finish' | 'cancel',
   ): Promise<Result<ActionResult, ProtocolError>> {
     const ctx = this.repo.get(pageContextId);
-    if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
+    if (!ctx) return err(this.repo.notFoundError(pageContextId));
 
     const root = ctx.forms.get(ctx.rootFormId);
     if (!root) return err(new ProtocolError(`Root form not found for page ${pageContextId}`));
@@ -203,14 +211,38 @@ export class ActionService {
     return result;
   }
 
-  async executeSystemAction(pageContextId: string, systemAction: number, sectionId?: string): Promise<Result<ActionResult, ProtocolError>> {
+  async executeSystemAction(
+    pageContextId: string,
+    systemAction: number,
+    sectionId?: string,
+    row?: { bookmark?: string; rowIndex?: number },
+  ): Promise<Result<ActionResult, ProtocolError>> {
     const ctx = this.repo.get(pageContextId);
-    if (!ctx) return err(new ProtocolError(`Page context not found: ${pageContextId}`));
+    if (!ctx) return err(this.repo.notFoundError(pageContextId));
 
     const resolved = resolveSection(ctx, sectionId);
     if ('error' in resolved) return err(new ProtocolError(resolved.error, { availableSections: resolved.availableSections }));
 
-    const { form, repeater } = resolved;
+    let form = resolved.form;
+    let repeater = resolved.repeater;
+
+    // Row targeting: when the caller names a specific row (bookmark or rowIndex)
+    // for a row-scoped action (Delete/Edit/View/DrillDown/New), position the
+    // cursor on THAT row first. Without this the action hits whatever row BC
+    // currently has selected -- e.g. Delete would remove the wrong record.
+    if (repeater && ROW_TARGETING_ACTIONS.has(systemAction) && row && (row.bookmark !== undefined || row.rowIndex !== undefined)) {
+      const bm = this.resolveBookmark(resolved.rows, row.bookmark, row.rowIndex);
+      if (isErr(bm)) return bm;
+      const pos = await this.positionRow(pageContextId, form.formId, repeater.controlPath, bm.value);
+      if (isErr(pos)) return pos;
+      // The repo replaced the context after SetCurrentRow -- re-resolve.
+      const ctx2 = this.repo.get(pageContextId);
+      if (!ctx2) return err(new ProtocolError('State lost after row selection'));
+      const re = resolveSection(ctx2, sectionId);
+      if ('error' in re) return err(new ProtocolError(re.error, { availableSections: re.availableSections }));
+      form = re.form;
+      repeater = re.repeater;
+    }
 
     // For row-targeting actions on pages with a repeater, use the repeater's controlPath
     let controlPath: string;
@@ -224,11 +256,37 @@ export class ActionService {
     return this.invokeAction(pageContextId, form, controlPath, systemAction);
   }
 
+  /** Resolve a bookmark from an explicit bookmark or a 0-based rowIndex into the loaded rows. */
+  private resolveBookmark(rows: readonly RepeaterRow[], bookmark?: string, rowIndex?: number): Result<string, ProtocolError> {
+    if (bookmark !== undefined) return ok(bookmark);
+    if (rowIndex !== undefined) {
+      const r = rows[rowIndex];
+      if (!r) return err(new ProtocolError(`Row index ${rowIndex} out of range. Loaded rows: 0-${rows.length - 1}. Load more with bc_read_data range first.`));
+      return ok(r.bookmark);
+    }
+    return err(new ProtocolError('No bookmark or rowIndex provided for row-scoped action'));
+  }
+
+  /** Position the repeater cursor on a row (SetCurrentRow) before a row-scoped action. */
+  private async positionRow(pageContextId: string, formId: string, repeaterControlPath: string, bookmark: string): Promise<Result<void, ProtocolError>> {
+    const interaction: SetCurrentRowInteraction = {
+      type: 'SetCurrentRow', formId, controlPath: repeaterControlPath, key: bookmark,
+    };
+    const result = await this.session.invoke(
+      interaction,
+      (event) => event.type === 'InvokeCompleted' || event.type === 'BookmarkChanged',
+    );
+    if (isErr(result)) return result;
+    this.repo.applyToPage(pageContextId, result.value);
+    return ok(undefined);
+  }
+
   private async invokeAction(
     pageContextId: string,
     form: FormState,
     controlPath: string,
     systemAction: number,
+    spawnPrefix: string = 'action',
   ): Promise<Result<ActionResult, ProtocolError>> {
     const interaction: InvokeActionInteraction = {
       type: 'InvokeAction',
@@ -246,6 +304,22 @@ export class ActionService {
 
     const events = result.value;
     this.repo.applyToPage(pageContextId, events);
+
+    // Register any ownerless new form (New card, drill-down target, cue page) as
+    // its own page context so callers get a usable pageContextId in openedPages.
+    // BC delivers these as top-level FormCreated with no parentFormId; the repo's
+    // applyEvent treats ownerless FormCreated as "update existing form", so
+    // without this the new page never gets a pageContextId -- it is unreachable
+    // and uncloseable via MCP, and the source context's form map gets polluted.
+    for (const event of events) {
+      if (event.type !== 'FormCreated') continue;
+      if (event.parentFormId) continue;
+      if (event.formId === form.formId) continue;
+      if (this.repo.getByFormId(event.formId)) continue;
+      const newPcId = `session:page:${spawnPrefix}:${uuid().substring(0, 8)}`;
+      this.repo.create(newPcId, event.formId);
+      this.repo.applyToPage(newPcId, events);
+    }
 
     // Check for dialog
     const dialogEvent = events.find(e => e.type === 'DialogOpened');

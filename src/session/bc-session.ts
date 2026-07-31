@@ -45,6 +45,25 @@ export class BCSession {
     return this.company;
   }
 
+  /** Explicitly set the current company (e.g. after a confirmed ChangeCompany). */
+  setCompany(company: string): void {
+    if (company) this.company = company;
+  }
+
+  /**
+   * Refresh cached session credentials (notably CompanyName) from decoded
+   * SessionInfo events — emitted for SessionInit / CachedSessionInit and, after
+   * a ChangeCompany, SessionSettingsChanged handlers. No-op if none carry a
+   * company. Used by bc_switch_company to reflect the server-confirmed company.
+   */
+  applySessionInfo(events: BCEvent[]): void {
+    for (const event of events) {
+      if (event.type === 'SessionInfo') {
+        this.extractSessionCredentials(event.sessionData);
+      }
+    }
+  }
+
   get isAlive(): boolean {
     return !this.dead && this.ws.isConnected;
   }
@@ -52,45 +71,58 @@ export class BCSession {
   async initialize(tenantId: string): Promise<Result<BCEvent[], ProtocolError>> {
     const openSessionCall = this.encoder.encodeOpenSession(tenantId, this.ws.spaInstanceId, this.profile);
 
-    this.logger.debug('protocol', 'Sending OpenSession');
-    const rpcResult = await this.ws.sendRpc(openSessionCall.method, openSessionCall.params, this.timeoutMs);
-    if (isErr(rpcResult)) return rpcResult;
+    // Capture async Message bursts (e.g. a late license/evaluation dialog that
+    // BC pushes as a notification rather than in the synchronous OpenSession
+    // response) during the quiescence window below.
+    const events: BCEvent[] = [];
+    const unsubscribe = this.collectAsyncMessages(events);
 
-    const responseData = rpcResult.value;
-    let events: BCEvent[] = [];
-    if (Array.isArray(responseData)) {
-      events = this.decoder.decode(responseData);
-    }
+    try {
+      this.logger.debug('protocol', 'Sending OpenSession');
+      const rpcResult = await this.ws.sendRpc(openSessionCall.method, openSessionCall.params, this.timeoutMs);
+      if (isErr(rpcResult)) return rpcResult;
 
-    // Wait for async messages
-    await new Promise(resolve => setTimeout(resolve, QUIESCENCE_MS));
-
-    // Extract session credentials from response (recursively searches for fields)
-    this.extractSessionCredentials(responseData);
-
-    // Update form tracking
-    this.updateFormTracking(events);
-
-    this._initialized = true;
-
-    // Auto-dismiss license notification dialogs (present on fresh/evaluation databases)
-    const licenseDialog = this.findLicenseDialog(events);
-    if (licenseDialog) {
-      this.logger.info('Auto-dismissing license notification dialog');
-      try {
-        await this.invoke(
-          { type: 'InvokeAction', formId: licenseDialog.formId, controlPath: 'server:', systemAction: 300 }, // Ok=300
-          (e) => e.type === 'InvokeCompleted',
-        );
-        this._openFormIds.delete(licenseDialog.formId);
-      } catch {
-        this.logger.warn('Failed to auto-dismiss license dialog, continuing anyway');
+      const responseData = rpcResult.value;
+      if (Array.isArray(responseData)) {
+        events.push(...this.decoder.decode(responseData));
       }
+
+      // Wait for async messages
+      await new Promise(resolve => setTimeout(resolve, QUIESCENCE_MS));
+
+      // Extract session credentials from response (recursively searches for fields)
+      this.extractSessionCredentials(responseData);
+
+      // Update form tracking (includes any async-delivered dialogs)
+      this.updateFormTracking(events);
+
+      this._initialized = true;
+
+      // Auto-dismiss license notification dialogs (present on fresh/evaluation databases)
+      const licenseDialog = this.findLicenseDialog(events);
+      if (licenseDialog) {
+        this.logger.info('Auto-dismissing license notification dialog');
+        try {
+          await this.invoke(
+            { type: 'InvokeAction', formId: licenseDialog.formId, controlPath: 'server:', systemAction: 300 }, // Ok=300
+            (e) => e.type === 'InvokeCompleted',
+          );
+          // Clear from BOTH openFormIds and the modal stack. Using the raw Set
+          // delete alone leaves a stale modalStack entry (the dialog was pushed
+          // there by updateFormTracking), which the next modal reconcile would try
+          // to Abort even though the form is gone.
+          this.removeOpenForm(licenseDialog.formId);
+        } catch {
+          this.logger.warn('Failed to auto-dismiss license dialog, continuing anyway');
+        }
+      }
+
+      this.logger.info(`Session initialized: ${this.sessionId}, company: ${this.company}`);
+
+      return ok(events);
+    } finally {
+      unsubscribe();
     }
-
-    this.logger.info(`Session initialized: ${this.sessionId}, company: ${this.company}`);
-
-    return ok(events);
   }
 
   private extractSessionCredentials(data: unknown): void {
@@ -121,18 +153,27 @@ export class BCSession {
   ): Promise<Result<BCEvent[], ProtocolError>> {
     if (this.dead) return err(new ProtocolError('Session is dead'));
     const effectiveTimeout = timeoutMs ?? this.timeoutMs;
-    try {
-      return await this.withTimeout(
-        this.enqueue(() => this.invokeUnqueued(interaction, expect, effectiveTimeout)),
-        effectiveTimeout + 5000, // Session-level timeout is 5s longer than RPC timeout
-        `Invoke(${interaction.type})`,
-      );
-    } catch (e) {
-      if (e instanceof TimeoutError) {
-        return err(new ProtocolError(e.message));
+    // The timeout clock must start when the interaction is actually SENT, not
+    // when it is enqueued. If withTimeout wraps the enqueued promise, time spent
+    // waiting behind other queued invokes counts against this call's budget --
+    // so under concurrent tool calls (HTTP handles requests concurrently; stdio
+    // does not await line handlers) a call sitting in the queue can time out and
+    // kill a perfectly healthy session. Wrapping withTimeout INSIDE the enqueued
+    // task starts the clock only once this task reaches the head of the queue.
+    return this.enqueue(async () => {
+      try {
+        return await this.withTimeout(
+          this.invokeUnqueued(interaction, expect, effectiveTimeout),
+          effectiveTimeout + 5000, // Session-level timeout is 5s longer than RPC timeout
+          `Invoke(${interaction.type})`,
+        );
+      } catch (e) {
+        if (e instanceof TimeoutError) {
+          return err(new ProtocolError(e.message));
+        }
+        throw e;
       }
-      throw e;
-    }
+    });
   }
 
   private withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -159,6 +200,29 @@ export class BCSession {
    * NOT already serialized must use the public `invoke` instead -- BC's
    * protocol is stateful and concurrent sends corrupt sequence numbers.
    */
+  /**
+   * Subscribe to the WebSocket's async `Message` notifications and decode any
+   * compressed handler arrays into `sink`. Returns the unsubscribe function.
+   * Shared by `invokeUnqueued` and `initialize` so both capture trailing async
+   * events during their quiescence window.
+   */
+  private collectAsyncMessages(sink: BCEvent[]): () => void {
+    return this.ws.onMessage((raw) => {
+      if (!raw || typeof raw !== 'object') return;
+      const msg = raw as Record<string, unknown>;
+      // Only process async Message notifications (method: "Message", no id)
+      if (msg['method'] === 'Message' && !('id' in msg) && Array.isArray(msg['params'])) {
+        const messageData = (msg['params'] as unknown[])[0] as Record<string, unknown> | undefined;
+        if (messageData?.['compressedData'] && typeof messageData['compressedData'] === 'string') {
+          const decompResult = decompressPayload(messageData['compressedData'] as string);
+          if (isOk(decompResult) && Array.isArray(decompResult.value)) {
+            sink.push(...this.decoder.decode(decompResult.value as unknown[]));
+          }
+        }
+      }
+    });
+  }
+
   private async invokeUnqueued(
     interaction: BCInteraction,
     expect: EventPredicate,
@@ -169,21 +233,7 @@ export class BCSession {
     const asyncEvents: BCEvent[] = [];
 
     // Register message handler to capture async Message notifications during this invoke
-    const unsubscribe = this.ws.onMessage((raw) => {
-      if (!raw || typeof raw !== 'object') return;
-      const msg = raw as Record<string, unknown>;
-      // Only process async Message notifications (method: "Message", no id)
-      if (msg['method'] === 'Message' && !('id' in msg) && Array.isArray(msg['params'])) {
-        const messageData = (msg['params'] as unknown[])[0] as Record<string, unknown> | undefined;
-        if (messageData?.['compressedData'] && typeof messageData['compressedData'] === 'string') {
-          const decompResult = decompressPayload(messageData['compressedData'] as string);
-          if (isOk(decompResult) && Array.isArray(decompResult.value)) {
-            const events = this.decoder.decode(decompResult.value as unknown[]);
-            asyncEvents.push(...events);
-          }
-        }
-      }
-    });
+    const unsubscribe = this.collectAsyncMessages(asyncEvents);
 
     try {
       // Encode the interaction
@@ -211,7 +261,11 @@ export class BCSession {
       const rpcResult = await this.ws.sendRpc(encoded.method, encoded.params, timeoutMs);
       if (isErr(rpcResult)) {
         const msg = rpcResult.error.message;
-        if (msg.includes('InvalidSessionException') || msg.includes('"code":1')) {
+        // Match the fatal JSON-RPC code 1 exactly. A naive `includes('"code":1')`
+        // substring also matches code 10, 12, 19, 100... -- non-fatal errors that
+        // would then wrongly tear down the whole session. The word boundary is
+        // the same guard error-translator.ts already uses.
+        if (msg.includes('InvalidSessionException') || /"code"\s*:\s*1\b/.test(msg)) {
           this.markDead();
           return rpcResult;
         }
@@ -232,6 +286,12 @@ export class BCSession {
             this.markDead();
             return err(new ModalReconcileError(`Modal reconciliation failed: ${reconcile.error.message}`, { originalError: msg }));
           }
+          // Surface the reconcile sub-invokes' events (notably FormClosed for the
+          // aborted stale dialogs) to the caller so the PageContextRepository can
+          // prune those dialogs. Without this merge, page.dialogs / section
+          // validity stay stale and derivePageState keeps reporting a dialog that
+          // no longer exists.
+          allEvents.push(...reconcile.value);
           // Re-encode -- sequence numbers / openFormIds may have advanced.
           const retryContext: EncodeContext = {
             callbackId,
@@ -371,7 +431,8 @@ export class BCSession {
    * inspects `LogicalDispatcher.Frames`. SystemAction.Abort=320 closes the
    * topmost frame's ModalForm.
    */
-  async reconcileModalStack(): Promise<Result<void, ProtocolError>> {
+  async reconcileModalStack(): Promise<Result<BCEvent[], ProtocolError>> {
+    const collected: BCEvent[] = [];
     const MAX_ATTEMPTS = 10;
     for (let i = 0; i < MAX_ATTEMPTS && this.modalStack.size > 0; i++) {
       const top = this.modalStack.peek()!;
@@ -383,6 +444,7 @@ export class BCSession {
       if (isErr(result)) {
         return err(new ProtocolError(`reconcileModalStack: Abort on formId=${top} failed: ${result.error.message}`));
       }
+      collected.push(...result.value);
       // If BC didn't emit FormClosed for this formId, force-pop to make progress.
       // Live observation (BC28): confirm dialogs do NOT emit FormClosed on
       // Abort=320 against controlPath:'server:'. The local stack is force-popped
@@ -398,7 +460,7 @@ export class BCSession {
     if (this.modalStack.size > 0) {
       return err(new ProtocolError(`reconcileModalStack: stack still has ${this.modalStack.size} entries after ${MAX_ATTEMPTS} attempts`));
     }
-    return ok(undefined);
+    return ok(collected);
   }
 
   /**

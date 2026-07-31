@@ -125,32 +125,29 @@ export class MCPHandler {
     try {
       const result = await tool.execute(parseResult.data);
       // Result is a Result<T, ProtocolError>
-      const r = result as { ok: boolean; value?: unknown; error?: { message: string } };
+      const r = result as { ok: boolean; value?: unknown; error?: { message?: string; code?: string; context?: Record<string, unknown> } };
       if (r.ok) {
         // A tool may attach an inline image via a `__image` field ({ data, mimeType }).
         // Surface it as an MCP image content block alongside the JSON text.
+        // JSON is emitted compact (no pretty-print) to keep responses token-light.
         const value = r.value as Record<string, unknown> | undefined;
         const image = value && (value.__image as { data?: string; mimeType?: string } | undefined);
         const content: Array<Record<string, unknown>> = [];
         if (image && image.data) {
           const { __image: _omit, ...rest } = value as Record<string, unknown>;
-          content.push({ type: 'text', text: JSON.stringify(rest, null, 2) });
+          content.push({ type: 'text', text: JSON.stringify(rest) });
           content.push({ type: 'image', data: image.data, mimeType: image.mimeType ?? 'image/png' });
         } else {
-          content.push({ type: 'text', text: JSON.stringify(r.value, null, 2) });
+          content.push({ type: 'text', text: JSON.stringify(r.value) });
         }
         return { jsonrpc: '2.0', id: request.id, result: { content } };
       } else {
-        const t = translateBcError(r.error?.message ?? 'Unknown error');
-        this.metrics?.recordError(t.code, r.error?.message);
-        return {
-          jsonrpc: '2.0',
-          id: request.id,
-          result: {
-            content: [{ type: 'text', text: `Error [${t.code}]: ${t.message}` }],
-            isError: true,
-          },
-        };
+        // Preserve the tool's own typed error code (CARDPART_STUB,
+        // PAGE_NOT_MATERIALIZED, ...) and its diagnostic context
+        // (availableActions / availableSections / availableFields / hostHint,
+        // ...) so the caller can self-correct in one turn instead of making
+        // extra discovery calls.
+        return this.buildErrorResult(request.id, r.error?.message ?? 'Unknown error', r.error?.code, r.error?.context);
       }
     } catch (e) {
       // Session recovery: return a clear message so the LLM knows to re-open pages
@@ -168,16 +165,30 @@ export class MCPHandler {
 
       const raw = e instanceof Error ? e.message : String(e);
       this.logger.error(`Tool ${params.name} failed: ${raw}`);
-      const t = translateBcError(raw);
-      this.metrics?.recordError(t.code, raw);
-      return {
-        jsonrpc: '2.0',
-        id: request.id,
-        result: {
-          content: [{ type: 'text', text: `Error [${t.code}]: ${t.message}` }],
-          isError: true,
-        },
-      };
+      const code = (e as { code?: string }).code;
+      const context = (e as { context?: Record<string, unknown> }).context;
+      return this.buildErrorResult(request.id, raw, code, context);
     }
+  }
+
+  /**
+   * Build an MCP error response. Prefers the error object's own typed code over
+   * the message-derived one, and appends the structured diagnostic context (if
+   * any) on a second line as JSON so the model can retry without a round-trip.
+   */
+  private buildErrorResult(
+    id: unknown,
+    rawMessage: string,
+    typedCode?: string,
+    context?: Record<string, unknown>,
+  ): JsonRpcResponse {
+    const translated = translateBcError(rawMessage);
+    const code = typedCode && typedCode !== 'PROTOCOL_ERROR' ? typedCode : translated.code;
+    this.metrics?.recordError(code, rawMessage);
+    const hasContext = context && Object.keys(context).length > 0;
+    const text = hasContext
+      ? `Error [${code}]: ${translated.message}\n${JSON.stringify({ context })}`
+      : `Error [${code}]: ${translated.message}`;
+    return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text }], isError: true } };
   }
 }

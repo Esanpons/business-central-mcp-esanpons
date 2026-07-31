@@ -7,7 +7,7 @@ export interface DownloadReportOperationInput {
   company?: string;
   out?: string;
   timeoutMs?: number;
-  filters?: Record<string, string>;
+  filters?: Record<string, string | number | boolean>;
 }
 
 export type DownloadReportOutput = DownloadReportResult;
@@ -16,12 +16,16 @@ export class DownloadReportOperation {
   constructor(private readonly service: ReportDownloadService) {}
 
   async execute(input: DownloadReportOperationInput): Promise<Result<DownloadReportOutput, ProtocolError>> {
+    // Coerce filter values to text (BC request-page fields are text-based).
+    const filters = input.filters
+      ? Object.fromEntries(Object.entries(input.filters).map(([k, v]) => [k, typeof v === 'string' ? v : String(v)]))
+      : undefined;
     const dlInput: DownloadReportInput = {
       reportId: String(input.reportId),
       company: input.company,
       out: input.out,
       timeoutMs: input.timeoutMs,
-      filters: input.filters,
+      filters,
     };
     try {
       const r = await this.service.download(dlInput);
