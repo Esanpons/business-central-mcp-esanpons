@@ -2,7 +2,7 @@
 import { createInterface } from 'node:readline';
 import { loadConfig } from './core/config.js';
 import { createLogger } from './core/logger.js';
-import { NTLMAuthProvider } from './connection/auth/ntlm-provider.js';
+import { createAuthProvider } from './connection/auth/factory.js';
 import { ConnectionFactory } from './connection/connection-factory.js';
 import { EventDecoder } from './protocol/event-decoder.js';
 import { InteractionEncoder } from './protocol/interaction-encoder.js';
@@ -50,12 +50,7 @@ async function main() {
   logger.info('BC MCP Server v2 (stdio) starting...');
 
   // Infrastructure
-  const authProvider = new NTLMAuthProvider({
-    baseUrl: config.bc.baseUrl,
-    username: config.bc.username,
-    password: config.bc.password,
-    tenantId: config.bc.tenantId,
-  }, logger);
+  const authProvider = createAuthProvider(config.bc, logger);
   const connectionFactory = new ConnectionFactory(authProvider, config.bc, logger);
 
   // Protocol
@@ -77,14 +72,14 @@ async function main() {
 
   // Services — built once after session is available
   function buildServices(s: BCSession): ReturnType<typeof buildToolRegistry> {
-    const pageService = new PageService(s, pageContextRepo, logger, { tenantId: config.bc.tenantId });
+    const pageService = new PageService(s, pageContextRepo, logger, { tenantId: config.bc.tenantId, authMode: config.bc.authMode });
     const dataService = new DataService(s, pageContextRepo, logger, config.logging.redactValues);
     const actionService = new ActionService(s, pageContextRepo, logger);
     const filterService = new FilterService(s, pageContextRepo, logger, config.logging.redactValues);
     const navigationService = new NavigationService(s, pageContextRepo, logger);
     const searchService = new SearchService(s, logger);
-    const screenshotService = new ScreenshotService(config.bc, config.screenshotDir, () => s.companyName, logger);
-    const reportDownloadService = new ReportDownloadService(config.bc, config.reportDir, () => s.companyName, logger);
+    const screenshotService = new ScreenshotService(config.bc, config.screenshotDir, () => s.companyName, logger, authProvider);
+    const reportDownloadService = new ReportDownloadService(config.bc, config.reportDir, () => s.companyName, logger, authProvider);
     const objectIndexService = new ObjectIndexService(pageService, config.stateDir, config.bc.baseUrl, config.bc.tenantId, logger);
 
     const operations: Operations = {

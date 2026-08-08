@@ -23,9 +23,9 @@
 | Language | TypeScript / Node 20+ |
 | npm package | `business-central-mcp-esanpons` (AESVA fork) |
 | BC versions | BC27, BC28 (wire-compatible) |
-| Auth | NavUserPassword (OAuth/SaaS on roadmap) |
+| Auth | NavUserPassword (on-prem) + AAD/Entra browser login (BC Online / SaaS) |
 | Tools | 18 |
-| Tests | 370 unit/protocol + integration |
+| Tests | 403 unit/protocol + integration |
 | License | MIT |
 
 ## Install
@@ -116,9 +116,13 @@ Restart Claude Desktop.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `BC_BASE_URL` | Yes | — | BC server base URL, e.g. `http://your-bc-server/BC` |
-| `BC_USERNAME` | Yes | — | NavUserPassword username |
-| `BC_PASSWORD` | Yes | — | NavUserPassword password |
+| `BC_AUTH` | No | `UserPassword` | Auth mode. `UserPassword` = on-prem forms `/SignIn` (unchanged). `AAD` = BC Online / SaaS via Entra browser login (see [SaaS setup](docs/SETUP-GLOBAL.md#bc-online-saas--bc_authaad)). |
+| `BC_BASE_URL` | Yes | — | BC base URL. On-prem: `http://your-bc-server/BC`. SaaS: `https://businesscentral.dynamics.com/<aadTenantId>/<environment>`. |
+| `BC_USERNAME` | On-prem | — | NavUserPassword username (optional in AAD mode: used for headless Entra login). |
+| `BC_PASSWORD` | On-prem | — | NavUserPassword password (optional in AAD mode). |
+| `BC_AAD_PROFILE_DIR` | No | `./.state/aad-profile` | AAD only: persistent browser profile holding the Entra SSO session. Use an absolute path when registering globally. |
+| `BC_AAD_TOTP_SECRET` | No | — | AAD only: base32 TOTP secret for unattended MFA. Empty = bootstrap interactively with `npm run login:aad`. |
+| `BC_AAD_LOGIN_TIMEOUT` | No | `120000` | AAD only: ms budget for the OIDC login dance. |
 | `BC_PROFILE` | No | server default | Profile id, e.g. `BUSINESS MANAGER`. Affects which Role Center loads and which pages Tell Me indexes. |
 | `BC_TENANT_ID` | No | `default` | Multi-tenant deployments only. |
 | `BC_CLIENT_VERSION` | No | `27.0.0.0` | Version reported to BC during session open. |

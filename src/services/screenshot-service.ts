@@ -2,8 +2,10 @@ import { mkdirSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import type { BCConfig } from '../core/config.js';
 import type { Logger } from '../core/logger.js';
+import type { IBCAuthProvider } from '../connection/auth/auth-provider.js';
+import { FormsAuthProvider } from '../connection/auth/forms-provider.js';
 import { launchHeadless } from './browser.js';
-import { authCookies, deepLinkPage, onSignIn, inPageLogin, waitReady } from './bc-web-auth.js';
+import { ensureAuthJar, deepLinkPage, onSignIn, inPageLogin, waitReady } from './bc-web-auth.js';
 
 /**
  * ScreenshotService — captures a REAL screenshot of the BC web client.
@@ -78,12 +80,31 @@ interface Rect { x: number; y: number; w: number; h: number; }
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 export class ScreenshotService {
+  private _auth?: IBCAuthProvider;
+
   constructor(
     private readonly config: BCConfig,
     private readonly screenshotDir: string,
     private readonly getCompany: () => string | undefined,
     private readonly logger: Logger,
-  ) {}
+    authProvider?: IBCAuthProvider,
+  ) {
+    this._auth = authProvider;
+  }
+
+  /** Shared auth provider (one login for WS + browser). Standalone scripts that
+   * don't inject one get a self-contained forms provider built from config. */
+  private auth(): IBCAuthProvider {
+    if (!this._auth) {
+      this._auth = new FormsAuthProvider({
+        baseUrl: this.config.baseUrl,
+        username: this.config.username,
+        password: this.config.password,
+        tenantId: this.config.tenantId,
+      }, this.logger);
+    }
+    return this._auth;
+  }
 
   async capture(input: CaptureInput): Promise<CaptureResult> {
     const pageId = String(input.pageId).trim();
@@ -93,7 +114,7 @@ export class ScreenshotService {
 
     const browser = await launchHeadless();
     try {
-      const cookies = await authCookies(this.config);
+      const cookies = await ensureAuthJar(this.auth());
       const p = await browser.newPage();
       const width = input.width ?? 1600;
       const height = input.height ?? 1000;
@@ -105,6 +126,9 @@ export class ScreenshotService {
       // SignIn form (its ReturnUrl is our deep link, so BC redirects right back).
       if (await onSignIn(p)) {
         this.logger.warn('[screenshot] cookie injection landed on SignIn — logging in in-page');
+        // The injected jar is stale server-side; drop it so the next capture (and
+        // the next WS reconnect, if the provider is shared) re-authenticates.
+        this.auth().invalidate();
         await inPageLogin(this.config, p);
       }
 

@@ -1,0 +1,886 @@
+{
+  "capturedAt": "2026-08-08T08:02:54.759Z",
+  "baseUrl": "https://businesscentral.dynamics.com/2c43eb40-4e62-4039-8a43-8a75f7323032/Dev",
+  "openSession": {
+    "captured": true,
+    "rawLen": 1870,
+    "fields": {
+      "extractedFields": {
+        "applicationId": "FIN",
+        "supportedExtensions": "[{\"Name\":\"Microsoft.Dynamics.Nav.Client.PageNotifier\"},{\"Name\":\"Microsoft.Dynamics.Nav.Client.Capabilities.Tour\"},{\"Name\":\"Microsoft.Dynamics.Nav.Client.Capabilities.UserTours\"},{\"Name\":\"Microsoft.Dynamics.Nav.Client.Capabilities.AppSource\"},{\"Name\":\"Microsoft.Dynamics.Nav.Client.Capabilities.Designer\"},{\"Name\":\"Microsoft.Dynamics.Nav.Client.Capabilities.LocationProvider\"}]",
+        "tenantId": "msweua3554t30793230",
+        "company": null,
+        "telemetryClientSessionId": "9aca0bae-91fd-472f-8e49-43415d0d09e0",
+        "features": [
+          "__featureUninitialized",
+          "QueueInteractions",
+          "MetadataCache",
+          "CacheSession",
+          "DynamicsQuickEntry",
+          "Multitasking",
+          "MultilineEdit",
+          "ShareToTeams",
+          "FactBoxResizing",
+          "SidePanelResizing",
+          "DevicePerformanceWarning",
+          "CopilotChatCreatesAnalysisView",
+          "CopilotChatIsAwareOfCopilotActions",
+          "CopilotChatSupportsAdditional1PContent",
+          "CopilotChatSupportsISVDocumentation"
+        ],
+        "profile": ""
+      },
+      "rawEnvelope": "{\"jsonrpc\":\"2.0\",\"id\":\"|0a1811c00ec14d5d9d7123669792cf7f.ad47b199cfe44ea3\",\"method\":\"OpenSession\",\"params\":[{\"openFormIds\":[],\"sessionId\":\"\",\"sequenceNo\":null,\"lastClientAckSequenceNumber\":-1,\"telemetryClientActivityId\":null,\"telemetryTraceStartInfo\":\"traceStartInfo=%5BWeb%20Client%20-%20Web%20browser%5D%20OpenForm\",\"navigationContext\":{\"applicationId\":\"FIN\",\"deviceCategory\":0,\"spaInstanceId\":\"msk36adr\"},\"supportedExtensions\":\"[{\\\"Name\\\":\\\"Microsoft.Dynamics.Nav.Client.PageNotifier\\\"},{\\\"Name\\\":\\\"Microsoft.Dynamics.Nav.Client.Capabilities.Tour\\\"},{\\\"Name\\\":\\\"Microsoft.Dynamics.Nav.Client.Capab...<+1270 chars>"
+    }
+  },
+  "webSockets": [
+    {
+      "url": "wss://msweuweuas4242-7uyvs76.appservices.weu.businesscentral.dynamics.com/tenant/msweua3554t30793230/tab/23ff22ab-f996-4144-82c2-659b374bbe3e/csh?ackseqnb=-1&aadTenantId=2c43eb40-4e62-4039-8a43-8a75f7323032&csrftoken=CfDJ8M...%3Credacted+198+chars%3E&traceId=0a1811c00ec14d5d9d7123669792cf7f",
+      "frameCount": 29,
+      "frames": [
+        {
+          "dir": "sent",
+          "opcode": 1,
+          "len": 1870,
+          "preview": "{\"jsonrpc\":\"2.0\",\"id\":\"|0a1811c00ec14d5d9d7123669792cf7f.ad47b199cfe44ea3\",\"method\":\"OpenSession\",\"params\":[{\"openFormIds\":[],\"sessionId\":\"\",\"sequenceNo\":null,\"lastClientAckSequenceNumber\":-1,\"telemetryClientActivityId\":null,\"telemetryTraceStartInfo\":\"traceStartInfo=%5BWeb%20Client%20-%20Web%20browser%5D%20OpenForm\",\"navigationContext\":{\"applicationId\":\"FIN\",\"deviceCategory\":0,\"spaInstanceId\":\"msk36adr\"},\"supportedExtensions\":\"[{\\\"Name\\\":\\\"Microsoft.Dynamics.Nav.Client.PageNotifier\\\"},{\\\"Name\\\":\\\"Microsoft.Dynamics.Nav.Client.Capabilities.Tour\\\"},{\\\"Name\\\":\\\"Microsoft.Dynamics.Nav.Client.Capab...<+1270 chars>"
+        },
+        {
+          "dir": "recv",
+          "opcode": 1,
+          "len": 327360,
+          "preview": "{\"jsonrpc\":\"2.0\",\"result\":[{\"handlerType\":\"DN.CachedSessionInitHandler\",\"parameters\":[[{\"handlerType\":\"DN.LogicalClientInitHandler\",\"parameters\":[{\"stackc\":\"DN.StackLogicalControl\",\"stackgc\":\"DN.StackGroupLogicalControl\",\"ac\":\"DN.ActionControl\",\"agc\":\"DN.AgentControl\",\"blobc\":\"DN.BlobControl\",\"edc\":\"DN.EditLogicalControl\",\"filc\":\"DN.FilterLogicalControl\",\"fhc\":\"DN.FormHostControl\",\"gc\":\"DN.GroupControl\",\"imgc\":\"DN.ImageControl\",\"clact\":\"DN.LogicalAction\",\"lookac\":\"DN.LookupAction\",\"lc\":\"DN.LogicalControl\",\"alc\":\"DN.ActionListControl\",\"lf\":\"DN.LogicalForm\",\"lmd\":\"DN.LogicalMessageDialog\",\"pc\":\"...<+323911 chars>"
+        },
+        {
+          "dir": "recv",
+          "opcode": 1,
+          "len": 416,
+          "preview": {
+            "jsonrpc": "2.0",
+            "method": "Message",
+            "params": [
+              {
+                "sequenceNumber": 0,
+                "telemetryTraceId": "0a1811c00ec14d5d9d7123669792cf7f",
+                "handler": "LogicalClientChange",
+                "data": [
+                  {
+                    "handlerType": "DN.LogicalClientEventRaisingHandler",
+                    "parameters": [
+                      "PPACSettingsChanged",
+                      {
+                        "CopilotFeedbackEnabled": true,
+                        "SurveyFeedbackEnabled": true,
+                        "FeedbackAttachmentsEnabled": true,
+                        "FeedbackReachoutEnabled": true,
+                        "UserInitiatedFeedbackEnabled": true
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "dir": "sent",
+          "opcode": 1,
+          "len": 2671,
+          "preview": "{\"jsonrpc\":\"2.0\",\"id\":\"|a9a8ba3adea0491ea0c0b2822af1b7a2.15387e246a1442bf\",\"method\":\"Invoke\",\"params\":[{\"openFormIds\":[\"392\"],\"sessionId\":\"MSWEUA3554T30793230CRONUS ESSR63921772971360178534FIN\",\"sequenceNo\":\"msk36adr#1\",\"lastClientAckSequenceNumber\":0,\"telemetryClientActivityId\":null,\"telemetryTraceStartInfo\":\"traceStartInfo=%5BWeb%20Client%20-%20Web%20browser%5D%20InvokeSessionAction%2CInvokeSessionAction\",\"navigationContext\":{\"applicationId\":\"FIN\",\"deviceCategory\":0,\"spaInstanceId\":\"msk36adr\"},\"supportedExtensions\":\"[{\\\"Name\\\":\\\"Microsoft.Dynamics.Nav.Client.PageNotifier\\\"},{\\\"Name\\\":\\\"Micro...<+2071 chars>"
+        },
+        {
+          "dir": "recv",
+          "opcode": 1,
+          "len": 6563,
+          "preview": "{\"jsonrpc\":\"2.0\",\"result\":[{\"handlerType\":\"DN.CallbackResponseProperties\",\"parameters\":[{\"SequenceNumber\":1,\"CompletedInteractions\":[{\"InvocationId\":\"1\",\"Duration\":138},{\"InvocationId\":\"2\",\"Duration\":32}]}]},{\"handlerType\":\"DN.SessionInitHandler\",\"parameters\":[{\"RequestToken\":\"CfDJ8M7CtEFOJYZKowh0R9yicn-ZIFA_w-tiI6iloZ_5yOhc33i40s6-W_AN2WTC4bJJ4COiLZND7QXQs7vkrni0vQwKxqlrwM5-m-w26AeWi12KrTc99IPSsjdv_poYn6m2AJPS8e4KYm5Xh52QINLHESqzJ31guqZmUX8aVhRVSAvGfPcd12C02rhKiI1Q0-0ANQ\",\"ServerSessionId\":\"MSWEUA3554T30793230CRONUS ESSR63921772971360178534FIN\",\"TelemetryClientSessionId\":\"9aca0bae-91fd-472f-8...<+5959 chars>"
+        },
+        {
+          "dir": "sent",
+          "opcode": 1,
+          "len": 1078,
+          "preview": "{\"jsonrpc\":\"2.0\",\"id\":\"|7ed4f8cc58f9453fb6cfaa98ebea9f61.d593e0656fcf4c2b\",\"method\":\"Invoke\",\"params\":[{\"openFormIds\":[\"392\"],\"sessionId\":\"MSWEUA3554T30793230CRONUS ESSR63921772971360178534FIN\",\"sequenceNo\":\"msk36adr#2\",\"lastClientAckSequenceNumber\":0,\"telemetryClientActivityId\":null,\"telemetryTraceStartInfo\":\"traceStartInfo=%5BWeb%20Client%20-%20Web%20browser%5D%20LoadForm%2CInvokeSessionAction\",\"navigationContext\":{\"applicationId\":\"FIN\",\"deviceCategory\":0,\"spaInstanceId\":\"msk36adr\"},\"supportedExtensions\":null,\"interactionsToInvoke\":[{\"interactionName\":\"LoadForm\",\"skipExtendingSessionLifetime...<+478 chars>"
+        },
+        {
+          "dir": "recv",
+          "opcode": 1,
+          "len": 2558,
+          "preview": "{\"jsonrpc\":\"2.0\",\"result\":[{\"handlerType\":\"DN.CallbackResponseProperties\",\"parameters\":[{\"SequenceNumber\":2,\"CompletedInteractions\":[{\"InvocationId\":\"3\",\"Duration\":0},{\"InvocationId\":\"4\",\"Duration\":15}]}]},{\"handlerType\":\"DN.SessionInitHandler\",\"parameters\":[{\"RequestToken\":\"CfDJ8M7CtEFOJYZKowh0R9yicn-ZIFA_w-tiI6iloZ_5yOhc33i40s6-W_AN2WTC4bJJ4COiLZND7QXQs7vkrni0vQwKxqlrwM5-m-w26AeWi12KrTc99IPSsjdv_poYn6m2AJPS8e4KYm5Xh52QINLHESqzJ31guqZmUX8aVhRVSAvGfPcd12C02rhKiI1Q0-0ANQ\",\"ServerSessionId\":\"MSWEUA3554T30793230CRONUS ESSR63921772971360178534FIN\",\"TelemetryClientSessionId\":\"9aca0bae-91fd-472f-8e4...<+1954 chars>"
+        },
+        {
+          "dir": "sent",
+          "opcode": 1,
+          "len": 1457,
+          "preview": "{\"jsonrpc\":\"2.0\",\"id\":\"|a25287dfb5a74b6b8c2652dbfabc93df.b4aaf44dd6f944ef\",\"method\":\"Invoke\",\"params\":[{\"openFormIds\":[\"392\"],\"sessionId\":\"MSWEUA3554T30793230CRONUS ESSR63921772971360178534FIN\",\"sequenceNo\":\"msk36adr#3\",\"lastClientAckSequenceNumber\":0,\"telemetryClientActivityId\":null,\"telemetryTraceStartInfo\":\"traceStartInfo=%5BWeb%20Client%20-%20Web%20browser%5D%20InvokeSessionAction\",\"navigationContext\":{\"applicationId\":\"FIN\",\"deviceCategory\":0,\"spaInstanceId\":\"msk36adr\"},\"supportedExtensions\":null,\"interactionsToInvoke\":[{\"interactionName\":\"InvokeSessionAction\",\"skipExtendingSessionLifetime...<+857 chars>"
+        },
+        {
+          "dir": "recv",
+          "opcode": 1,
+          "len": 6814,
+          "preview": "{\"jsonrpc\":\"2.0\",\"method\":\"Message\",\"params\":[{\"sequenceNumber\":3,\"telemetryTraceId\":\"7ed4f8cc58f9453fb6cfaa98ebea9f61\",\"handler\":\"LogicalClientChange\",\"data\":[{\"handlerType\":\"DN.LogicalClientChangeHandler\",\"parameters\":[\"392\",[{\"t\":\"ChildInserted\",\"ControlReference\":{\"controlPath\":\"server:\",\"formId\":\"392\"},\"PropertyName\":\"Notifications\",\"ControlInserted\":{\"t\":\"nlc\",\"Caption\":\"Este es un entorno de espacio aislado solo con fines de prueba, demostración o desarrollo.\",\"StringValue\":\"\",\"Name\":\"2676849f-740a-437e-94c3-f701e24bab8d\",\"NotificationId\":\"d82835d9-a005-451a-972b-0d6532de2071\",\"Actions\"...<+6210 chars>"
+        },
+        {
+          "dir": "recv",
+          "opcode": 1,
+          "len": 2510,
+          "preview": "{\"jsonrpc\":\"2.0\",\"result\":[{\"handlerType\":\"DN.CallbackResponseProperties\",\"parameters\":[{\"SequenceNumber\":4,\"CompletedInteractions\":[{\"InvocationId\":\"5\",\"Duration\":22}]}]},{\"handlerType\":\"DN.LogicalClientEventRaisingHandler\",\"parameters\":[\"RequestUserToken\",{\"Resource\":\"https://api.businesscentral.dynamics.com\",\"AccessToken\":\"eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dCI6ImZFdHFyaEtUMWJYQUdhZlNkUW9OMXZYVFJwSSIsImtpZCI6ImZFdHFyaEtUMWJYQUdhZlNkUW9OMXZYVFJwSSJ9.eyJhdWQiOiJodHRwczovL2FwaS5idXNpbmVzc2NlbnRyYWwuZHluYW1pY3MuY29tIiwiaXNzIjoiaHR0cHM6Ly9zdHMud2luZG93cy5uZXQvMmM0M2ViNDAtNGU2Mi00MDM5LThhNDM...<+1908 chars>"
+        },
+        {
+          "dir": "sent",
+          "opcode": 1,
+          "len": 1557,
+          "preview": "{\"jsonrpc\":\"2.0\",\"id\":\"|2dc66da896754dcd8dba6615e0245640.10ce412186e84419\",\"method\":\"Invoke\",\"params\":[{\"openFormIds\":[\"392\"],\"sessionId\":\"MSWEUA3554T30793230CRONUS ESSR63921772971360178534FIN\",\"sequenceNo\":\"msk36adr#4\",\"lastClientAckSequenceNumber\":3,\"telemetryClientActivityId\":null,\"telemetryTraceStartInfo\":\"traceStartInfo=%5BWeb%20Client%20-%20Web%20browser%5D%20InvokeExtensibilityMethod%2CLoadForm%2CInvokeExtensibilityMethod\",\"navigationContext\":{\"applicationId\":\"FIN\",\"deviceCategory\":0,\"spaInstanceId\":\"msk36adr\"},\"supportedExtensions\":null,\"interactionsToInvoke\":[{\"interactionName\":\"Invok...<+957 chars>"
+        },
+        {
+          "dir": "recv",
+          "opcode": 1,
+          "len": 358,
+          "preview": {
+            "jsonrpc": "2.0",
+            "method": "Message",
+            "params": [
+              {
+                "sequenceNumber": 5,
+                "telemetryTraceId": "7ed4f8cc58f9453fb6cfaa98ebea9f61",
+                "handler": "LogicalClientChange",
+                "data": [
+                  {
+                    "handlerType": "DN.LogicalClientChangeHandler",
+                    "parameters": [
+                      "392",
+                      [
+                        {
+                          "t": "PropertyChanges",
+                          "ControlReference": {
+                            "controlPath": "server:",
+                            "formId": "389"
+                          },
+                          "Changes": {
+                            "PendingBackgroundTasks": []
+                          }
+                        }
+                      ]
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "dir": "recv",
+          "opcode": 1,
+          "len": 778,
+          "preview": "{\"jsonrpc\":\"2.0\",\"result\":[{\"handlerType\":\"DN.CallbackResponseProperties\",\"parameters\":[{\"SequenceNumber\":6,\"CompletedInteractions\":[{\"InvocationId\":\"6\",\"Duration\":8},{\"InvocationId\":\"7\",\"Duration\":0},{\"InvocationId\":\"8\",\"Duration\":4}]}]},{\"handlerType\":\"DN.LogicalClientChangeHandler\",\"parameters\":[\"392\",[{\"t\":\"PropertyChanges\",\"ControlReference\":{\"controlPath\":\"server:\",\"formId\":\"389\"},\"Changes\":{\"PendingUpdates\":1}},{\"t\":\"ExtensionObjectMethodInvokedChange\",\"ObjectReference\":{\"Id\":\"-2147483645\"},\"Context\":{},\"MethodName\":\"StartUserTour\",\"Arguments\":[{\"TypeName\":null,\"Value\":\"199410\"}]},{\"t\":...<+172 chars>"
+        },
+        {
+          "dir": "recv",
+          "opcode": 1,
+          "len": 349,
+          "preview": {
+            "jsonrpc": "2.0",
+            "method": "Message",
+            "params": [
+              {
+                "sequenceNumber": 7,
+                "telemetryTraceId": "7ed4f8cc58f9453fb6cfaa98ebea9f61",
+                "handler": "LogicalClientChange",
+                "data": [
+                  {
+                    "handlerType": "DN.LogicalClientChangeHandler",
+                    "parameters": [
+                      "392",
+                      [
+                        {
+                          "t": "PropertyChanges",
+                          "ControlReference": {
+                            "controlPath": "server:",
+                            "formId": "389"
+                          },
+                          "Changes": {
+                            "PendingUpdates": 0
+                          }
+                        }
+                      ]
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "dir": "recv",
+          "opcode": 1,
+          "len": 1427,
+          "preview": "{\"jsonrpc\":\"2.0\",\"method\":\"Message\",\"params\":[{\"sequenceNumber\":8,\"telemetryTraceId\":\"7ed4f8cc58f9453fb6cfaa98ebea9f61\",\"handler\":\"LogicalClientChange\",\"data\":[{\"handlerType\":\"DN.LogicalClientChangeHandler\",\"parameters\":[\"392\",[{\"t\":\"PropertyChanges\",\"ControlReference\":{\"controlPath\":\"server:\",\"formId\":\"38A\"},\"Changes\":{\"AppId\":\"437dbf0e-84ff-417a-965d-ed2bb9650972\",\"AppName\":\"Base Application\",\"AppPublisher\":\"Microsoft\",\"AppVersion\":\"28.3.52162.52931\",\"PendingUpdates\":0,\"HasFiltersApplied\":true,\"Bookmark\":\"10_UXnivWoEp0CwlDKrfPrm6g\",\"ServerFormHandle\":\"bde27951-046a-40a7-b094-32ab7cfae6ea\"}},...<+827 chars>"
+        },
+        {
+          "dir": "sent",
+          "opcode": 1,
+          "len": 917,
+          "preview": "{\"jsonrpc\":\"2.0\",\"id\":\"|7c2ae6873c204149814a637a333244f0.6d1a0a4cf747457b\",\"method\":\"Invoke\",\"params\":[{\"openFormIds\":[\"392\"],\"sessionId\":\"MSWEUA3554T30793230CRONUS ESSR63921772971360178534FIN\",\"sequenceNo\":\"msk36adr#5\",\"lastClientAckSequenceNumber\":8,\"telemetryClientActivityId\":null,\"telemetryTraceStartInfo\":\"traceStartInfo=%5BWeb%20Client%20-%20Web%20browser%5D%20LoadForm\",\"navigationContext\":{\"applicationId\":\"FIN\",\"deviceCategory\":0,\"spaInstanceId\":\"msk36adr\"},\"supportedExtensions\":null,\"interactionsToInvoke\":[{\"interactionName\":\"LoadForm\",\"skipExtendingSessionLifetime\":false,\"namedParamete...<+317 chars>"
+        },
+        {
+          "dir": "recv",
+          "opcode": 1,
+          "len": 418,
+          "preview": {
+            "jsonrpc": "2.0",
+            "result": [
+              {
+                "handlerType": "DN.CallbackResponseProperties",
+                "parameters": [
+                  {
+                    "SequenceNumber": 9,
+                    "CompletedInteractions": [
+                      {
+                        "InvocationId": "9",
+                        "Duration": 0
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "handlerType": "DN.LogicalClientChangeHandler",
+                "parameters": [
+                  "392",
+                  [
+                    {
+                      "t": "PropertyChanges",
+                      "ControlReference": {
+                        "controlPath": "server:",
+                        "formId": "38B"
+                      },
+                      "Changes": {
+                        "PendingUpdates": 1
+                      }
+                    }
+                  ]
+                ]
+              }
+            ],
+            "id": "|7c2ae6873c204149814a637a333244f0.6d1a0a4cf747457b"
+          }
+        },
+        {
+          "dir": "recv",
+          "opcode": 1,
+          "len": 1101,
+          "preview": "{\"jsonrpc\":\"2.0\",\"method\":\"Message\",\"params\":[{\"sequenceNumber\":10,\"telemetryTraceId\":\"7c2ae6873c204149814a637a333244f0\",\"handler\":\"LogicalClientChange\",\"data\":[{\"handlerType\":\"DN.LogicalClientChangeHandler\",\"parameters\":[\"392\",[{\"t\":\"PropertyChanges\",\"ControlReference\":{\"controlPath\":\"server:\",\"formId\":\"38B\"},\"Changes\":{\"AppId\":\"e1d97edc-c239-46b4-8d84-6368bdf67c8b\",\"AppName\":\"E-Document Core\",\"AppPublisher\":\"Microsoft\",\"AppVersion\":\"28.3.52162.52328\",\"PendingUpdates\":0,\"HasFiltersApplied\":true,\"Bookmark\":\"10_4N5LXyJtS0u4h4EonQbw-Q\",\"ServerFormHandle\":\"5f4bdee0-6d22-4b4b-b887-81289d06f0f9\"}},...<+501 chars>"
+        },
+        {
+          "dir": "sent",
+          "opcode": 1,
+          "len": 918,
+          "preview": "{\"jsonrpc\":\"2.0\",\"id\":\"|cb55fc2c755241589bdc3e49b05918ab.7dee537395424356\",\"method\":\"Invoke\",\"params\":[{\"openFormIds\":[\"392\"],\"sessionId\":\"MSWEUA3554T30793230CRONUS ESSR63921772971360178534FIN\",\"sequenceNo\":\"msk36adr#6\",\"lastClientAckSequenceNumber\":10,\"telemetryClientActivityId\":null,\"telemetryTraceStartInfo\":\"traceStartInfo=%5BWeb%20Client%20-%20Web%20browser%5D%20LoadForm\",\"navigationContext\":{\"applicationId\":\"FIN\",\"deviceCategory\":0,\"spaInstanceId\":\"msk36adr\"},\"supportedExtensions\":null,\"interactionsToInvoke\":[{\"interactionName\":\"LoadForm\",\"skipExtendingSessionLifetime\":false,\"namedParamet...<+318 chars>"
+        },
+        {
+          "dir": "recv",
+          "opcode": 1,
+          "len": 419,
+          "preview": {
+            "jsonrpc": "2.0",
+            "result": [
+              {
+                "handlerType": "DN.CallbackResponseProperties",
+                "parameters": [
+                  {
+                    "SequenceNumber": 11,
+                    "CompletedInteractions": [
+                      {
+                        "InvocationId": "a",
+                        "Duration": 0
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "handlerType": "DN.LogicalClientChangeHandler",
+                "parameters": [
+                  "392",
+                  [
+                    {
+                      "t": "PropertyChanges",
+                      "ControlReference": {
+                        "controlPath": "server:",
+                        "formId": "38C"
+                      },
+                      "Changes": {
+                        "PendingUpdates": 1
+                      }
+                    }
+                  ]
+                ]
+              }
+            ],
+            "id": "|cb55fc2c755241589bdc3e49b05918ab.7dee537395424356"
+          }
+        },
+        {
+          "dir": "recv",
+          "opcode": 1,
+          "len": 1269,
+          "preview": "{\"jsonrpc\":\"2.0\",\"method\":\"Message\",\"params\":[{\"sequenceNumber\":12,\"telemetryTraceId\":\"cb55fc2c755241589bdc3e49b05918ab\",\"handler\":\"LogicalClientChange\",\"data\":[{\"handlerType\":\"DN.LogicalClientChangeHandler\",\"parameters\":[\"392\",[{\"t\":\"PropertyChanges\",\"ControlReference\":{\"controlPath\":\"server:\",\"formId\":\"38C\"},\"Changes\":{\"AppId\":\"437dbf0e-84ff-417a-965d-ed2bb9650972\",\"AppName\":\"Base Application\",\"AppPublisher\":\"Microsoft\",\"AppVersion\":\"28.3.52162.52931\",\"PendingUpdates\":0,\"HasFiltersApplied\":true,\"Bookmark\":\"10_Seos0HQtpU6Bq3fiZgeHzg\",\"ServerFormHandle\":\"d02cea49-2d74-4ea5-81ab-77e2660787ce\"}}...<+669 chars>"
+        },
+        {
+          "dir": "sent",
+          "opcode": 1,
+          "len": 918,
+          "preview": "{\"jsonrpc\":\"2.0\",\"id\":\"|1bcf4d44e5f34968b6c503dfd4a7b786.8f56fb55105d4c70\",\"method\":\"Invoke\",\"params\":[{\"openFormIds\":[\"392\"],\"sessionId\":\"MSWEUA3554T30793230CRONUS ESSR63921772971360178534FIN\",\"sequenceNo\":\"msk36adr#7\",\"lastClientAckSequenceNumber\":12,\"telemetryClientActivityId\":null,\"telemetryTraceStartInfo\":\"traceStartInfo=%5BWeb%20Client%20-%20Web%20browser%5D%20LoadForm\",\"navigationContext\":{\"applicationId\":\"FIN\",\"deviceCategory\":0,\"spaInstanceId\":\"msk36adr\"},\"supportedExtensions\":null,\"interactionsToInvoke\":[{\"interactionName\":\"LoadForm\",\"skipExtendingSessionLifetime\":false,\"namedParamet...<+318 chars>"
+        },
+        {
+          "dir": "recv",
+          "opcode": 1,
+          "len": 419,
+          "preview": {
+            "jsonrpc": "2.0",
+            "result": [
+              {
+                "handlerType": "DN.CallbackResponseProperties",
+                "parameters": [
+                  {
+                    "SequenceNumber": 13,
+                    "CompletedInteractions": [
+                      {
+                        "InvocationId": "b",
+                        "Duration": 0
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "handlerType": "DN.LogicalClientChangeHandler",
+                "parameters": [
+                  "392",
+                  [
+                    {
+                      "t": "PropertyChanges",
+                      "ControlReference": {
+                        "controlPath": "server:",
+                        "formId": "38D"
+                      },
+                      "Changes": {
+                        "PendingUpdates": 1
+                      }
+                    }
+                  ]
+                ]
+              }
+            ],
+            "id": "|1bcf4d44e5f34968b6c503dfd4a7b786.8f56fb55105d4c70"
+          }
+        },
+        {
+          "dir": "recv",
+          "opcode": 1,
+          "len": 2125,
+          "preview": "{\"jsonrpc\":\"2.0\",\"method\":\"Message\",\"params\":[{\"sequenceNumber\":14,\"telemetryTraceId\":\"1bcf4d44e5f34968b6c503dfd4a7b786\",\"handler\":\"LogicalClientChange\",\"data\":[{\"handlerType\":\"DN.LogicalClientChangeHandler\",\"parameters\":[\"392\",[{\"t\":\"PropertyChanges\",\"ControlReference\":{\"controlPath\":\"server:\",\"formId\":\"38D\"},\"Changes\":{\"AppId\":\"ec255f57-31d0-4ca2-b751-f2fa7c745abb\",\"AppName\":\"Shopify Connector\",\"AppPublisher\":\"Microsoft\",\"AppVersion\":\"28.3.52162.52273\",\"PendingUpdates\":0,\"HasFiltersApplied\":true,\"Bookmark\":\"B_lHUAAAJ7\",\"SystemId\":\"85c72407-4b8b-f111-8072-7ced8d760719\",\"ServerFormHandle\":\"537...<+1525 chars>"
+        },
+        {
+          "dir": "sent",
+          "opcode": 1,
+          "len": 918,
+          "preview": "{\"jsonrpc\":\"2.0\",\"id\":\"|40c5e626c8c8484e919770b6dab07de4.5ac98beea9f34106\",\"method\":\"Invoke\",\"params\":[{\"openFormIds\":[\"392\"],\"sessionId\":\"MSWEUA3554T30793230CRONUS ESSR63921772971360178534FIN\",\"sequenceNo\":\"msk36adr#8\",\"lastClientAckSequenceNumber\":14,\"telemetryClientActivityId\":null,\"telemetryTraceStartInfo\":\"traceStartInfo=%5BWeb%20Client%20-%20Web%20browser%5D%20LoadForm\",\"navigationContext\":{\"applicationId\":\"FIN\",\"deviceCategory\":0,\"spaInstanceId\":\"msk36adr\"},\"supportedExtensions\":null,\"interactionsToInvoke\":[{\"interactionName\":\"LoadForm\",\"skipExtendingSessionLifetime\":false,\"namedParamet...<+318 chars>"
+        },
+        {
+          "dir": "recv",
+          "opcode": 1,
+          "len": 419,
+          "preview": {
+            "jsonrpc": "2.0",
+            "result": [
+              {
+                "handlerType": "DN.CallbackResponseProperties",
+                "parameters": [
+                  {
+                    "SequenceNumber": 15,
+                    "CompletedInteractions": [
+                      {
+                        "InvocationId": "c",
+                        "Duration": 0
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "handlerType": "DN.LogicalClientChangeHandler",
+                "parameters": [
+                  "392",
+                  [
+                    {
+                      "t": "PropertyChanges",
+                      "ControlReference": {
+                        "controlPath": "server:",
+                        "formId": "38E"
+                      },
+                      "Changes": {
+                        "PendingUpdates": 1
+                      }
+                    }
+                  ]
+                ]
+              }
+            ],
+            "id": "|40c5e626c8c8484e919770b6dab07de4.5ac98beea9f34106"
+          }
+        },
+        {
+          "dir": "recv",
+          "opcode": 1,
+          "len": 2417,
+          "preview": "{\"jsonrpc\":\"2.0\",\"method\":\"Message\",\"params\":[{\"sequenceNumber\":16,\"telemetryTraceId\":\"40c5e626c8c8484e919770b6dab07de4\",\"handler\":\"LogicalClientChange\",\"data\":[{\"handlerType\":\"DN.LogicalClientChangeHandler\",\"parameters\":[\"392\",[{\"t\":\"PropertyChanges\",\"ControlReference\":{\"controlPath\":\"server:\",\"formId\":\"38E\"},\"Changes\":{\"AppId\":\"437dbf0e-84ff-417a-965d-ed2bb9650972\",\"AppName\":\"Base Application\",\"AppPublisher\":\"Microsoft\",\"AppVersion\":\"28.3.52162.52931\",\"PendingUpdates\":0,\"HasFiltersApplied\":true,\"Bookmark\":\"10_wqxu0BjuHkqKmctEhso9SQ\",\"ServerFormHandle\":\"d06eacc2-ee18-4a1e-8a99-cb4486ca3d49\"}}...<+1817 chars>"
+        },
+        {
+          "dir": "sent",
+          "opcode": 1,
+          "len": 972,
+          "preview": "{\"jsonrpc\":\"2.0\",\"id\":\"|040cfdf731e24bc09d49447f189e199f.48d15618624c4141\",\"method\":\"Invoke\",\"params\":[{\"openFormIds\":[\"392\"],\"sessionId\":\"MSWEUA3554T30793230CRONUS ESSR63921772971360178534FIN\",\"sequenceNo\":\"msk36adr#9\",\"lastClientAckSequenceNumber\":16,\"telemetryClientActivityId\":null,\"telemetryTraceStartInfo\":\"traceStartInfo=%5BWeb%20Client%20-%20Web%20browser%5D%20InvokeExtensibilityMethod\",\"navigationContext\":{\"applicationId\":\"FIN\",\"deviceCategory\":0,\"spaInstanceId\":\"msk36adr\"},\"supportedExtensions\":null,\"interactionsToInvoke\":[{\"interactionName\":\"InvokeExtensibilityMethod\",\"skipExtendingSe...<+372 chars>"
+        },
+        {
+          "dir": "recv",
+          "opcode": 1,
+          "len": 5956,
+          "preview": "{\"jsonrpc\":\"2.0\",\"result\":[{\"handlerType\":\"DN.CallbackResponseProperties\",\"parameters\":[{\"SequenceNumber\":17,\"CompletedInteractions\":[{\"InvocationId\":\"d\",\"Duration\":47}]}]},{\"handlerType\":\"DN.LogicalClientChangeHandler\",\"parameters\":[\"392\",[{\"t\":\"MethodInvoked\",\"ControlReference\":{\"controlPath\":\"server:c[1]\",\"formId\":\"38E\"},\"MethodName\":\"Update\",\"Arguments\":[{\"TypeName\":null,\"Value\":\"{\\\"Resources\\\":{\\\"MonthNames\\\":[\\\"enero\\\",\\\"febrero\\\",\\\"marzo\\\",\\\"abril\\\",\\\"mayo\\\",\\\"junio\\\",\\\"julio\\\",\\\"agosto\\\",\\\"septiembre\\\",\\\"octubre\\\",\\\"noviembre\\\",\\\"diciembre\\\"],\\\"ShortMonthNames\\\":[\\\"ene.\\\",\\\"feb.\\\",\\\"ma...<+5354 chars>"
+        }
+      ]
+    }
+  ],
+  "oidcRedirectChain": [
+    {
+      "method": "GET",
+      "url": "https://businesscentral.dynamics.com/2c43eb40-4e62-4039-8a43-8a75f7323032/Dev",
+      "type": "Document"
+    },
+    {
+      "method": "GET",
+      "url": "https://login.microsoftonline.com/2c43eb40-4e62-4039-8a43-8a75f7323032/oauth2/authorize?client_id=996def3d-b36c-4153-8607-a6fd3c01b89f&redirect_uri=https%3A%2F%2Fbusinesscentral.dynamics.com%2Fremote-sign-in&response_type=code&scope=openid%20profile&response_mode=form_post&nonce=639217728997624870.MDMxZTc1NTYtNWM3OS00Yzg0LWFiYjktN2YxYzNhZjRhYzMxOWE3ZWVhZGQtOTZlZS00ZjU1LWFiMGEtZDdhNDAxZmQwMGIy&nux=1&msafed=0&state=CfDJ8JujBjDGcw1Bn21IVtoHrxFgiQB2iDcT0TPMMbEKjnOkKLesAfxkN_ktVHnVgSDDQCi4HXWIIEXLqQn_8ibb7lsB4VgHjtHt3pDwZk3KyneD0T2hqujQ68ediUsIh1ggUMYCFO7CCS8cUxnQePsvcFP_4d39iA2gbvswPExM_wV515bNmGMNksU361pKal39UsKnsNI6nFuvxfPbSIwH0p-x51MENckt9gD3uXWa_S5ixH0c75YBYrFAfljS16tsz0h1e1oJ9QE8FRDs0Ml6L8j_w8ixAqB5zbhFsXc9rm4CjF3DgMmM7mbvZIN29Wrf8YKXqsv3VM0F3NZGwf5tie_mmwbbUSjkc7K8HdHBeIkkpyr2odRfAlyEvEPSjISrLhwGu2CeBsihf_QUMGNngKO0moTXu1igBrTdAXztXadGOkg55GzJApZ0oc7U7D-o0Dvp1QW4dVWTdx4okHwnYQBW_NC2ZylB-9JqcdGGa1nxHZOg415UMCGKod5KC91gd1pIeH8MJut0qevUXHVLGNN2Xzp2i4nBICMtLb95mgYD&x-client-SKU=ID_NET8_0&x-client-ver=8.14.0.0",
+      "type": "Document",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "url": "https://login.microsoftonline.com/2c43eb40-4e62-4039-8a43-8a75f7323032/oauth2/authorize?client_id=996def3d-b36c-4153-8607-a6fd3c01b89f&redirect_uri=https%3A%2F%2Fbusinesscentral.dynamics.com%2Fremote-sign-in&response_type=code&scope=openid%20profile&response_mode=form_post&nonce=639217728997624870.MDMxZTc1NTYtNWM3OS00Yzg0LWFiYjktN2YxYzNhZjRhYzMxOWE3ZWVhZGQtOTZlZS00ZjU1LWFiMGEtZDdhNDAxZmQwMGIy&nux=1&msafed=0&state=CfDJ8JujBjDGcw1Bn21IVtoHrxFgiQB2iDcT0TPMMbEKjnOkKLesAfxkN_ktVHnVgSDDQCi4HXWIIEXLqQn_8ibb7lsB4VgHjtHt3pDwZk3KyneD0T2hqujQ68ediUsIh1ggUMYCFO7CCS8cUxnQePsvcFP_4d39iA2gbvswPExM_wV515bNmGMNksU361pKal39UsKnsNI6nFuvxfPbSIwH0p-x51MENckt9gD3uXWa_S5ixH0c75YBYrFAfljS16tsz0h1e1oJ9QE8FRDs0Ml6L8j_w8ixAqB5zbhFsXc9rm4CjF3DgMmM7mbvZIN29Wrf8YKXqsv3VM0F3NZGwf5tie_mmwbbUSjkc7K8HdHBeIkkpyr2odRfAlyEvEPSjISrLhwGu2CeBsihf_QUMGNngKO0moTXu1igBrTdAXztXadGOkg55GzJApZ0oc7U7D-o0Dvp1QW4dVWTdx4okHwnYQBW_NC2ZylB-9JqcdGGa1nxHZOg415UMCGKod5KC91gd1pIeH8MJut0qevUXHVLGNN2Xzp2i4nBICMtLb95mgYD&x-client-SKU=ID_NET8_0&x-client-ver=8.14.0.0&sso_reload=true",
+      "type": "Document",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "url": "https://login.microsoftonline.com/2c43eb40-4e62-4039-8a43-8a75f7323032/login",
+      "type": "Document",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "url": "https://login.microsoftonline.com/common/SAS/ProcessAuth",
+      "type": "Document",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "url": "https://login.microsoftonline.com/kmsi",
+      "type": "Document",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "url": "https://businesscentral.dynamics.com/remote-sign-in",
+      "type": "Document"
+    },
+    {
+      "method": "GET",
+      "url": "https://businesscentral.dynamics.com/2c43eb40-4e62-4039-8a43-8a75f7323032/Dev",
+      "type": "Document",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "url": "https://businesscentral.dynamics.com/2c43eb40-4e62-4039-8a43-8a75f7323032/Dev?aadTenantId=2c43eb40-4e62-4039-8a43-8a75f7323032&startTraceId=0a1811c00ec14d5d9d7123669792cf7f&tid=9aca0bae-91fd-472f-8e49-43415d0d09e0&runinframe=1",
+      "type": "Document",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "url": "https://webshell.suite.office.com/iframe/TokenFactoryIframe?origin=https%3A%2F%2Fbusinesscentral.dynamics.com&shsid=afdf2bbb-b2d7-4d2e-8704-5cc3dc8c01e7&apiver=oneshell&cshver=1.20260802.6.0&upn=esanpons%40tkdbg.onmicrosoft.com",
+      "type": "Document",
+      "status": 200
+    }
+  ],
+  "cookies": {
+    "bc": [
+      {
+        "name": "NAVAllowedAncestor",
+        "value": "https%...<redacted 42 chars>",
+        "domain": "msweuweuas4242-7uyvs76.appservices.weu.businesscentral.dynamics.com",
+        "path": "/tenant/msweua3554t30793230/tab/23ff22ab-f996-4144-82c2-659b374bbe3e",
+        "expires": -1,
+        "size": 60,
+        "httpOnly": true,
+        "secure": true,
+        "session": true,
+        "sameSite": "None",
+        "priority": "Medium",
+        "sourceScheme": "Secure",
+        "sourcePort": 443
+      },
+      {
+        "name": "SessionId",
+        "value": "ixscn4...<redacted 24 chars>",
+        "domain": "msweuweuas4242-7uyvs76.appservices.weu.businesscentral.dynamics.com",
+        "path": "/tenant/msweua3554t30793230/tab/23ff22ab-f996-4144-82c2-659b374bbe3e",
+        "expires": -1,
+        "size": 33,
+        "httpOnly": true,
+        "secure": true,
+        "session": true,
+        "sameSite": "None",
+        "priority": "Medium",
+        "sourceScheme": "Secure",
+        "sourcePort": 443
+      },
+      {
+        "name": ".AspNetCore.Antiforgery.47DEQpj8HBQ",
+        "value": "CfDJ8M...<redacted 155 chars>",
+        "domain": "msweuweuas4242-7uyvs76.appservices.weu.businesscentral.dynamics.com",
+        "path": "/tenant/msweua3554t30793230/tab/23ff22ab-f996-4144-82c2-659b374bbe3e",
+        "expires": -1,
+        "size": 190,
+        "httpOnly": true,
+        "secure": true,
+        "session": true,
+        "sameSite": "None",
+        "priority": "Medium",
+        "sourceScheme": "Secure",
+        "sourcePort": 443
+      },
+      {
+        "name": ".AspNetCore.Cookies",
+        "value": "CfDJ8M...<redacted 304 chars>",
+        "domain": "msweuweuas4242-7uyvs76.appservices.weu.businesscentral.dynamics.com",
+        "path": "/tenant/msweua3554t30793230/tab/23ff22ab-f996-4144-82c2-659b374bbe3e",
+        "expires": -1,
+        "size": 323,
+        "httpOnly": true,
+        "secure": true,
+        "session": true,
+        "sameSite": "None",
+        "priority": "Medium",
+        "sourceScheme": "Secure",
+        "sourcePort": 443
+      },
+      {
+        "name": "ApplicationGatewayAffinity",
+        "value": "Woi1Em...<redacted 28 chars>",
+        "domain": "msweuweuas4242-7uyvs76.appservices.weu.businesscentral.dynamics.com",
+        "path": "/tenant/msweua3554t30793230/tab/23ff22ab-f996-4144-82c2-659b374bbe3e",
+        "expires": -1,
+        "size": 54,
+        "httpOnly": true,
+        "secure": true,
+        "session": true,
+        "sameSite": "None",
+        "priority": "Medium",
+        "sourceScheme": "Secure",
+        "sourcePort": 443
+      },
+      {
+        "name": "2c43eb40-4e62-4039-8a43-8a75f7323032.Antiforgery.FCE",
+        "value": "CfDJ8J...<redacted 155 chars>",
+        "domain": "businesscentral.dynamics.com",
+        "path": "/2c43eb40-4e62-4039-8a43-8a75f7323032",
+        "expires": -1,
+        "size": 207,
+        "httpOnly": true,
+        "secure": true,
+        "session": true,
+        "priority": "Medium",
+        "sourceScheme": "Secure",
+        "sourcePort": 443,
+        "partitionKey": {
+          "topLevelSite": "https://dynamics.com",
+          "hasCrossSiteAncestor": false
+        }
+      },
+      {
+        "name": "2c43eb40-4e62-4039-8a43-8a75f7323032.auth",
+        "value": "CfDJ8J...<redacted 304 chars>",
+        "domain": "businesscentral.dynamics.com",
+        "path": "/2c43eb40-4e62-4039-8a43-8a75f7323032",
+        "expires": -1,
+        "size": 345,
+        "httpOnly": true,
+        "secure": true,
+        "session": true,
+        "sameSite": "None",
+        "priority": "Medium",
+        "sourceScheme": "Secure",
+        "sourcePort": 443,
+        "partitionKey": {
+          "topLevelSite": "https://dynamics.com",
+          "hasCrossSiteAncestor": false
+        }
+      },
+      {
+        "name": ".AspNetCore.OpenIdConnect.Nonce.CfDJ8JujBjDGcw1Bn21IVtoHrxFbdFPoPc2dPfVHcUiotpZYeFjvGGiIfFMu8eYRqAw5Tey7SN1HUFYTFF5MjXK8xAEHidOFqdTKy9sfUIfnfstslU4n9YN1INzPtfHAb1ruQsULWVa3ymKoBNjt0iMO856bE5kADHJje96MXutAMfxDDLRlK6Xpn5L-m8bN5NHbftn9rVNz3Jc6o7To8jGonyd09l4dqRmuk6cNX6w9Ai_3SIoJ_PTkt4IX96xboT8S2knp8yAmtWyOX4P8An5Msec",
+        "value": "***",
+        "domain": "businesscentral.dynamics.com",
+        "path": "/remote-sign-in",
+        "expires": 1786176999.901417,
+        "size": 316,
+        "httpOnly": true,
+        "secure": true,
+        "session": false,
+        "sameSite": "None",
+        "priority": "Medium",
+        "sourceScheme": "Secure",
+        "sourcePort": 443,
+        "partitionKey": {
+          "topLevelSite": "https://dynamics.com",
+          "hasCrossSiteAncestor": false
+        }
+      },
+      {
+        "name": ".AspNetCore.Correlation.6jMP8SOoBPOo2nkxtWBWrhCuq1Nr1jSla7WO0RcrQaE",
+        "value": "***",
+        "domain": "businesscentral.dynamics.com",
+        "path": "/remote-sign-in",
+        "expires": 1786176999.901521,
+        "size": 68,
+        "httpOnly": true,
+        "secure": true,
+        "session": false,
+        "sameSite": "None",
+        "priority": "Medium",
+        "sourceScheme": "Secure",
+        "sourcePort": 443,
+        "partitionKey": {
+          "topLevelSite": "https://dynamics.com",
+          "hasCrossSiteAncestor": false
+        }
+      },
+      {
+        "name": "ASLBSA",
+        "value": "00033f...<redacted 68 chars>",
+        "domain": "businesscentral.dynamics.com",
+        "path": "/",
+        "expires": -1,
+        "size": 74,
+        "httpOnly": true,
+        "secure": true,
+        "session": true,
+        "priority": "Medium",
+        "sourceScheme": "Secure",
+        "sourcePort": 443
+      },
+      {
+        "name": "ASLBSACORS",
+        "value": "00033f...<redacted 68 chars>",
+        "domain": "businesscentral.dynamics.com",
+        "path": "/",
+        "expires": -1,
+        "size": 78,
+        "httpOnly": true,
+        "secure": true,
+        "session": true,
+        "sameSite": "None",
+        "priority": "Medium",
+        "sourceScheme": "Secure",
+        "sourcePort": 443
+      },
+      {
+        "name": "signedOnTenants",
+        "value": "2c43eb...<redacted 205 chars>",
+        "domain": "businesscentral.dynamics.com",
+        "path": "/",
+        "expires": 1817712170.054426,
+        "size": 220,
+        "httpOnly": true,
+        "secure": true,
+        "session": false,
+        "sameSite": "None",
+        "priority": "Medium",
+        "sourceScheme": "Secure",
+        "sourcePort": 443,
+        "partitionKey": {
+          "topLevelSite": "https://dynamics.com",
+          "hasCrossSiteAncestor": false
+        }
+      },
+      {
+        "name": "UserSignedUp",
+        "value": "***",
+        "domain": "businesscentral.dynamics.com",
+        "path": "/",
+        "expires": 1817712170.054637,
+        "size": 13,
+        "httpOnly": true,
+        "secure": true,
+        "session": false,
+        "sameSite": "None",
+        "priority": "Medium",
+        "sourceScheme": "Secure",
+        "sourcePort": 443,
+        "partitionKey": {
+          "topLevelSite": "https://dynamics.com",
+          "hasCrossSiteAncestor": false
+        }
+      }
+    ],
+    "entra": [
+      {
+        "name": "esctx-ShCkGfjJks",
+        "domain": ".login.microsoftonline.com",
+        "path": "/",
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "None"
+      },
+      {
+        "name": "x-ms-gateway-slice",
+        "domain": "login.microsoftonline.com",
+        "path": "/",
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "None"
+      },
+      {
+        "name": "stsservicecookie",
+        "domain": "login.microsoftonline.com",
+        "path": "/",
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "None"
+      },
+      {
+        "name": "AADSSO",
+        "domain": ".login.microsoftonline.com",
+        "path": "/",
+        "secure": true,
+        "httpOnly": false,
+        "sameSite": "None"
+      },
+      {
+        "name": "esctx-KqmuYd9BI9I",
+        "domain": ".login.microsoftonline.com",
+        "path": "/",
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "None"
+      },
+      {
+        "name": "brcap",
+        "domain": ".login.microsoftonline.com",
+        "path": "/",
+        "secure": true,
+        "httpOnly": false,
+        "sameSite": "None"
+      },
+      {
+        "name": "wlidperf",
+        "domain": ".microsoftonline.com",
+        "path": "/",
+        "secure": true,
+        "httpOnly": false,
+        "sameSite": "None"
+      },
+      {
+        "name": "ESTSAUTHLIGHT",
+        "domain": "login.microsoftonline.com",
+        "path": "/",
+        "secure": true,
+        "httpOnly": false,
+        "sameSite": "None"
+      },
+      {
+        "name": "esctx-EIeuGShERI",
+        "domain": ".login.microsoftonline.com",
+        "path": "/",
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "None"
+      },
+      {
+        "name": "esctx",
+        "domain": ".login.microsoftonline.com",
+        "path": "/",
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "None"
+      },
+      {
+        "name": "esctx-rcypibc9XY",
+        "domain": ".login.microsoftonline.com",
+        "path": "/",
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "None"
+      },
+      {
+        "name": "CCState",
+        "domain": ".login.microsoftonline.com",
+        "path": "/",
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "None"
+      },
+      {
+        "name": "MC1",
+        "domain": ".microsoft.com",
+        "path": "/",
+        "secure": true,
+        "httpOnly": false,
+        "sameSite": "None"
+      },
+      {
+        "name": "MS0",
+        "domain": ".microsoft.com",
+        "path": "/",
+        "secure": true,
+        "httpOnly": false,
+        "sameSite": "None"
+      },
+      {
+        "name": "ESTSAUTH",
+        "domain": ".login.microsoftonline.com",
+        "path": "/",
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "None"
+      },
+      {
+        "name": "ESTSAUTHPERSISTENT",
+        "domain": ".login.microsoftonline.com",
+        "path": "/",
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "None"
+      },
+      {
+        "name": "buid",
+        "domain": "login.microsoftonline.com",
+        "path": "/",
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "None"
+      },
+      {
+        "name": "SignInStateCookie",
+        "domain": ".login.microsoftonline.com",
+        "path": "/",
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "None"
+      },
+      {
+        "name": "fpc",
+        "domain": "login.microsoftonline.com",
+        "path": "/",
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "None"
+      }
+    ]
+  }
+}

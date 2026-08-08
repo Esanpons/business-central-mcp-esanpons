@@ -1,5 +1,9 @@
+export type BCAuthMode = 'UserPassword' | 'AAD';
+
 export interface BCConfig {
   baseUrl: string;
+  /** Auth mode: `UserPassword` = on-prem forms /SignIn (default); `AAD` = BC Online via Entra browser login. */
+  authMode: BCAuthMode;
   username: string;
   password: string;
   tenantId: string;
@@ -11,6 +15,12 @@ export interface BCConfig {
   invokeTimeoutMs: number;
   reconnectMaxRetries: number;
   reconnectBaseDelayMs: number;
+  /** AAD only: persistent browser-profile dir holding the Entra SSO session. */
+  aadProfileDir: string;
+  /** AAD only: base32 TOTP secret for unattended MFA (empty = interactive bootstrap). */
+  aadTotpSecret: string;
+  /** AAD only: ms budget for the OIDC login dance. */
+  aadLoginTimeoutMs: number;
 }
 
 export interface LoggingConfig {
@@ -76,20 +86,34 @@ export function loadConfig(): AppConfig {
     throw new Error('API_TOKEN is required when BIND_ADDRESS is non-loopback');
   }
 
+  const authMode = optionalEnv('BC_AUTH', 'UserPassword');
+  if (authMode !== 'UserPassword' && authMode !== 'AAD') {
+    throw new Error(`BC_AUTH must be "UserPassword" or "AAD", got: ${authMode}`);
+  }
+
   return {
     bc: {
       baseUrl: requireEnv('BC_BASE_URL').replace(/\/+$/, ''),
-      username: requireEnv('BC_USERNAME'),
-      password: requireEnv('BC_PASSWORD'),
+      authMode,
+      // Credentials are mandatory only for the forms login. In AAD mode they are
+      // optional (headless Entra login); without them the AAD provider falls back
+      // to the persisted browser profile bootstrapped via `npm run login:aad`.
+      username: authMode === 'UserPassword' ? requireEnv('BC_USERNAME') : optionalEnv('BC_USERNAME', ''),
+      password: authMode === 'UserPassword' ? requireEnv('BC_PASSWORD') : optionalEnv('BC_PASSWORD', ''),
       tenantId: optionalEnv('BC_TENANT_ID', 'default'),
       profile: optionalEnv('BC_PROFILE', ''),
       clientVersionString: optionalEnv('BC_CLIENT_VERSION', '27.0.0.0'),
       serverMajor: optionalEnvInt('BC_SERVER_MAJOR', 27),
-      applicationId: optionalEnv('BC_APPLICATION_ID', 'NAV'),
+      // OpenSession applicationId. On-prem BC 27 expects NAV; BC Online (SaaS) sends
+      // FIN (confirmed by the F2 spike). Explicit BC_APPLICATION_ID always wins.
+      applicationId: optionalEnv('BC_APPLICATION_ID', authMode === 'AAD' ? 'FIN' : 'NAV'),
       timeoutMs: optionalEnvInt('BC_TIMEOUT', 120000, { min: 1 }),
       invokeTimeoutMs: optionalEnvInt('BC_INVOKE_TIMEOUT', 30000, { min: 1 }),
       reconnectMaxRetries: optionalEnvInt('BC_RECONNECT_MAX_RETRIES', 6, { min: 0 }),
       reconnectBaseDelayMs: optionalEnvInt('BC_RECONNECT_BASE_DELAY', 2000, { min: 1 }),
+      aadProfileDir: optionalEnv('BC_AAD_PROFILE_DIR', './.state/aad-profile'),
+      aadTotpSecret: optionalEnv('BC_AAD_TOTP_SECRET', ''),
+      aadLoginTimeoutMs: optionalEnvInt('BC_AAD_LOGIN_TIMEOUT', 120000, { min: 1 }),
     },
     logging: {
       level: optionalEnv('LOG_LEVEL', 'info'),

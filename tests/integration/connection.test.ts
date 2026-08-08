@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { config as dotenvConfig } from 'dotenv';
 import { loadConfig } from '../../src/core/config.js';
 import { createNullLogger } from '../../src/core/logger.js';
-import { NTLMAuthProvider } from '../../src/connection/auth/ntlm-provider.js';
+import { FormsAuthProvider } from '../../src/connection/auth/forms-provider.js';
 import { ConnectionFactory } from '../../src/connection/connection-factory.js';
 import { isOk } from '../../src/core/result.js';
 
@@ -14,7 +14,7 @@ describe('BC Connection (integration)', () => {
   beforeAll(() => {
     const appConfig = loadConfig();
     const logger = createNullLogger();
-    const auth = new NTLMAuthProvider({
+    const auth = new FormsAuthProvider({
       baseUrl: appConfig.bc.baseUrl,
       username: appConfig.bc.username,
       password: appConfig.bc.password,

@@ -12,6 +12,11 @@ export class ConnectionFactory {
     private readonly logger: Logger,
   ) {}
 
+  /** The active auth provider (SessionFactory reads its tenant override for SaaS). */
+  get provider(): IBCAuthProvider {
+    return this.authProvider;
+  }
+
   async create(): Promise<Result<BCWebSocket, ConnectionError>> {
     if (!this.authProvider.isAuthenticated()) {
       const authResult = await this.authProvider.authenticate();
@@ -20,7 +25,9 @@ export class ConnectionFactory {
       }
     }
 
-    const wsUrl = this.buildWebSocketUrl();
+    // SaaS: the provider discovered the full server-assigned WS URL (backend host +
+    // tab). On-prem: build the default {baseUrl}/csh.
+    const wsUrl = this.authProvider.getWebSocketUrl() ?? this.buildWebSocketUrl();
     const headers = this.authProvider.getWebSocketHeaders();
 
     const ws = new BCWebSocket(this.logger);

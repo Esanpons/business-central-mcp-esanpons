@@ -2,22 +2,34 @@ import * as cheerio from 'cheerio';
 import { ok, err, type Result } from '../../core/result.js';
 import { AuthenticationError } from '../../core/errors.js';
 import type { IBCAuthProvider, AuthResult } from './auth-provider.js';
+import { parseSetCookie, type RawCookie } from './cookies.js';
 import type { Logger } from '../../core/logger.js';
 
-interface NTLMProviderConfig {
+interface FormsProviderConfig {
   baseUrl: string;
   username: string;
   password: string;
   tenantId: string;
 }
 
-export class NTLMAuthProvider implements IBCAuthProvider {
+/**
+ * ASP.NET forms authentication against BC's /SignIn endpoint (NavUserPassword).
+ * Formerly misnamed "NTLMAuthProvider" — there is no NTLM anywhere in this flow:
+ * it is a plain GET (antiforgery token) + POST (credentials) that yields the
+ * `.AspNetCore.Cookies` auth ticket and the antiforgery CSRF cookie.
+ *
+ * Produces BOTH the `Cookie` header string for the WebSocket upgrade AND the
+ * attributed cookie jar (`RawCookie[]`) consumed by the headless browser
+ * (screenshots / report downloads) — one login, every consumer shares it.
+ */
+export class FormsAuthProvider implements IBCAuthProvider {
   private cookies = '';
   private csrfToken = '';
+  private cookieJar: RawCookie[] = [];
   private authenticated = false;
 
   constructor(
-    private readonly config: NTLMProviderConfig,
+    private readonly config: FormsProviderConfig,
     private readonly logger: Logger
   ) {}
 
@@ -78,6 +90,16 @@ export class NTLMAuthProvider implements IBCAuthProvider {
       }
       this.cookies = Array.from(cookieMap.entries()).map(([k, v]) => `${k}=${v}`).join('; ');
 
+      // Attributed jar for the headless browser: same Set-Cookie lines, keeping
+      // path/secure/samesite/httponly. POST lines override GET lines by name.
+      const host = new URL(this.config.baseUrl).host;
+      const jarMap = new Map<string, RawCookie>();
+      for (const line of [...setCookies, ...postCookies]) {
+        const c = parseSetCookie(line, host);
+        jarMap.set(c.name, c);
+      }
+      this.cookieJar = [...jarMap.values()];
+
       // Detect a failed sign-in. A successful POST /SignIn answers with a 302
       // redirect AND sets the auth-ticket cookie `.AspNetCore.Cookies`. A wrong
       // password returns 200 with the login page re-rendered and NO auth ticket.
@@ -117,7 +139,7 @@ export class NTLMAuthProvider implements IBCAuthProvider {
 
       this.authenticated = true;
       this.logger.info(`Authenticated as ${this.config.username} to ${this.config.baseUrl}`);
-      return ok({ cookies: this.cookies, csrfToken: this.csrfToken });
+      return ok({ cookies: this.cookies, csrfToken: this.csrfToken, cookieJar: this.cookieJar });
 
     } catch (e) {
       return err(new AuthenticationError(
@@ -135,6 +157,20 @@ export class NTLMAuthProvider implements IBCAuthProvider {
     return { csrftoken: this.csrfToken };
   }
 
+  getCookieJar(): RawCookie[] {
+    return this.cookieJar;
+  }
+
+  /** On-prem builds the WS URL from baseUrl — no override. */
+  getWebSocketUrl(): string | null {
+    return null;
+  }
+
+  /** On-prem uses the configured tenant. */
+  getTenantIdOverride(): string | null {
+    return null;
+  }
+
   isAuthenticated(): boolean {
     return this.authenticated;
   }
@@ -148,6 +184,7 @@ export class NTLMAuthProvider implements IBCAuthProvider {
     this.authenticated = false;
     this.cookies = '';
     this.csrfToken = '';
+    this.cookieJar = [];
     this.logger.info('Auth state invalidated; next connection will re-sign-in');
   }
 }

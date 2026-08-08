@@ -23,8 +23,10 @@ import { tmpdir } from 'node:os';
 import { isAbsolute, resolve, join, extname } from 'node:path';
 import type { BCConfig } from '../core/config.js';
 import type { Logger } from '../core/logger.js';
+import type { IBCAuthProvider } from '../connection/auth/auth-provider.js';
+import { FormsAuthProvider } from '../connection/auth/forms-provider.js';
 import { launchHeadless } from './browser.js';
-import { authCookies, deepLinkReport, onSignIn, inPageLogin, waitReady } from './bc-web-auth.js';
+import { ensureAuthJar, deepLinkReport, onSignIn, inPageLogin, waitReady } from './bc-web-auth.js';
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -72,12 +74,31 @@ export interface DownloadReportResult {
 }
 
 export class ReportDownloadService {
+  private _auth?: IBCAuthProvider;
+
   constructor(
     private readonly config: BCConfig,
     private readonly reportDir: string,
     private readonly getCompany: () => string | undefined,
     private readonly logger: Logger,
-  ) {}
+    authProvider?: IBCAuthProvider,
+  ) {
+    this._auth = authProvider;
+  }
+
+  /** Shared auth provider (one login for WS + browser). Standalone scripts that
+   * don't inject one get a self-contained forms provider built from config. */
+  private auth(): IBCAuthProvider {
+    if (!this._auth) {
+      this._auth = new FormsAuthProvider({
+        baseUrl: this.config.baseUrl,
+        username: this.config.username,
+        password: this.config.password,
+        tenantId: this.config.tenantId,
+      }, this.logger);
+    }
+    return this._auth;
+  }
 
   async download(input: DownloadReportInput): Promise<DownloadReportResult> {
     const reportId = String(input.reportId).trim();
@@ -91,7 +112,7 @@ export class ReportDownloadService {
     const dlDir = mkdtempSync(join(tmpdir(), 'bc-report-'));
     const browser = await launchHeadless();
     try {
-      const cookies = await authCookies(this.config);
+      const cookies = await ensureAuthJar(this.auth());
       const p = await browser.newPage();
       await p.setCookie(...cookies);
 
@@ -105,6 +126,9 @@ export class ReportDownloadService {
       await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
       if (await onSignIn(p)) {
         this.logger.warn('[report] cookie injection landed on SignIn — logging in in-page');
+        // The injected jar is stale server-side; drop it so the next download (and
+        // the next WS reconnect, if the provider is shared) re-authenticates.
+        this.auth().invalidate();
         await inPageLogin(this.config, p);
         await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => undefined);
       }

@@ -85,13 +85,17 @@ active values any time with `claude mcp get bc-ws`.
 
 | Env var | Controls | Example |
 |---|---|---|
-| `BC_BASE_URL` | **which BC server / Docker** | `https://devel1/BC` |
-| `BC_USERNAME` | user | `admin` |
-| `BC_PASSWORD` | password (plain text in `~/.claude.json`) | — |
+| `BC_AUTH` | auth mode: `UserPassword` (default, on-prem forms) or `AAD` (BC Online) | `AAD` |
+| `BC_BASE_URL` | **which BC server / Docker / SaaS env** | `https://devel1/BC` |
+| `BC_USERNAME` | user (required on-prem; optional in AAD) | `admin` |
+| `BC_PASSWORD` | password (plain text in `~/.claude.json`; optional in AAD) | — |
 | `BC_TENANT_ID` | **which tenant / database** inside BC | `default` |
-| `NODE_TLS_REJECT_UNAUTHORIZED` | `0` to accept a self-signed cert | `0` |
+| `NODE_TLS_REJECT_UNAUTHORIZED` | `0` to accept a self-signed cert (on-prem only) | `0` |
 | `BC_SERVER_MAJOR` | BC major version | `27` |
 | `BC_APPLICATION_ID` | OpenSession applicationId (the fix) | `NAV` |
+| `BC_AAD_PROFILE_DIR` | AAD: persistent Entra profile dir (use absolute) | `...\.state\aad-profile` |
+| `BC_AAD_TOTP_SECRET` | AAD: base32 TOTP for unattended MFA | — |
+| `BC_AAD_LOGIN_TIMEOUT` | AAD: ms budget for the OIDC login | `120000` |
 | `BC_REPORT_DIR` | where `bc_download_report` writes files (default `.arxius/reports`, relative to the server's cwd — set an absolute path to control it) | `D:\BCReports` |
 | `BC_SCREENSHOT_DIR` / `BC_MANUAL_DIR` | where `bc_screenshot` / `bc_build_manual` write (defaults `./screenshots` / `./manuals`) | — |
 
@@ -116,6 +120,43 @@ Two options:
    ```
    The same code base serves both; only the env differs. Each appears as its own MCP
    (`bc-ws`, `bc-ws-otrodocker`).
+
+### BC Online (SaaS) — `BC_AUTH=AAD`
+
+The same server also talks to a **BC Online sandbox** via an Entra (Azure AD) browser login.
+On-prem is unaffected: without `BC_AUTH`, everything behaves exactly as above.
+
+1. **Bootstrap the Entra profile once** (interactive, handles MFA). From the repo:
+   ```powershell
+   $env:BC_AUTH="AAD"
+   $env:BC_BASE_URL="https://businesscentral.dynamics.com/<aadTenantId>/<environment>"
+   npm run login:aad     # opens a visible browser; sign in + MFA; the profile persists
+   ```
+2. **Register the SaaS MCP** (separate name, alongside `bc-ws`):
+   ```powershell
+   claude mcp add bc-saas -s user `
+     -e BC_AUTH=AAD `
+     -e BC_BASE_URL=https://businesscentral.dynamics.com/<aadTenantId>/<environment> `
+     -e BC_SERVER_MAJOR=28 `
+     -e BC_AAD_PROFILE_DIR=D:\Proyectos\Aesva\business-central-mcp-esanpons\.state\aad-profile `
+     -- node "D:\Proyectos\Aesva\business-central-mcp-esanpons\dist\stdio-server.js"
+   ```
+   Use an **absolute** `BC_AAD_PROFILE_DIR` so the server finds the same warm profile regardless
+   of its working directory. Unattended MFA instead of the bootstrap: add
+   `-e BC_AAD_TOTP_SECRET=<base32>` (needs `otpauth`, already a dependency). `BC_USERNAME`/
+   `BC_PASSWORD` are optional in AAD mode (only used for headless login).
+3. `BC_TENANT_ID` / `BC_APPLICATION_ID` in AAD mode take the values the F2 spike confirms
+   (`npm run capture:saas`); see [`Plans/saas-spike.md`](Plans/saas-spike.md).
+
+If a headless reconnect ever fails with an "interaction required" style error (Entra expired the
+persisted session), just re-run `npm run login:aad`.
+
+**Running Docker AND SaaS at once, re-login, switching tenant, resetting the profile:** see the
+dedicated guide [`guides/saas-vs-docker.md`](guides/saas-vs-docker.md). Short version: register two
+MCP servers with clear names (`bc-docker` + `bc-saas`); the model routes by name from what you say
+("in SaaS" / "in devel1"). To switch tenant/account use a fresh `BC_AAD_PROFILE_DIR`; to reset,
+delete that folder and re-run `npm run login:aad`. `bc_health` reports `environmentKind`
+(`saas` | `on-prem`) so you can always confirm which BC an instance talks to.
 
 ### Which company does it open?
 

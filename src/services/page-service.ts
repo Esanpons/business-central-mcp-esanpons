@@ -65,21 +65,25 @@ export const DEFAULT_AUTO_LOAD_SECTIONS: readonly SectionKind[] = ['header', 'li
 export class PageService {
   private readonly autoLoadSections: readonly SectionKind[];
   private readonly defaultTenantId: string;
+  private readonly authMode: 'UserPassword' | 'AAD';
 
   constructor(
     private readonly session: BCSession,
     private readonly repo: PageContextRepository,
     private readonly logger: Logger,
-    options?: { autoLoadSections?: readonly SectionKind[]; tenantId?: string },
+    options?: { autoLoadSections?: readonly SectionKind[]; tenantId?: string; authMode?: 'UserPassword' | 'AAD' },
   ) {
     this.autoLoadSections = options?.autoLoadSections ?? DEFAULT_AUTO_LOAD_SECTIONS;
     this.defaultTenantId = options?.tenantId ?? 'default';
+    this.authMode = options?.authMode ?? 'UserPassword';
   }
 
   async openPage(pageId: string, options?: { bookmark?: string; tenantId?: string; filter?: string }): Promise<Result<PageContext, ProtocolError>> {
     // Precedence: explicit per-call tenant > server-configured tenant > 'default'.
     const tenantId = options?.tenantId ?? this.defaultTenantId;
-    let query = `page=${pageId}&tenant=${tenantId}`;
+    // SaaS binds the tenant at session open (path-based URL); the OpenForm query
+    // must not carry &tenant=. On-prem keeps the explicit query tenant.
+    let query = this.authMode === 'AAD' ? `page=${pageId}` : `page=${pageId}&tenant=${tenantId}`;
     if (options?.bookmark) {
       query += `&bookmark=${encodeURIComponent(options.bookmark)}`;
     }

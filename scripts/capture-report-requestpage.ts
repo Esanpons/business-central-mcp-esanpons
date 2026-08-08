@@ -22,8 +22,10 @@ if (existsSync('.secrets/devel1.env')) dotenv({ path: '.secrets/devel1.env' });
 else dotenv();
 
 import { loadConfig } from '../src/core/config.js';
+import { createLogger } from '../src/core/logger.js';
 import { launchHeadless } from '../src/services/browser.js';
-import { authCookies, deepLinkReport, onSignIn, inPageLogin, waitReady } from '../src/services/bc-web-auth.js';
+import { FormsAuthProvider } from '../src/connection/auth/forms-provider.js';
+import { ensureAuthJar, deepLinkReport, onSignIn, inPageLogin, waitReady } from '../src/services/bc-web-auth.js';
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -123,7 +125,11 @@ console.log('[capture] report', reportId, '->', url);
 
 const browser = await launchHeadless();
 try {
-  const cookies = await authCookies(cfg.bc);
+  const auth = new FormsAuthProvider(
+    { baseUrl: cfg.bc.baseUrl, username: cfg.bc.username, password: cfg.bc.password, tenantId: cfg.bc.tenantId },
+    createLogger(cfg.logging),
+  );
+  const cookies = await ensureAuthJar(auth);
   const p = await browser.newPage();
   await p.setViewport({ width: 1600, height: 1000 });
   await p.setCookie(...cookies);

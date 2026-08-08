@@ -10,7 +10,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { config as dotenvConfig } from 'dotenv';
 import { loadConfig } from '../../src/core/config.js';
 import { createNullLogger } from '../../src/core/logger.js';
-import { NTLMAuthProvider } from '../../src/connection/auth/ntlm-provider.js';
+import { FormsAuthProvider } from '../../src/connection/auth/forms-provider.js';
 import { ConnectionFactory } from '../../src/connection/connection-factory.js';
 import { EventDecoder } from '../../src/protocol/event-decoder.js';
 import { InteractionEncoder } from '../../src/protocol/interaction-encoder.js';
@@ -50,7 +50,7 @@ describe('Document Page Workflows (BC27)', () => {
 
   beforeAll(async () => {
     const appConfig = loadConfig();
-    const auth = new NTLMAuthProvider({
+    const auth = new FormsAuthProvider({
       baseUrl: appConfig.bc.baseUrl,
       username: appConfig.bc.username,
       password: appConfig.bc.password,
@@ -518,7 +518,7 @@ describe('BC28 Cross-Version Tests', () => {
   let sessionFactory: SessionFactory;
 
   beforeAll(async () => {
-    const auth = new NTLMAuthProvider({
+    const auth = new FormsAuthProvider({
       baseUrl: BC28_CONFIG.baseUrl,
       username: BC28_CONFIG.username,
       password: BC28_CONFIG.password,

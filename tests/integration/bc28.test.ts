@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createNullLogger } from '../../src/core/logger.js';
-import { NTLMAuthProvider } from '../../src/connection/auth/ntlm-provider.js';
+import { FormsAuthProvider } from '../../src/connection/auth/forms-provider.js';
 import { ConnectionFactory } from '../../src/connection/connection-factory.js';
 import { EventDecoder } from '../../src/protocol/event-decoder.js';
 import { InteractionEncoder } from '../../src/protocol/interaction-encoder.js';
@@ -31,7 +31,7 @@ describe('BC28 Compatibility (integration)', () => {
   const logger = createNullLogger();
 
   beforeAll(async () => {
-    const auth = new NTLMAuthProvider({
+    const auth = new FormsAuthProvider({
       baseUrl: BC28_CONFIG.baseUrl,
       username: BC28_CONFIG.username,
       password: BC28_CONFIG.password,

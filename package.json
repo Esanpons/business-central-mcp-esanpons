@@ -29,7 +29,10 @@
     "build:dxt": "tsx scripts/build-dxt.ts",
     "screenshot:poc": "tsx scripts/screenshot-poc.ts",
     "verify:manual-html": "tsx scripts/verify-manual-html.ts",
-    "capture:report": "tsx scripts/capture-report-requestpage.ts"
+    "capture:report": "tsx scripts/capture-report-requestpage.ts",
+    "capture:saas": "tsx scripts/capture-saas-handshake.ts",
+    "login:aad": "tsx scripts/aad-login.ts",
+    "smoke:saas": "tsx scripts/smoke-saas.ts"
   },
   "keywords": [
     "mcp",
@@ -52,6 +55,7 @@
   },
   "dependencies": {
     "cheerio": "^1.2.0",
+    "otpauth": "^9.5.1",
     "puppeteer-core": "^25.1.0",
     "uuid": "^13.0.0",
     "ws": "^8.20.0",

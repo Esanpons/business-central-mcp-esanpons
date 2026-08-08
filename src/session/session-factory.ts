@@ -21,17 +21,21 @@ export class SessionFactory {
     const wsResult = await this.connectionFactory.create();
     if (isErr(wsResult)) return wsResult;
 
+    // SaaS binds a server-assigned backend tenant (discovered from the WS URL);
+    // on-prem uses the configured tenant. The provider decides.
+    const tenantId = this.connectionFactory.provider.getTenantIdOverride() ?? this.tenantId;
+
     const session = new BCSession(
       wsResult.value,
       this.decoder,
       this.encoder,
       this.logger,
-      this.tenantId,
+      tenantId,
       this.timeoutMs,
       this.profile,
     );
 
-    const initResult = await session.initialize(this.tenantId);
+    const initResult = await session.initialize(tenantId);
     if (isErr(initResult)) {
       session.close();
       return err(new ConnectionError(`Session initialization failed: ${initResult.error.message}`));

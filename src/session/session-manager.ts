@@ -34,6 +34,8 @@ export class SessionManager {
   private readonly reconnectOptions: ReconnectOptions;
   /** Recovery en curs compartit: coalesça crides concurrents en un sol intent (un sol /SignIn). */
   private recovering: Promise<BCSession | null> | null = null;
+  /** Last session-create error message, surfaced in SessionLostError when all retries fail. */
+  private lastCreateError: string | null = null;
 
   /** Exposed for testing -- override to avoid real delays. */
   protected delay(ms: number): Promise<void> {
@@ -97,8 +99,12 @@ export class SessionManager {
       const newSession = await this.createWithBackoff();
 
       if (newSession === null) {
+        // Surface the underlying auth/connect reason (e.g. AAD needs an interactive
+        // `npm run login:aad` because the persisted Entra session expired) instead
+        // of a generic "cannot reach BC".
+        const detail = this.lastCreateError ? ` Last error: ${this.lastCreateError}` : '';
         throw new SessionLostError(
-          'Session was lost and all reconnect attempts failed. The server cannot reach Business Central.',
+          `Session was lost and all reconnect attempts failed. The server cannot reach Business Central.${detail}`,
           impactedIds,
           { reconnectFailed: true },
         );
@@ -167,10 +173,12 @@ export class SessionManager {
       const result = await this.sessionFactory.create();
 
       if (!isErr(result)) {
+        this.lastCreateError = null;
         return result.value;
       }
 
       const errorMsg = result.error.message;
+      this.lastCreateError = errorMsg;
 
       if (errorMsg.includes('LogicalModalityViolation')) {
         // Mid-session violations are reconciled in BCSession.invokeUnqueued.

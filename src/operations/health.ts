@@ -16,6 +16,10 @@ export interface HealthOutput {
   version: string;
   bc: {
     baseUrl: string;
+    /** Auth mode: 'UserPassword' = on-prem forms; 'AAD' = BC Online (SaaS). */
+    authMode: string;
+    /** Human hint of the target kind, so a caller can tell SaaS from on-prem at a glance. */
+    environmentKind: 'saas' | 'on-prem';
     tenantId: string;
     applicationId: string;
     serverMajor: number;
@@ -57,6 +61,8 @@ export class HealthOperation {
       version: '2.0.0',
       bc: {
         baseUrl: this.deps.bc.baseUrl,
+        authMode: this.deps.bc.authMode,
+        environmentKind: this.deps.bc.authMode === 'AAD' ? 'saas' : 'on-prem',
         tenantId: this.deps.bc.tenantId,
         applicationId: this.deps.bc.applicationId,
         serverMajor: this.deps.bc.serverMajor,

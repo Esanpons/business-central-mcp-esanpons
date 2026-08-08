@@ -9,7 +9,7 @@ import { existsSync, statSync } from 'node:fs';
 import { config as dotenvConfig } from 'dotenv';
 import { loadConfig } from '../../src/core/config.js';
 import { createNullLogger } from '../../src/core/logger.js';
-import { NTLMAuthProvider } from '../../src/connection/auth/ntlm-provider.js';
+import { FormsAuthProvider } from '../../src/connection/auth/forms-provider.js';
 import { ConnectionFactory } from '../../src/connection/connection-factory.js';
 import { EventDecoder } from '../../src/protocol/event-decoder.js';
 import { InteractionEncoder } from '../../src/protocol/interaction-encoder.js';
@@ -36,7 +36,7 @@ const RUN = hasEnv && hasChrome;
 async function buildSession(): Promise<BCSession> {
   const logger = createNullLogger();
   const ac = loadConfig();
-  const auth = new NTLMAuthProvider(
+  const auth = new FormsAuthProvider(
     { baseUrl: ac.bc.baseUrl, username: ac.bc.username, password: ac.bc.password, tenantId: ac.bc.tenantId },
     logger,
   );

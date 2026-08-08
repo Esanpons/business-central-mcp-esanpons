@@ -4,7 +4,7 @@
 // Run: tsx scripts/test-protocol-filter.ts
 import { loadConfig } from '../src/core/config.js';
 import { createLogger } from '../src/core/logger.js';
-import { NTLMAuthProvider } from '../src/connection/auth/ntlm-provider.js';
+import { FormsAuthProvider } from '../src/connection/auth/forms-provider.js';
 import { ConnectionFactory } from '../src/connection/connection-factory.js';
 import { EventDecoder } from '../src/protocol/event-decoder.js';
 import { InteractionEncoder } from '../src/protocol/interaction-encoder.js';
@@ -16,7 +16,7 @@ import { unwrap } from '../src/core/result.js';
 
 const ac = loadConfig();
 const logger = createLogger({ ...ac.logging, level: 'warn' });
-const auth = new NTLMAuthProvider({ baseUrl: ac.bc.baseUrl, username: ac.bc.username, password: ac.bc.password, tenantId: ac.bc.tenantId }, logger);
+const auth = new FormsAuthProvider({ baseUrl: ac.bc.baseUrl, username: ac.bc.username, password: ac.bc.password, tenantId: ac.bc.tenantId }, logger);
 const cf = new ConnectionFactory(auth, ac.bc, logger);
 const sf = new SessionFactory(cf, new EventDecoder(), new InteractionEncoder(ac.bc.clientVersionString, ac.bc.applicationId), logger, ac.bc.tenantId, ac.bc.invokeTimeoutMs, ac.bc.profile);
 const session = unwrap(await sf.create());

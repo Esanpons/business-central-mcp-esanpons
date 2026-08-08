@@ -469,6 +469,77 @@ It is registered to BYPASS the `ensureSession()` gate so it answers even when BC
 HTTP `/health` endpoint returns the same shape. `MCPHandler` translates raw BC errors to clear,
 actionable messages via `src/core/error-translator.ts` and records error codes in `Metrics`.
 
+## Authentication modes: on-prem forms vs BC Online (SaaS / AAD)
+
+Auth is selected by `BC_AUTH` (default `UserPassword`). **Unset = exact on-prem behavior.**
+The provider is chosen by `createAuthProvider()` (`src/connection/auth/factory.ts`); the rest of
+the stack (protocol, session, services) is auth-agnostic. Full plan + rationale:
+[`docs/Plans/2026-08-08-saas-sandbox.md`](docs/Plans/2026-08-08-saas-sandbox.md).
+
+**Target is fixed per MCP registration, not chosen at runtime.** One server process = one BC
+(env-selected). To have both, register two MCP servers with clear names (e.g. `bc-docker` +
+`bc-saas`); the model routes by server name from what the user says ("in SaaS" / "in devel1").
+`bc_health` returns `bc.authMode` + `bc.environmentKind` (`saas` | `on-prem`) + `baseUrl` so the
+model can confirm which environment an instance talks to. Guide:
+[`docs/guides/saas-vs-docker.md`](docs/guides/saas-vs-docker.md).
+
+- **`UserPassword` (default)** — `FormsAuthProvider` (`src/connection/auth/forms-provider.ts`,
+  the artist formerly known as `NTLMAuthProvider`; there is no NTLM — it's ASP.NET forms
+  `/SignIn`). GET antiforgery token + POST credentials → `.AspNetCore.Cookies` ticket +
+  antiforgery CSRF. Produces BOTH the WS `Cookie` header AND the attributed cookie jar
+  (`RawCookie[]`, `src/connection/auth/cookies.ts`) consumed by the headless browser.
+- **`AAD` (BC Online / SaaS)** — `AADBrowserAuthProvider`
+  (`src/connection/auth/aad-browser-provider.ts`). **Verified live against the sandbox `Dev`
+  (2026-08-08): auth, WS, OpenSession, openPage, readRows/readField, writeField (changed=true).**
+  OAuth tokens do NOT authenticate the web client — it needs a real user browser session. So
+  this drives a headless browser with a **persistent profile** (`BC_AAD_PROFILE_DIR`, default
+  `./.state/aad-profile`): the OIDC dance runs once (interactive `npm run login:aad`, or headless
+  with `BC_USERNAME`/`BC_PASSWORD` [+`BC_AAD_TOTP_SECRET` for MFA]), Entra SSO cookies persist,
+  later reconnects re-auth silently.
+
+  **SaaS is NOT `{baseUrl}/csh`** (the spike's key finding). The server assigns a per-tab backend
+  endpoint `wss://{backendHost}/tenant/{backendTenant}/tab/{tabId}/csh?ackseqnb=-1&aadTenantId=..&csrftoken=CfDJ8..`
+  on a regional app-service host, with the session cookies (`SessionId`, `.AspNetCore.Cookies`,
+  `.AspNetCore.Antiforgery.*`, `NAVAllowedAncestor`, `ApplicationGatewayAffinity`) scoped to that
+  host + tab path. None of it is derivable from `baseUrl`, so the provider **discovers** it from
+  the browser: it captures the WS URL via CDP (`Target.setAutoAttach` + `Network` per target,
+  because the SPA opens its WS inside a Web Worker), parses the backend host/tenant from the path,
+  and collects the backend-host cookies. The connection layer then opens a Node WS to that exact
+  URL (`getWebSocketUrl()`), OpenSession uses the discovered backend tenant
+  (`getTenantIdOverride()`), and `applicationId` defaults to **`FIN`** in AAD mode. Crucially, the
+  WS upgrade must send `Origin: https://businesscentral.dynamics.com` + a browser `User-Agent` —
+  the gateway enforces `NAVAllowedAncestor` and 500s a bare `ws` upgrade. Full details:
+  [`docs/Plans/saas-spike.md`](docs/Plans/saas-spike.md). Live smoke: `npm run smoke:saas`.
+
+**One login, shared everywhere.** `ScreenshotService` / `ReportDownloadService` no longer do
+their own `/SignIn` — they call `ensureAuthJar(provider)` (`src/services/bc-web-auth.ts`) and
+inject the ACTIVE provider's jar. Standalone scripts that don't inject a provider fall back to a
+self-contained `FormsAuthProvider`.
+
+**Mode-conditional URL/tenant points (the only non-auth places the mode leaks):**
+- `ConnectionFactory` uses `provider.getWebSocketUrl()` when non-null (SaaS backend URL) instead
+  of building `{baseUrl}/csh`.
+- `SessionFactory` uses `provider.getTenantIdOverride()` when non-null (SaaS backend tenant) for
+  BCSession + OpenSession.
+- `deepLinkPage`/`deepLinkReport` (`bc-web-auth.ts`) omit `?tenant=` in AAD mode (SaaS is
+  tenant-path-based: `baseUrl` = `https://businesscentral.dynamics.com/{aadTenantId}/{environment}`).
+- `PageService` omits `&tenant=` from the `OpenForm` WS query in AAD mode (SaaS binds the tenant
+  at session open).
+- `BC_APPLICATION_ID` defaults to `FIN` in AAD mode (else `NAV`); `BC_TENANT_ID` is superseded by
+  the discovered backend tenant in AAD. Both stay env-overridable.
+
+**SaaS session expiry** reuses the existing recovery path: WS drop → `isAlive=false` →
+`SessionManager` calls `provider.invalidate()` (keeps the disk profile) → `authenticate()`
+re-discovers a fresh tab + re-auths from the warm profile. If Entra needs interaction, the
+actionable error (run `npm run login:aad`) is surfaced in the `SessionLostError` detail.
+
+**Scripts.** `npm run capture:saas` (headed spike, re-runnable diagnostic — captures WS URL,
+OpenSession frame, cookies, OIDC chain to `src/protocol/captures/`), `npm run login:aad`
+(interactive profile bootstrap), `npm run smoke:saas` (live end-to-end: auth → WS → openPage →
+read → write+restore). Note: **screenshots/reports in AAD mode are not yet re-verified** — the
+cookie-injection path uses the front-door jar; if it lands on login it may need the persistent
+profile approach instead (follow-up).
+
 ## Known Limitations
 
 ### Document Pages (Multi-Repeater)

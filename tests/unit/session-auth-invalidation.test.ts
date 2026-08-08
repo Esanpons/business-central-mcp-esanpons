@@ -4,7 +4,7 @@ import { SessionLostError, ConnectionError } from '../../src/core/errors.js';
 import { ok, err } from '../../src/core/result.js';
 
 // Cobreix el fix de reconnexió post-publish: després d'un al_publish el NST recicla
-// l'app domain i invalida les cookies/CSRF forms-auth. El singleton NTLMAuthProvider
+// l'app domain i invalida les cookies/CSRF forms-auth. El singleton FormsAuthProvider
 // les reutilitzava (flag authenticated mai resetejat) i el gate isAuthenticated()
 // saltava el /SignIn, fent que tota reconnexió fallés. El fix: cridar
 // authProvider.invalidate() abans de cada intent de create perquè es refaci un

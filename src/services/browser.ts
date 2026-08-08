@@ -56,3 +56,23 @@ export async function launchHeadless(): Promise<any> {
     args: ['--disable-gpu', '--no-sandbox', '--hide-scrollbars', ...(ignoreTls ? ['--ignore-certificate-errors'] : [])],
   });
 }
+
+/**
+ * Launch a browser bound to a PERSISTENT profile directory. AAD/SaaS auth reuses
+ * this so an interactive login (+MFA) done once survives headless reconnects: the
+ * Entra SSO cookies live in `userDataDir`. `headless:false` is the bootstrap path
+ * (`npm run login:aad`); `true` is the normal unattended path once the profile is
+ * warm. Returns the puppeteer Browser (call `browser.pages()` for the first tab).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function launchPersistent(userDataDir: string, opts?: { headless?: boolean }): Promise<any> {
+  const puppeteer = await loadPuppeteer();
+  const ignoreTls = process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0';
+  return puppeteer.launch({
+    executablePath: resolveChrome(),
+    headless: opts?.headless ?? true,
+    userDataDir,
+    acceptInsecureCerts: ignoreTls,
+    args: ['--disable-gpu', '--no-sandbox', '--hide-scrollbars', ...(ignoreTls ? ['--ignore-certificate-errors'] : [])],
+  });
+}

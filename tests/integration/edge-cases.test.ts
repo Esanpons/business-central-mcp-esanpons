@@ -11,7 +11,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { config as dotenvConfig } from 'dotenv';
 import { loadConfig } from '../../src/core/config.js';
 import { createNullLogger } from '../../src/core/logger.js';
-import { NTLMAuthProvider } from '../../src/connection/auth/ntlm-provider.js';
+import { FormsAuthProvider } from '../../src/connection/auth/forms-provider.js';
 import { ConnectionFactory } from '../../src/connection/connection-factory.js';
 import { EventDecoder } from '../../src/protocol/event-decoder.js';
 import { InteractionEncoder } from '../../src/protocol/interaction-encoder.js';
@@ -47,7 +47,7 @@ describe('Edge Case & Stress Tests', () => {
 
   beforeAll(async () => {
     const appConfig = loadConfig();
-    const auth = new NTLMAuthProvider({
+    const auth = new FormsAuthProvider({
       baseUrl: appConfig.bc.baseUrl,
       username: appConfig.bc.username,
       password: appConfig.bc.password,
