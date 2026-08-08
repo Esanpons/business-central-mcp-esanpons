@@ -250,6 +250,10 @@ try {
     const r = await runReport.execute({ reportId: '6' });
     if (isOk(r)) rec('bc_run_report', 'PASS', `report 6: requestPage fields=${A(r.value).fields?.length ?? A(r.value).requestPage?.fields?.length ?? '?'}`);
     else rec('bc_run_report', 'FAIL', A(r).error.message);
+    // Close the report's request-page modal so it doesn't strand a dialog that
+    // breaks the later wizard open (best-effort).
+    const rpFormId = isOk(r) ? A(r.value).requestPage?.formId : undefined;
+    if (rpFormId) await session.invoke(A({ type: 'CloseForm', formId: rpFormId }), (e: { type: string }) => e.type === 'InvokeCompleted').catch(() => undefined);
   } catch (e) { rec('bc_run_report', 'FAIL', String(e)); }
 
   // --- bc_download_report (out-of-band browser) ---

@@ -88,7 +88,7 @@ create+delete). Prueba que el servidor hace lo mismo en BC Online que en el Dock
 
 | | Docker (`devel1`, on-prem, BC27) | SaaS (`Dev`, BC Online, BC28.3) |
 |---|---|---|
-| Resultado | **16 PASS · 0 FAIL · 2 SKIP** | **16 PASS · 1 FAIL · 1 SKIP** |
+| Resultado | **17 PASS · 0 FAIL · 1 SKIP** | **16 PASS · 1 FAIL · 1 SKIP** |
 | Auth | forms `/SignIn` (`UserPassword`) | Entra/AAD browser login (perfil persistente) |
 | Compañía | CRONUS_04 (7 compañías) | CRONUS ES (2 compañías) |
 
@@ -103,7 +103,7 @@ create+delete). Prueba que el servidor hace lo mismo en BC Online que en el Dock
 | `bc_open_page` | ✅ | ✅ | lista + card |
 | `bc_read_data` | ✅ | ✅ | refresh OK; filtrado por OpenForm (ver abajo) |
 | `bc_navigate` | ✅ | ✅ | drill-down a card |
-| `bc_write_data` | ✅* | ✅* | SaaS confirmado `changed=true` + restore en el smoke; en la batería depende del estado editable de la pág. 42 |
+| `bc_write_data` | ✅* | ✅ | SaaS: `wrote "Descripción de la operación" changed=true` + restore. Docker: SKIP en batería (page 42 abre read-only en CRONUS_04); write verificado en tests de integración. La batería usa fallback `New` para forzar un doc editable |
 | `bc_execute_action` | ✅ | ✅ | Delete del borrador |
 | `bc_respond_dialog` | ✅ | ✅ | confirmación del delete |
 | `bc_close_page` | ✅ | ✅ | |
@@ -113,7 +113,7 @@ create+delete). Prueba que el servidor hace lo mismo en BC Online que en el Dock
 | `bc_download_report` | ✅ | ❌ | única FAIL — ver abajo; es limitación de params/deep-link, NO de acceso SaaS |
 | `bc_screenshot` | ✅ | ✅ | **el navegador out-of-band SÍ autentica en SaaS** |
 | `bc_build_manual` | ✅ | ✅ | usa el motor de screenshot |
-| `bc_wizard_navigate` | ✅ | ✅* | page 1803 (Company Setup): open → next → cancel. Docker verificado; SaaS mismo código protocol-level (auth-agnóstico) |
+| `bc_wizard_navigate` | ✅ | ⏭️ | page 1803 (Company Setup): Docker abre como NavigatePage → `open → next → cancel` verificado en vivo. SaaS: 1803 abre como Card (diferencia de entorno de BC) → SKIP; el tool es código protocol-level idéntico ya probado en SaaS por los demás tools |
 
 ### La única FAIL: `bc_download_report` en SaaS
 
@@ -151,6 +151,8 @@ ensucia mucho, `npm run login:aad` sobre un perfil limpio también lo resetea.
 
 ### Conclusión
 
-El servidor opera contra **BC Online con paridad práctica respecto al Docker on-prem**: 16 de 18
-herramientas pasan idénticas, `bc_write_data` está confirmada por el smoke, y las restantes son un
-SKIP legítimo (wizard) y `bc_download_report` en SaaS.
+El servidor opera contra **BC Online con paridad práctica respecto al Docker on-prem** (Docker
+17/18, SaaS 16/18). Las diferencias restantes: `bc_download_report` en SaaS (única FAIL — race del
+deep-link de la SPA, no de acceso) y `bc_wizard_navigate` en SaaS (1803 abre como Card, diferencia
+de entorno). Todo lo demás — datos, escritura, filtros, acciones, diálogos, compañías, screenshots,
+manuales — funciona idéntico en ambos.
