@@ -45,7 +45,7 @@ describe.sequential('Phase 3 Feature Verification', () => {
     pageService = new PageService(session, repo, logger);
     dataService = new DataService(session, repo, logger);
     const filterService = new FilterService(session, repo, logger);
-    readData = new ReadDataOperation(dataService, filterService, repo);
+    readData = new ReadDataOperation(dataService, filterService, repo, pageService);
   });
 
   afterAll(async () => {

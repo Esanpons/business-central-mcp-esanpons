@@ -9,21 +9,42 @@
 > [`2026-07-04-auditoria-completa-millores.md`](2026-07-04-auditoria-completa-millores.md)
 > ahora que ya existe un tenant real con sandboxes.
 
-## Estado (2026-08-08)
+## Estado (2026-08-08) — SaaS VERIFICADO EN VIVO ✅
+
+**TODAS las fases (F1–F5) están HECHAS y SaaS está verificado en vivo contra el sandbox `Dev`.**
+No queda nada bloqueante. La batería funcional completa (`npm run test-battery saas`) da **15 PASS,
+1 FAIL, 2 SKIP** — prácticamente idéntica a Docker (ver [`saas-battery.md`](saas-battery.md)).
 
 - **F1 refactor de auth** — HECHO. `NTLMAuthProvider`→`FormsAuthProvider`, `RawCookie`/`parseSetCookie`
   movidos a `src/connection/auth/cookies.ts`, `AuthResult.cookieJar` + `getCookieJar()`, factory
   `createAuthProvider` por `BC_AUTH`, login del navegador unificado (`ensureAuthJar`), config `BC_AUTH`
   con credenciales por modo. tsc + 403 tests verdes.
-- **F3 provider AAD** — HECHO (código). `AADBrowserAuthProvider` (login Entra headless con perfil
-  persistente + TOTP opcional), `npm run login:aad` (bootstrap interactivo), `tenant=` omitido en modo
-  AAD en deep links y OpenForm.
+- **F2 spike** — **EJECUTADO** (`npm run capture:saas`, login+MFA hecho 2026-08-08). Reveló que SaaS NO
+  usa `{baseUrl}/csh` sino un WS de backend por pestaña; resultados en [`saas-spike.md`](saas-spike.md),
+  captura en `src/protocol/captures/saas-handshake-2026-08-08.json`. **YA NO es bloqueante.**
+- **F3 provider AAD** — HECHO y **verificado en vivo**. `AADBrowserAuthProvider` descubre la URL del WS
+  de backend + tenant del navegador (CDP), login Entra headless con perfil persistente + TOTP opcional,
+  `npm run login:aad` (bootstrap), `Origin`+`User-Agent` en el WS, `applicationId=FIN` en AAD.
 - **F4 expiración de cookies** — HECHO. Reusa el recovery existente (`invalidate`+re-auth); el error
   accionable se propaga en `SessionLostError`.
-- **F2 spike** — código listo (`npm run capture:saas`); **PENDIENTE de ejecutar** (requiere tu login MFA).
-  Resultados a [`saas-spike.md`](saas-spike.md).
-- **F5 docs** — HECHO (.env.example, README, SETUP-GLOBAL, CLAUDE.md, ROADMAP).
-- **PENDIENTE (bloqueado por ti)**: ejecutar F2 live y el smoke de tools contra el sandbox `Dev`.
+- **F5 docs** — HECHO (.env.example, README, SETUP-GLOBAL, CLAUDE.md, ROADMAP, guía saas-vs-docker).
+
+**Único FAIL en SaaS:** `bc_download_report` con report 6 (su request page en SaaS pide parámetros →
+`requestPageShown:true`). NO es un problema de acceso a SaaS: `bc_screenshot`/`bc_build_manual` (mismo
+motor de navegador out-of-band autenticado) SÍ pasan en SaaS. Es la limitación ya documentada de
+parámetros obligatorios de request page (ver `docs/tools/bc_download_report.md`), no específica de SaaS.
+
+**Mejora — filtrado de listas ARREGLADO (2026-08-08).** La batería destapó que el *filter pane*
+(`Filter/AddLine`) es un no-op en BC27/BC28 (columnas sin `columnBinderPath`). Ya está corregido: el
+filtrado usa el `filter=` de la query OpenForm (`'Campo' IS 'valor'`, nombres AL invariantes). Expuesto
+en `bc_open_page` (`filters`, al abrir) y `bc_read_data` (`filters`, re-abre en su sitio con el mismo
+pageContextId). Verificado en vivo: Docker 49→0, SaaS 6→1 / 6→3. Archivos: `src/protocol/filter-query.ts`,
+`src/services/page-service.ts` (`reopenWithFilters`), `src/operations/{open-page,read-data}.ts`.
+
+**Pendiente conocido (no bloqueante, no es de acceso a SaaS):** `bc_download_report` no es fiable en
+SaaS — el mecanismo de descarga funciona (lo prueba `bc_screenshot`), pero el deep-link de report en
+SaaS es inestable ("Go back home") y su request page usa un toolbar distinto al flujo on-prem. Necesita
+una ruta de invocación de reports específica para SaaS.
 
 ---
 
@@ -308,7 +329,7 @@ Ejemplo `.mcp.json` (junto al `bc-ws` actual, sin sustituirlo):
 | R1 | **ToS / anti-automatización**: protocolo reverse-engineered contra servicio hospedado; Microsoft podría gatear `/csh` | Solo sandbox de desarrollo; volumen bajo; decisión informada del propietario del tenant (§3.5). Plan B parcial: modo API REST (ROADMAP) |
 | R2 | **SaaS es un blanco móvil**: siempre corre la última minor (28.3→28.4 ya programado) | Evidencia 27↔28 wire-idéntico; spike re-ejecutable como herramienta de diagnóstico; smoke SaaS tras cada update del sandbox; `BC_APPLICATION_ID`/`BC_CLIENT_VERSION` ya configurables |
 | R3 | **Conditional Access / MFA** puede vetar el login headless e incluso caducar el perfil persistente | Escalera de §3.3: sin-MFA → TOTP → bootstrap headed periódico. El floor honesto es re-login humano ocasional |
-| R4 | **Mecánica cookies/CSRF SaaS asumida** hasta que el spike la verifique | F2 es bloqueante de F3 por diseño; go/no-go explícito |
+| R4 | ~~Mecánica cookies/CSRF SaaS asumida hasta que el spike la verifique~~ | ✅ RESUELTO: F2 ejecutado, cookies/CSRF/WS confirmados en vivo (ver saas-spike.md) |
 | R5 | Expiración de cookies a mitad de sesión | F4: cableado al recovery existente de `SessionManager` |
 
 ---

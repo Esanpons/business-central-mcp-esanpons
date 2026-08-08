@@ -33,11 +33,13 @@ the Job-Queue dispatcher draining `CDO Queue Entry` is AL behavior, not bc-ws.
 ## 2. Planned work (prioritized)
 
 ### Auth & reach
-- **AAD authentication (BC Online / SaaS)** — IMPLEMENTED (`BC_AUTH=AAD`,
-  `AADBrowserAuthProvider`): Entra browser login with a persistent profile. Plan + status:
-  [`Plans/2026-08-08-saas-sandbox.md`](Plans/2026-08-08-saas-sandbox.md). Remaining: run the F2
-  capture spike against the live sandbox to confirm `applicationId`/`tenantId`/csrf
-  ([`Plans/saas-spike.md`](Plans/saas-spike.md)), then the live tool smoke.
+- **AAD authentication (BC Online / SaaS)** — ✅ **DONE and VERIFIED LIVE** (2026-08-08) against the
+  `Dev` sandbox. `BC_AUTH=AAD` + `AADBrowserAuthProvider`: Entra browser login with a persistent
+  profile; discovers the per-tab backend WS URL + tenant from the browser (SaaS is NOT `{baseUrl}/csh`).
+  The F2 capture spike ran and the full functional battery is **15/18 PASS** (parity with Docker).
+  Details: [`Plans/2026-08-08-saas-sandbox.md`](Plans/2026-08-08-saas-sandbox.md),
+  [`Plans/saas-spike.md`](Plans/saas-spike.md), [`Plans/saas-battery.md`](Plans/saas-battery.md).
+  Remaining polish (not blocking): `bc_download_report` request-page params on SaaS.
 - **S2S / OAuth client-credentials REST mode** — a future unattended complement (api/v2.0);
   covers API entities only, not arbitrary pages/actions.
 - **Windows authentication** — for domain-joined on-prem where NavUserPassword is off.

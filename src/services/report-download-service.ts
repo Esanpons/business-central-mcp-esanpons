@@ -136,6 +136,15 @@ export class ReportDownloadService {
       // waitReady never trips and would otherwise burn the full 60s default.
       await waitReady(p, this.logger, { timeoutMs: 12000, settleMs: 1500 });
 
+      // SaaS: the report deep-link races with BC's SPA routing and intermittently
+      // lands on a "Go back home" error page instead of the request page. Detect it
+      // and re-navigate a few times. Harmless on-prem (which never hits this page).
+      for (let attempt = 0; attempt < 5 && await this.isErrorPage(p); attempt++) {
+        this.logger.warn(`[report] deep-link landed on an error page; re-navigating (${attempt + 1}/5)`);
+        await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => undefined);
+        await waitReady(p, this.logger, { timeoutMs: 12000, settleMs: 2000 });
+      }
+
       // Set request-page filters (e.g. No. = a document number) BEFORE running, so
       // a document report prints exactly one record instead of nothing usable.
       let filtersApplied: FilterApplied[] | undefined;
@@ -210,6 +219,28 @@ export class ReportDownloadService {
    * Send-to control exists, fall back to a direct confirm. Returns a short
    * description of what it clicked, or null when nothing matched.
    */
+  /**
+   * True when the deep link landed on BC's "Go back home" error page instead of
+   * the report request page (a SaaS SPA-routing race). Scans all frames because
+   * the SPA renders inside an iframe.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async isErrorPage(p: any): Promise<boolean> {
+    for (const f of p.frames()) {
+      try {
+        const hit = await f.evaluate(() => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const doc = (globalThis as any).document;
+          const t = (doc.body?.innerText || '');
+          // Localised variants of BC's not-found page.
+          return /go back home|volver al inicio|torna a l'inici|zur(ü|u)ck zur startseite/i.test(t);
+        });
+        if (hit) return true;
+      } catch { /* cross-origin / detached frame */ }
+    }
+    return false;
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async driveRequestPage(p: any): Promise<string | null> {
     // "Enviar a..." / "Send to..." — match by prefix (the caption ends in "...").

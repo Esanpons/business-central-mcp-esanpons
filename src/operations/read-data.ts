@@ -2,9 +2,11 @@ import { isOk, isErr, ok, err, type Result } from '../core/result.js';
 import { ProtocolError } from '../core/errors.js';
 import type { DataService } from '../services/data-service.js';
 import type { FilterService } from '../services/filter-service.js';
+import type { PageService } from '../services/page-service.js';
 import type { PageContextRepository } from '../protocol/page-context-repo.js';
 import { buildSection, type Section } from '../protocol/section-dto.js';
 import { filterFieldsByGroup, filterColumns, sliceRows } from '../protocol/section-filters.js';
+import { buildOpenFormFilter } from '../protocol/filter-query.js';
 
 export interface ReadDataInput {
   pageContextId: string;
@@ -34,6 +36,7 @@ export class ReadDataOperation {
     private readonly dataService: DataService,
     private readonly filterService: FilterService,
     private readonly repo: PageContextRepository,
+    private readonly pageService?: PageService,
   ) {}
 
   async execute(input: ReadDataInput): Promise<Result<ReadDataOutput, ProtocolError>> {
@@ -45,16 +48,26 @@ export class ReadDataOperation {
     }
 
     if (input.filters && input.filters.length > 0) {
-      // Reset previously-applied filter lines first (unless the caller opted
-      // into accumulation). BC ANDs filter lines together, so without this a
-      // second read with a different value would intersect with the first and
-      // return zero rows.
-      if (!input.appendFilters) {
-        const clearResult = await this.filterService.clearFilters(input.pageContextId, input.section);
-        if (isErr(clearResult)) return clearResult;
+      const isMainList = !input.section || input.section === 'header';
+      if (isMainList && this.pageService) {
+        // Working path: re-open the page's form with an OpenForm `filter=` query
+        // (the filter pane is a no-op on BC27/BC28 — see protocol/filter-query.ts).
+        // This REPLACES any prior filter (reopen from scratch); appendFilters does
+        // not apply here. Filter columns are AL field names, not localized captions.
+        const expr = buildOpenFormFilter(input.filters);
+        const reopened = await this.pageService.reopenWithFilters(input.pageContextId, expr);
+        if (isErr(reopened)) return reopened;
+      } else {
+        // Subpage/line sections: the OpenForm query can't target a subpage, so fall
+        // back to the filter pane (which errors clearly on builds without a
+        // columnBinderPath instead of silently returning unfiltered rows).
+        if (!input.appendFilters) {
+          const clearResult = await this.filterService.clearFilters(input.pageContextId, input.section);
+          if (isErr(clearResult)) return clearResult;
+        }
+        const filterResult = await this.filterService.applyFilters(input.pageContextId, input.filters, input.section);
+        if (isErr(filterResult)) return filterResult;
       }
-      const filterResult = await this.filterService.applyFilters(input.pageContextId, input.filters, input.section);
-      if (isErr(filterResult)) return filterResult;
     }
 
     // For repeater-bearing sections, materialize rows up to the requested range

@@ -60,9 +60,10 @@ en modo AAD.
 - [x] Ajustado en código: descubrimiento de URL/tenant de backend, `Origin`+`User-Agent` en el WS,
   `applicationId=FIN` por defecto en AAD, cookies de backend para el header del WS.
 
-## Verificación en vivo (`npm run smoke:saas`, 2026-08-08)
+## Verificación en vivo (`npm run test-battery saas`, 2026-08-08)
 
 Contra `Dev` (CRONUS ES): auth Entra headless (SSO del perfil) → WS al tab de backend →
-OpenSession → `openPage 22` (5 clientes reales) → `readRows`/`readField` → `writeField`
-`changed=true` + restore. Tell Me devolvió 0 (índice de perfil vacío en sandbox nuevo; no es
-un problema de transporte).
+OpenSession → `openPage 22` (clientes reales) → `readRows`/`readField` → `writeField`
+`changed=true` + restore. Batería funcional completa 15/18 PASS (ver
+[`saas-battery.md`](saas-battery.md)). Tell Me devolvió 0 (índice de perfil vacío en sandbox
+nuevo; no es un problema de transporte).

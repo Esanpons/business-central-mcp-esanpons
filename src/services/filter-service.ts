@@ -64,9 +64,19 @@ export class FilterService {
           availableColumns: currentResolved.repeater.columns.map(c => c.properties.caption ?? '').filter(Boolean),
         }));
       }
+      // The filter PANE (Filter/AddLine with a columnBinderPath) does NOT work on
+      // BC27/BC28: these builds ship list columns with a ColumnBinder.Name but no
+      // .Path, and BC silently ignores an AddLine keyed by the Name (verified live:
+      // a no-match value still returns every row). The mechanism that DOES work is
+      // the OpenForm `filter=` query at open time (see PageService.openPage /
+      // ObjectIndexService). So fail loudly here instead of silently returning
+      // unfiltered data, and point the caller at the working path.
       const columnBinderPath = column.columnBinder?.path;
       if (!columnBinderPath) {
-        return err(new ProtocolError(`Column ${filter.column} has no columnBinderPath for filtering`));
+        return err(new ProtocolError(
+          `Filtering the "${filter.column}" column via the filter pane is not supported on this BC build ` +
+          `(the column has no columnBinderPath). Re-open the page with an OpenForm query filter instead.`,
+        ));
       }
 
       const addLineInteraction: FilterInteraction = {

@@ -84,7 +84,7 @@ async function main() {
 
     const operations: Operations = {
       openPage: new OpenPageOperation(pageService),
-      readData: new ReadDataOperation(dataService, filterService, pageContextRepo),
+      readData: new ReadDataOperation(dataService, filterService, pageContextRepo, pageService),
       writeData: new WriteDataOperation(dataService, pageContextRepo),
       executeAction: new ExecuteActionOperation(actionService, pageContextRepo),
       closePage: new ClosePageOperation(pageService),

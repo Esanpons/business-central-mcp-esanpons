@@ -20,6 +20,12 @@
 > **PENDENT (regla d'or §1):** executar la suite d'integració contra `devel1`
 > (`npx vitest run --config vitest.integration.config.ts`) com a gate de regressió del mode
 > Docker — no s'ha pogut executar aquí (cal el contenidor viu). El SaaS (§7) NO s'ha començat.
+>
+> **⚠️ DESACTUALITZAT (2026-08-08): el SaaS JA ESTÀ FET I VERIFICAT EN VIU.** Aquesta auditoria és
+> de 2026-07-04. El suport SaaS (§7) es va implementar i verificar contra el sandbox `Dev` el
+> 2026-08-08 — vegeu [`2026-08-08-saas-sandbox.md`](2026-08-08-saas-sandbox.md) (estat + bateria
+> 15/18 PASS), [`saas-spike.md`](saas-spike.md) i [`saas-battery.md`](saas-battery.md). Ignoreu el
+> "SaaS NO s'ha començat" d'aquest document històric.
 
 
 
@@ -697,7 +703,12 @@ S'han afegit 15 tests nous (B4, M10/M11, M18, M2, B3, M5). Segueix sense cobertu
 - **Tools sense test d'integració**: `bc_health`, `bc_find_object`, `bc_refresh_objects`,
   `bc_build_manual`, `bc_wizard_navigate`, `bc_switch_company`.
 
-### D. SaaS (§7) — NO començat
+### D. SaaS (§7) — ✅ FET I VERIFICAT EN VIU (2026-08-08)
+
+**Aquesta secció ja no aplica.** Tots els milestones (S1 refactor, S0/F2 spike, S2 `AADBrowserAuthProvider`,
+S3 expiració) es van fer i verificar contra el sandbox `Dev` el 2026-08-08. Bateria funcional 15/18 PASS,
+paritat amb Docker. Vegeu [`2026-08-08-saas-sandbox.md`](2026-08-08-saas-sandbox.md) i
+[`saas-battery.md`](saas-battery.md). El text de sota és el pla original (històric):
 
 Cap milestone del §7 s'ha tocat. Ordre recomanat (repetit aquí per comoditat):
 

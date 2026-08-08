@@ -508,8 +508,13 @@ model can confirm which environment an instance talks to. Guide:
   URL (`getWebSocketUrl()`), OpenSession uses the discovered backend tenant
   (`getTenantIdOverride()`), and `applicationId` defaults to **`FIN`** in AAD mode. Crucially, the
   WS upgrade must send `Origin: https://businesscentral.dynamics.com` + a browser `User-Agent` —
-  the gateway enforces `NAVAllowedAncestor` and 500s a bare `ws` upgrade. Full details:
-  [`docs/Plans/saas-spike.md`](docs/Plans/saas-spike.md). Live smoke: `npm run smoke:saas`.
+  the gateway enforces `NAVAllowedAncestor` and 500s a bare `ws` upgrade. **Also: the WS `Cookie`
+  header must carry ONLY the current tab's backend cookies, de-duped by name.** A persistent profile
+  accumulates `SessionId`/`.AspNetCore.Cookies`/antiforgery for every historical tab (same backend
+  host, different `/tenant/.../tab/{tabId}` paths); sending all of them makes the header carry dozens
+  of duplicate-named cookies and the gateway 500s. The provider filters cookies by the tab path and
+  de-dupes (result: 5 cookies). Full details:
+  [`docs/Plans/saas-spike.md`](docs/Plans/saas-spike.md). Live check: `npm run test-battery saas`.
 
 **One login, shared everywhere.** `ScreenshotService` / `ReportDownloadService` no longer do
 their own `/SignIn` — they call `ensureAuthJar(provider)` (`src/services/bc-web-auth.ts`) and
@@ -535,10 +540,33 @@ actionable error (run `npm run login:aad`) is surfaced in the `SessionLostError`
 
 **Scripts.** `npm run capture:saas` (headed spike, re-runnable diagnostic — captures WS URL,
 OpenSession frame, cookies, OIDC chain to `src/protocol/captures/`), `npm run login:aad`
-(interactive profile bootstrap), `npm run smoke:saas` (live end-to-end: auth → WS → openPage →
-read → write+restore). Note: **screenshots/reports in AAD mode are not yet re-verified** — the
-cookie-injection path uses the front-door jar; if it lands on login it may need the persistent
-profile approach instead (follow-up).
+(interactive profile bootstrap), `npm run test-battery <docker|saas>` (full 18-tool functional
+battery — the live end-to-end check for either environment).
+
+**SaaS verified live (2026-08-08), battery 15/18 PASS — parity with Docker**
+([`docs/Plans/saas-battery.md`](docs/Plans/saas-battery.md)). `bc_screenshot` / `bc_build_manual`
+DO work in AAD mode (the out-of-band browser authenticates on SaaS too).
+
+**List filtering (`bc_open_page` / `bc_read_data` `filters`) — the WORKING mechanism.** The read-time
+"filter pane" (`Filter/AddLine`) is a no-op on BC27/BC28: list columns carry a `ColumnBinder.Name` but
+no `.Path`, so BC silently ignores the AddLine (a no-match value still returns every row). The mechanism
+that works is the **OpenForm `filter=` query** (`src/protocol/filter-query.ts`, format `'Field' IS 'value'`
+AND-joined; the same path `ObjectIndexService` uses for page 9174). `bc_open_page` now takes `filters`
+(applied at open) and `bc_read_data` `filters` re-opens the page's form IN PLACE via
+`PageService.reopenWithFilters` (same pageContextId). **Filter fields are AL field NAMES (invariant) —
+`No.`, `Name`, `City` — NOT localized captions** (`Nº`/`Nombre` raise a BC "token not found" error).
+Values support exact / range (`a..b`) / wildcard (`*x*`) / expression (`>n`). Verified live on both
+Docker (49→0 on an impossible value) and SaaS (6→1 exact, 6→3 range). Document LINE-section filtering
+still falls back to the filter pane (errors clearly). The FilterService AddLine path is kept only for
+that fallback.
+
+**`bc_download_report` on SaaS — known limitation (NOT a SaaS-access problem).** The download mechanism
+itself works on SaaS (same out-of-band browser as `bc_screenshot`, which passes). But the report
+deep-link (`?report=<id>`) is flaky on SaaS (intermittently lands on a "Go back home" error page) and,
+when the request page does render, its toolbar buttons aren't matched by the on-prem "Send to → OK"
+flow. So report download is not yet reliable on SaaS — needs a SaaS-specific report-invocation path
+(deep-link retry + toolbar reverse-engineering, or WS-side capture). On-prem `bc_download_report` is
+unaffected.
 
 ## Known Limitations
 

@@ -4,6 +4,7 @@ import type { PageService } from '../services/page-service.js';
 import { buildAllSections, type Section } from '../protocol/section-dto.js';
 import { fields as treeFields, cues as treeCues, tabs as treeTabs } from '../protocol/form-views.js';
 import { toSectionSummary, filterColumns, sliceRows } from '../protocol/section-filters.js';
+import { buildOpenFormFilter, type OpenFormFilter } from '../protocol/filter-query.js';
 
 export interface OpenPageInput {
   pageId: string;
@@ -24,6 +25,8 @@ export interface OpenPageInput {
   columns?: string[];
   /** Slice already-loaded repeater rows to [offset .. offset+limit] (no scroll; use bc_read_data for deep pagination). */
   range?: { offset: number; limit: number };
+  /** Server-side filters applied via the OpenForm query (AL field names). */
+  filters?: OpenFormFilter[];
 }
 
 export interface OpenPageOutput {
@@ -44,9 +47,11 @@ export class OpenPageOperation {
   constructor(private readonly pageService: PageService) {}
 
   async execute(input: OpenPageInput): Promise<Result<OpenPageOutput, ProtocolError>> {
+    const filterExpr = input.filters && input.filters.length > 0 ? buildOpenFormFilter(input.filters) : undefined;
     const result = await this.pageService.openPage(input.pageId, {
       bookmark: input.bookmark,
       tenantId: input.tenantId,
+      filter: filterExpr,
     });
     if (!isOk(result)) return result;
 

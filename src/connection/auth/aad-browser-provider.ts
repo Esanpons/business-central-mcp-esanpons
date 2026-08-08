@@ -57,6 +57,12 @@ export class AADBrowserAuthProvider implements IBCAuthProvider {
   private cookieJar: RawCookie[] = [];
   private userAgent = '';
   private authenticated = false;
+  // The headless browser that discovered the WS tab is KEPT ALIVE for the session
+  // lifetime: closing it makes BC tear down the per-tab session server-side, so a
+  // Node WS reconnect to that tab races into an "Unexpected server response: 500".
+  // Keeping the browser (and thus the tab) alive makes the WS upgrade reliable.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private browser: any = null;
 
   constructor(
     private readonly config: AADProviderConfig,
@@ -64,18 +70,22 @@ export class AADBrowserAuthProvider implements IBCAuthProvider {
   ) {}
 
   async authenticate(): Promise<Result<AuthResult, AuthenticationError>> {
-    return this.authenticateHeadless(true);
+    return this.authenticateHeadless(true, true);
   }
 
   /**
    * Interactive bootstrap: launch headed so a human completes login + MFA once,
-   * warming the persistent profile. Called by `npm run login:aad`.
+   * warming the persistent profile. Called by `npm run login:aad`. One-shot — the
+   * browser is closed at the end (it only warms the on-disk profile).
    */
   async bootstrap(): Promise<Result<AuthResult, AuthenticationError>> {
-    return this.authenticateHeadless(false);
+    return this.authenticateHeadless(false, false);
   }
 
-  private async authenticateHeadless(headless: boolean): Promise<Result<AuthResult, AuthenticationError>> {
+  private async authenticateHeadless(headless: boolean, keepAlive: boolean): Promise<Result<AuthResult, AuthenticationError>> {
+    // Close any browser kept from a previous authenticate() before opening a new one
+    // (recovery re-auth) so we never leak headless browsers.
+    if (this.browser) { await this.browser.close().catch(() => undefined); this.browser = null; }
     // puppeteer Browser is typed `any` throughout this codebase (browser.ts).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let browser: any;
@@ -123,22 +133,36 @@ export class AADBrowserAuthProvider implements IBCAuthProvider {
       }
       this.wsUrl = capturedWsUrl;
 
-      // Parse backend host + tenant from wss://{host}/tenant/{backendTenant}/tab/{tabId}/csh
+      // Parse backend host + tenant + tab path from
+      // wss://{host}/tenant/{backendTenant}/tab/{tabId}/csh
       const parsed = new URL(this.wsUrl);
       const backendHost = parsed.host;
       const tenantMatch = parsed.pathname.match(/\/tenant\/([^/]+)\//);
       this.backendTenant = tenantMatch ? tenantMatch[1]! : null;
       this.csrfToken = parsed.searchParams.get('csrftoken') ?? '';
+      // The tab-scoped cookie path, e.g. /tenant/{tenant}/tab/{tabId} (strip the /csh).
+      const tabPath = parsed.pathname.replace(/\/csh$/, '');
 
-      // Cookies: WS header needs the BACKEND-HOST cookies (SessionId,
-      // .AspNetCore.Cookies, antiforgery, affinity — all scoped to /tenant/.../tab/...).
-      // The attributed jar (browser injection for screenshots/reports) keeps the
-      // whole BC set (front door + backend).
+      // Cookies: the WS header needs ONLY the CURRENT tab's backend cookies
+      // (SessionId, .AspNetCore.Cookies, antiforgery, affinity — scoped to
+      // /tenant/.../tab/{tabId}). A persistent profile accumulates these for EVERY
+      // historical tab, all on the same backend host; sending all of them makes the
+      // Cookie header carry dozens of duplicate-named cookies with different values,
+      // which the gateway (Kestrel) rejects with a 500 on the WS upgrade. So filter
+      // by the tab path and de-dupe by name. The attributed jar (browser injection
+      // for screenshots/reports) keeps the whole BC set (front door + backend).
       const all = await cdp.send('Network.getAllCookies') as { cookies: CdpCookie[] };
       const bcAll = all.cookies.filter((c) => c.domain.replace(/^\./, '').endsWith('businesscentral.dynamics.com'));
-      const backendCookies = bcAll.filter((c) => c.domain.replace(/^\./, '') === backendHost);
+      const tabCookies = bcAll.filter((c) =>
+        c.domain.replace(/^\./, '') === backendHost &&
+        (c.path === tabPath || tabPath.startsWith(c.path.replace(/\/$/, '') + '/') || c.path === '/'),
+      );
+      // De-dupe by name, preferring the most specific (longest) path match.
+      const byName = new Map<string, CdpCookie>();
+      for (const c of tabCookies.sort((a, b) => a.path.length - b.path.length)) byName.set(c.name, c);
+      const backendCookies = [...byName.values()];
       if (backendCookies.length === 0) {
-        return err(new AuthenticationError(`AAD login succeeded but no backend-host cookies were found for ${backendHost}.`, { baseUrl: this.config.baseUrl }));
+        return err(new AuthenticationError(`AAD login succeeded but no backend-host cookies were found for ${backendHost} (tab ${tabPath}).`, { baseUrl: this.config.baseUrl }));
       }
       this.wsCookieHeader = backendCookies.map((c) => `${c.name}=${c.value}`).join('; ');
       this.cookieJar = bcAll.map((c) => ({
@@ -157,9 +181,13 @@ export class AADBrowserAuthProvider implements IBCAuthProvider {
 
       this.authenticated = true;
       this.logger.info(`[aad] authenticated: backend=${backendHost} tenant=${this.backendTenant} (${backendCookies.length} tab cookies)`);
-      // Release the browser's tab so our Node WS attaches cleanly (ackseqnb=-1
-      // reconnect semantics). The tab session survives server-side long enough.
-      await browser.close().catch(() => undefined);
+      if (keepAlive) {
+        // Keep the browser (and its tab session) alive so the Node WS upgrade to
+        // that tab succeeds. Closed on invalidate()/recovery.
+        this.browser = browser;
+      } else {
+        await browser.close().catch(() => undefined);
+      }
       return ok({ cookies: this.wsCookieHeader, csrfToken: this.csrfToken, cookieJar: this.cookieJar });
     } catch (e) {
       await browser?.close().catch(() => undefined);
@@ -308,6 +336,9 @@ export class AADBrowserAuthProvider implements IBCAuthProvider {
     this.backendTenant = null;
     this.csrfToken = '';
     this.cookieJar = [];
+    // Tear down the kept-alive browser (and its tab session). authenticate() will
+    // open a fresh one. Fire-and-forget so invalidate() stays synchronous.
+    if (this.browser) { const b = this.browser; this.browser = null; b.close().catch(() => undefined); }
     this.logger.info('[aad] auth state invalidated; next connection will re-discover (persistent profile retained)');
   }
 }

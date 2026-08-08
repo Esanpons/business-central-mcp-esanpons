@@ -16,6 +16,10 @@ export const OpenPageSchema = z.object({
   pageId: StringOrNumber.describe('Numeric BC page ID (e.g., 22 for Customer List, 21 for Customer Card). Use bc_search_pages to find IDs.'),
   bookmark: z.string().optional().describe('Open the page to a specific record. Bookmarks come from list row results in bc_open_page or bc_read_data.'),
   tenantId: z.string().optional().describe('BC tenant ID. Defaults to the server-configured tenant. Only needed in multi-tenant deployments.'),
+  filters: z.array(z.object({
+    column: z.string().describe('AL field NAME (invariant), e.g. "No.", "Name", "City" — NOT the localized caption ("Nº"/"Nombre" fail).'),
+    value: z.string().describe('BC filter value: exact ("10000"), range ("10000..30000"), wildcard ("A*", "*consulting*"), expression (">1000").'),
+  })).optional().describe('Server-side filters applied when the page opens (via the OpenForm query — the filter mechanism that works on BC27/BC28; the read-time filter pane does not). Multiple filters combine with AND. Use AL field names, not localized captions.'),
   sections: z.array(z.string()).optional().describe('Only return these sectionIds (e.g. ["header"]). Use to avoid pulling every line and factbox of a big document. Omit for all sections.'),
   summary: z.boolean().optional().describe('Return only sectionId/kind/caption (+totalRowCount) per section, with no fields/rows. Best first call on a large page (e.g. page 41 Sales Quote): discover the sections, then pull each with bc_read_data. Avoids token-limit overflows.'),
   tab: z.string().optional().describe('Filter header fields to a tab (e.g. "General", "Shipping and Billing"). Applies to the header section only.'),
@@ -32,9 +36,9 @@ export const ReadDataSchema = z.object({
   tab: z.string().optional().describe('Tab name to filter header fields by (e.g., "General", "Invoice Details", "Shipping and Billing"). Omit to return all header fields.'),
   group: z.string().optional().describe('Restrict returned card fields to those inside the group with this caption (e.g. "Bill-to", "Ship-to"). Use to disambiguate documents whose Sell-to/Bill-to/Ship-to groups repeat captions like "Name"/"Address"/"City". Each returned field also carries its own "group" and "controlPath".'),
   filters: z.array(z.object({
-    column: z.string().describe('Column caption name to filter on (e.g., "City", "No.").'),
+    column: z.string().describe('AL field NAME (invariant), e.g. "No.", "Name", "City" — NOT the localized caption ("Nº"/"Nombre" fail).'),
     value: z.string().describe('Filter value. Supports exact match ("London"), ranges ("10000..20000"), wildcards ("*consulting*"), expressions (">1000").'),
-  })).optional().describe('Server-side filters to apply before reading. Multiple filters combine with AND logic. By DEFAULT these REPLACE any filters already applied to this page context (previous filter lines are reset first).'),
+  })).optional().describe('Server-side filters applied by re-opening the page via the OpenForm query (the mechanism that works on BC27/BC28; the read-time filter pane does not). Multiple filters combine with AND and REPLACE any prior filter. Use AL field names, not localized captions. For document LINE sections filtering is not supported (returns a clear error).'),
   appendFilters: z.boolean().optional().describe('Set true to AND the filters on top of the ones already applied to this page context, instead of replacing them. Default false (replace).'),
   columns: z.array(z.string()).optional().describe('Column caption names to include in results. Omit to return all columns. Reduces output size.'),
   range: z.object({
