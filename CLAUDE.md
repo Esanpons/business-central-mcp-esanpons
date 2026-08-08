@@ -326,7 +326,7 @@ Source: https://platform.claude.com/docs/en/docs/agents-and-tools/tool-use/defin
 ## Field targeting, write verification & payload control (Fork additions — BC744)
 
 Hardening derived from task BC744 (full reference: [`docs/guides/conventions.md`](docs/guides/conventions.md);
-pending items in [`docs/ROADMAP.md`](docs/ROADMAP.md); execution record in `docs/Plans/bc-ws-mejoras-bc744.md`).
+pending items in [`docs/ROADMAP.md`](docs/ROADMAP.md) — the single place open work is tracked).
 Agent rules of thumb:
 
 - **Duplicate captions (P1/P8).** Document headers repeat captions across groups (Sell-to / Bill-to /
@@ -427,8 +427,10 @@ selected by `formats` (default `["md"]`):
   PDF/DOCX renderer any more (the `docx` dependency is gone) -- the HTML is the print path, so
   Ctrl+P on it yields the paged PDF.
 
-Output under `BC_MANUAL_DIR` (default `./manuals`). A user-scope skill
-`~/.claude/skills/bc-manual/SKILL.md` guides Claude to gather steps and call it.
+Output under `BC_MANUAL_DIR` (default `./manuals`). The authoring recipe an agent should follow
+lives in [`docs/guides/documenting.md`](docs/guides/documenting.md) — there is no `bc-manual`
+skill (an earlier note here claimed a user-scope `~/.claude/skills/bc-manual/SKILL.md`; it does
+not exist).
 
 **Printable A4 HTML — how it holds together.** The renderer does NOT emit a flowing document. It
 emits a flat list of measurable units in a hidden `#flow`, an empty `#doc`, and a `<template>` for
@@ -473,8 +475,8 @@ actionable messages via `src/core/error-translator.ts` and records error codes i
 
 Auth is selected by `BC_AUTH` (default `UserPassword`). **Unset = exact on-prem behavior.**
 The provider is chosen by `createAuthProvider()` (`src/connection/auth/factory.ts`); the rest of
-the stack (protocol, session, services) is auth-agnostic. Full plan + rationale:
-[`docs/Plans/2026-08-08-saas-sandbox.md`](docs/Plans/2026-08-08-saas-sandbox.md).
+the stack (protocol, session, services) is auth-agnostic. Discovery details + live evidence:
+[`docs/SAAS-EVIDENCE.md`](docs/SAAS-EVIDENCE.md) (handshake spike + Docker-vs-SaaS battery).
 
 **Target is fixed per MCP registration, not chosen at runtime.** One server process = one BC
 (env-selected). To have both, register two MCP servers with clear names (e.g. `bc-docker` +
@@ -514,7 +516,7 @@ model can confirm which environment an instance talks to. Guide:
   host, different `/tenant/.../tab/{tabId}` paths); sending all of them makes the header carry dozens
   of duplicate-named cookies and the gateway 500s. The provider filters cookies by the tab path and
   de-dupes (result: 5 cookies). Full details:
-  [`docs/Plans/saas-spike.md`](docs/Plans/saas-spike.md). Live check: `npm run test-battery saas`.
+  [`docs/SAAS-EVIDENCE.md`](docs/SAAS-EVIDENCE.md). Live check: `npm run test-battery saas`.
 
 **One login, shared everywhere.** `ScreenshotService` / `ReportDownloadService` no longer do
 their own `/SignIn` — they call `ensureAuthJar(provider)` (`src/services/bc-web-auth.ts`) and
@@ -544,7 +546,7 @@ OpenSession frame, cookies, OIDC chain to `src/protocol/captures/`), `npm run lo
 battery — the live end-to-end check for either environment).
 
 **SaaS verified live (2026-08-08), battery 15/18 PASS — parity with Docker**
-([`docs/Plans/saas-battery.md`](docs/Plans/saas-battery.md)). `bc_screenshot` / `bc_build_manual`
+([`docs/SAAS-EVIDENCE.md`](docs/SAAS-EVIDENCE.md)). `bc_screenshot` / `bc_build_manual`
 DO work in AAD mode (the out-of-band browser authenticates on SaaS too).
 
 **List filtering (`bc_open_page` / `bc_read_data` `filters`) — the WORKING mechanism.** The read-time

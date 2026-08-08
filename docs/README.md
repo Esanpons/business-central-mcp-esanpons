@@ -18,7 +18,7 @@ cross-cutting conventions, setup, and the roadmap.
 | `bc_read_data` | Refresh/return one section, with filtering, tab/group narrowing, column selection, and row pagination. | [tools/bc_read_data.md](tools/bc_read_data.md) |
 | `bc_write_data` | Write field values (header / card / FactBox / line); reports per-field whether the value actually **changed**. | [tools/bc_write_data.md](tools/bc_write_data.md) |
 | `bc_execute_action` | Invoke a named action or drill down on a Role Center cue tile. | [tools/bc_execute_action.md](tools/bc_execute_action.md) |
-| `bc_navigate` | Select a row, drill down into a record, or trigger a field lookup by bookmark. | [tools/bc_navigate.md](tools/bc_navigate.md) |
+| `bc_navigate` | Select a row by bookmark, or drill down into the record's detail page. | [tools/bc_navigate.md](tools/bc_navigate.md) |
 | `bc_respond_dialog` | Confirm / cancel / close a dialog raised by an action or write. | [tools/bc_respond_dialog.md](tools/bc_respond_dialog.md) |
 | `bc_close_page` | Close a page and free its server-side resources. | [tools/bc_close_page.md](tools/bc_close_page.md) |
 
@@ -65,12 +65,15 @@ cross-cutting conventions, setup, and the roadmap.
   tri-state, payload control (`summary`/`sections`/`columns`/`range`/`quiet`), and error codes.
 - **[Setup (global / per-project install)](SETUP-GLOBAL.md)** — register the server with Claude
   Code / Desktop / VSCode.
-- **[Roadmap, backlog & known limitations](ROADMAP.md)** — everything not yet done.
+- **[Pending work](ROADMAP.md)** — the SINGLE source of truth for everything not yet done:
+  limitations, open bugs, doc drift, test debt and the idea backlog. Every item is re-verified
+  against the code; nothing pending is tracked anywhere else.
 - **[CHANGELOG](../CHANGELOG.md)** — released and unreleased changes.
 - **Protocol & dev reference** — [`CLAUDE.md`](../CLAUDE.md) (BC wire-protocol patterns,
   development rules, decompiled-source verification procedure).
-- **Design history (archive)** — [`docs/superpowers/`](superpowers/) and execution records under
-  [`docs/Plans/`](Plans/).
+- **[SaaS evidence (frozen)](SAAS-EVIDENCE.md)** — how SaaS's per-tab backend WebSocket was
+  discovered, plus the 18-tool Docker-vs-SaaS parity matrix. Results only — pending work goes in
+  the roadmap.
 
 ## Configuration
 

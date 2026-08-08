@@ -146,7 +146,7 @@ On-prem is unaffected: without `BC_AUTH`, everything behaves exactly as above.
    `-e BC_AAD_TOTP_SECRET=<base32>` (needs `otpauth`, already a dependency). `BC_USERNAME`/
    `BC_PASSWORD` are optional in AAD mode (only used for headless login).
 3. `BC_TENANT_ID` / `BC_APPLICATION_ID` in AAD mode take the values the F2 spike confirms
-   (`npm run capture:saas`); see [`Plans/saas-spike.md`](Plans/saas-spike.md).
+   (`npm run capture:saas`); see [`SAAS-EVIDENCE.md`](SAAS-EVIDENCE.md).
 
 If a headless reconnect ever fails with an "interaction required" style error (Entra expired the
 persisted session), just re-run `npm run login:aad`.

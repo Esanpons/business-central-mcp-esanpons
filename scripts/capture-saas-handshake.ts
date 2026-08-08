@@ -1,6 +1,6 @@
 // scripts/capture-saas-handshake.ts
 //
-// F2 spike (docs/Plans/2026-08-08-saas-sandbox.md): capture the BC Online (SaaS)
+// SaaS handshake spike (results: docs/SAAS-EVIDENCE.md): capture the BC Online (SaaS)
 // WebSocket handshake so the AAD provider (F3) can reproduce it. The BC web client
 // opens its WebSocket INSIDE a Web Worker, so a page-level hook sees nothing — we
 // attach to every target via CDP (Target.setAutoAttach, flatten) and enable the
@@ -14,7 +14,7 @@
 //   npx tsx scripts/capture-saas-handshake.ts
 // Optional: BC_AAD_PROFILE_DIR (default ./.state/aad-profile), CAPTURE_TIMEOUT_MS.
 //
-// Output: docs/Plans/saas-spike.md is written by hand from the console summary;
+// Output: docs/SAAS-EVIDENCE.md is written by hand from the console summary;
 // the raw redacted capture goes to src/protocol/captures/saas-handshake-<date>.json.
 
 import { config as dotenv } from 'dotenv';

@@ -6,7 +6,7 @@
 Executes exactly one of an `action` (a named header/line/system action such as Post, Release, New, Delete) or a `cue` (a Role Center cue-tile drill-down) against an open page identified by `pageContextId`. The operation resolves the target within the requested `section`, validates that it is visible and enabled, sends an `InvokeAction` RPC to BC, applies the resulting protocol events to the page context, and returns the post-invoke state. For named actions, well-known names (`new`, `delete`, `refresh`, `edit`, `view`) take a SystemAction fast path; on pages with a repeater the row-targeting actions (Delete, Edit, View, DrillDown, New) are routed to the current row via the `{repeaterPath}/cr/c[0]` control path. Cue drill-downs send `DrillDown` (SystemAction 120) against the cue's control path and register the ownerless `FormCreated` page that BC opens.
 
 ## When to use / when NOT to use
-Use it to trigger header/line/system actions (Post, Release, Reopen, New, Delete, Refresh) and to drill into Role Center cue tiles to open the underlying list. For row-scoped actions on a list or document lines, pass `section` to disambiguate header vs. line actions, and (per the tool description) `rowIndex`/`bookmark` to pick the row.
+Use it to trigger header/line/system actions (Post, Release, Reopen, New, Delete, Refresh) and to drill into Role Center cue tiles to open the underlying list. For row-scoped actions on a list or document lines, pass `section` to disambiguate header vs. line actions, and `rowIndex`/`bookmark` to pick the row.
 
 Do NOT use it to write field values — use `bc_write_data`. Do NOT use it to open a record from a list row — use `bc_navigate` with `action: "drill_down"`. Passing both `action` and `cue`, or neither, is an error. Using `cue` without `section` is an error.
 
@@ -23,7 +23,7 @@ Do NOT use it to write field values — use `bc_write_data`. Do NOT use it to op
 
 The schema is refined with `!!action !== !!cue` — exactly one of `action` or `cue` must be supplied.
 
-Note: `rowIndex` and `bookmark` are accepted by the schema and documented in the tool description as the way to select a row for row-scoped actions, but the current `ExecuteActionOperation`/`ActionService` implementation does not read them — row targeting is resolved through the repeater's current row (`{repeaterPath}/cr/c[0]`) via the resolved `section`. Position the row beforehand (e.g. with `bc_navigate` `action: "select"`) when a specific row matters.
+Note: `rowIndex`/`bookmark` are honoured. For a row-scoped system action (New=10, Delete=20, Edit=40, View=60, DrillDown=120), `ActionService` first positions the repeater cursor on the requested row with a `SetCurrentRow` interaction, then executes the action against `{repeaterPath}/cr/c[0]`. `bookmark` wins over `rowIndex`; an out-of-range `rowIndex` returns an explicit error (with the loaded row range) instead of acting on the wrong row. Omit both and the action hits whatever row BC currently has selected — so **always pass a `bookmark` for destructive actions**.
 
 ## Output
 Returns an `ExecuteActionOutput` object:
@@ -99,7 +99,7 @@ Expected response shape:
 - Cue drill-down opens an ownerless top-level `FormCreated`; the operation registers it under a fresh `session:page:cue:<8-hex>` page context so it appears in `openedPages`.
 - `quiet` only suppresses `updatedFields`; `success`, `changedSections`, `openedPages`, `dialogsOpened`, and dialog info are always returned.
 - `updatedFields` reflects only the `header` section and only effectively-visible, captioned controls (ancestor group visibility + wizard state are taken into account).
-- `rowIndex`/`bookmark` are present in the schema but not consumed by the action operation today (see Parameters note).
+- `rowIndex`/`bookmark` select the target row for row-scoped system actions (see the Parameters note). Without them the action applies to BC's currently selected row.
 - Wizard navigation (`back`/`next`/`finish`/`cancel`) exists in `ActionService.executeWizardNav` but is not exposed through this tool's schema.
 
 ## Related tools

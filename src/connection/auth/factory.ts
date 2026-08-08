@@ -8,7 +8,7 @@ import { AADBrowserAuthProvider } from './aad-browser-provider.js';
  * Selects the auth provider for `BC_AUTH`. `UserPassword` (default) is the
  * on-prem/Docker forms login — behavior identical to before this factory
  * existed. `AAD` (BC Online / SaaS) drives an Entra browser login.
- * See docs/Plans/2026-08-08-saas-sandbox.md.
+ * See docs/SAAS-EVIDENCE.md (discovery) and CLAUDE.md "Authentication modes".
  */
 export function createAuthProvider(bc: BCConfig, logger: Logger): IBCAuthProvider {
   if (bc.authMode === 'AAD') {

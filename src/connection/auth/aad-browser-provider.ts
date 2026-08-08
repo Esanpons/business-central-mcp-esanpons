@@ -46,7 +46,7 @@ interface CdpCookie { name: string; value: string; domain: string; path: string;
  * OpenSession tenantId is the backend tenant parsed from the URL path; applicationId
  * is `FIN` on SaaS (config default in AAD mode).
  *
- * Spike reference: docs/Plans/saas-spike.md,
+ * Spike reference: docs/SAAS-EVIDENCE.md,
  * src/protocol/captures/saas-handshake-2026-08-08.json.
  */
 export class AADBrowserAuthProvider implements IBCAuthProvider {

@@ -1,17 +1,17 @@
 # bc_navigate
 
-> Navigate to a record on an open List or Document page by bookmark — position the cursor on a row, drill down into the record's detail page, or trigger a field lookup.
+> Navigate to a record on an open List or Document page by bookmark — position the cursor on a row, or drill down into the record's detail page.
 
 ## What it does
 
-Operates on a page that is already open (identified by a `pageContextId` from `bc_open_page`) and a row `bookmark` taken from that page's row data. It supports three actions: `select` moves the server-side cursor onto the row without opening anything; `drill_down` opens the record's Card/Document detail page and returns a brand-new `pageContextId` for that opened page; `lookup` triggers the lookup action on a field. The operation delegates to `NavigationService.drillDown` (for `drill_down`) or `NavigationService.selectRow` (for `select`/`lookup`), then projects the resulting page context into `Section[]` DTOs. The original List/Document page stays open after a drill-down.
+Operates on a page that is already open (identified by a `pageContextId` from `bc_open_page`) and a row `bookmark` taken from that page's row data. It supports two actions: `select` moves the server-side cursor onto the row without opening anything, and `drill_down` opens the record's Card/Document detail page and returns a brand-new `pageContextId` for that opened page. The operation delegates to `NavigationService.drillDown` or `NavigationService.selectRow`, then projects the resulting page context into `Section[]` DTOs. The original List/Document page stays open after a drill-down.
 
 ## When to use / when NOT to use
 
 Use it to:
 - Position the cursor on a specific list row before invoking a row-scoped action — though note `bc_execute_action` also accepts `bookmark`/`rowIndex` directly.
 - Open ("drill into") a record from a list, e.g. Customer List → Customer Card, or Sales Orders → Sales Order. This is the canonical way to go from a list to a detail page.
-- Drill down / look up from a specific column on a document line (`section: "lines"`, `field: "No."`).
+- Drill down from a document line by targeting that section (`section: "lines"`).
 
 Do NOT use it:
 - On Card pages with no repeater rows — `bc_navigate` only works on pages that have repeater rows (List/Document pages). Use `bc_open_page` to open a card directly.
@@ -27,11 +27,10 @@ Do not confuse `select` with `drill_down`: `select` only moves the cursor and re
 |---|---|---|---|
 | `pageContextId` | `string` (min length 1) | Yes | Page context ID of the List or Document page containing the row to navigate to. |
 | `bookmark` | `string` (min length 1) | Yes | Row bookmark from `bc_open_page` or `bc_read_data` results identifying which record to navigate to. |
-| `action` | `enum('drill_down' \| 'select' \| 'lookup')` | No | `"select"` moves cursor to row (default). `"drill_down"` opens the record detail page (returns new pageContextId). `"lookup"` triggers field lookup. |
+| `action` | `enum('drill_down' \| 'select')` | No | `"select"` moves cursor to row (default). `"drill_down"` opens the record detail page (returns new pageContextId). |
 | `section` | `string` | No | Section containing the row (e.g., `"lines"` for document line items). Omit for header/default repeater. |
-| `field` | `string` | No | Column caption to drill down or look up from (e.g., `"No."` to drill down on item number). Omit to use the default drill-down column. |
 
-Note: although the `action` description states `"select"` is the default, `action` is optional in the schema and the operation treats any non-`drill_down` value (including an absent `action`, `select`, and `lookup`) as the select-row path.
+Note: `action` is optional; the operation treats anything other than `drill_down` (including an absent `action`) as the select-row path. There is no field-lookup action — `lookup` and the `field` parameter were removed because they were never implemented; triggering `SystemAction.Lookup=110` is still an open gap (see [../ROADMAP.md](../ROADMAP.md), G7).
 
 ## Output
 
@@ -39,9 +38,9 @@ Returned shape is `NavigateOutput` (`src/operations/navigate.ts`):
 
 | Field | Type | Description |
 |---|---|---|
-| `targetPageContextId` | `string?` | Set only when `action='drill_down'` lands on a new page — the new page context ID of the opened Card/Document page. Absent for `select`/`lookup`. |
+| `targetPageContextId` | `string?` | Set only when `action='drill_down'` lands on a new page — the new page context ID of the opened Card/Document page. Absent for `select`. |
 | `pageType` | `string?` | Page type of the drilled-down target page (e.g. `"Card"`, `"Document"`). Set only for `drill_down`. |
-| `sections` | `Section[]?` | For `drill_down`: all sections of the target page (`buildAllSections`). For `select`/`lookup`: the single resolved section (`buildSection` for `section ?? 'header'`), or an empty array if that section can't be built. |
+| `sections` | `Section[]?` | For `drill_down`: all sections of the target page (`buildAllSections`). For `select`: the single resolved section (`buildSection` for `section ?? 'header'`), or an empty array if that section can't be built. |
 | `changedSections` | `string[]` | Always present. Currently always `[]` for this operation. |
 | `dialogsOpened` | `Array<{ formId: string; message?: string; fields?: ControlField[] }>` | Always present. Currently always `[]` for this operation. |
 | `requiresDialogResponse` | `boolean` | Always present. Currently always `false` for this operation. |
@@ -106,15 +105,15 @@ Expected response (new page context + full sections of the opened page):
 Drill down from a specific line-item column on a Document page:
 
 ```json
-{ "pageContextId": "session:page:sales-order-9", "bookmark": "37;...", "action": "drill_down", "section": "lines", "field": "No." }
+{ "pageContextId": "session:page:sales-order-9", "bookmark": "37;...", "action": "drill_down", "section": "lines" }
 ```
 
 ## Notes & limitations
 
 - After `drill_down`, BOTH the original List/Document page and the newly opened page remain open. Call `bc_close_page` on both when finished to free server-side WebSocket form sessions.
-- The returned `targetPageContextId` (and `pageType`) are populated ONLY for `drill_down`. For `select`/`lookup` the cursor moves but no new page context exists.
+- The returned `targetPageContextId` (and `pageType`) are populated ONLY for `drill_down`. For `select` the cursor moves but no new page context exists.
 - `changedSections`, `dialogsOpened`, and `requiresDialogResponse` are always present in the output but are currently fixed to empty/`false` by this operation — it does not surface dialogs itself. If a navigation could raise a confirmation dialog, that surfaces through other tools.
-- For `select`/`lookup`, sections are limited to the single resolved section (`section ?? 'header'`); only `drill_down` returns the target page's full section set.
+- For `select`, sections are limited to the single resolved section (`section ?? 'header'`); only `drill_down` returns the target page's full section set.
 - This tool only works on pages with repeater rows (List/Document). It is not for Card pages.
 
 ## Related tools

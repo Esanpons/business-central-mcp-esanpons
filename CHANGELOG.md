@@ -15,7 +15,7 @@ existing data tools keep their full speed.
 
 ### Fixed (2026-07-04 audit)
 
-Full findings and remaining work: [`docs/Plans/2026-07-04-auditoria-completa-millores.md`](docs/Plans/2026-07-04-auditoria-completa-millores.md).
+Remaining work from that audit (re-verified 2026-08-09) lives in [`docs/ROADMAP.md`](docs/ROADMAP.md); the audit order-of-work document itself was consolidated into it and removed.
 
 - **`bc_execute_action` now honours `bookmark`/`rowIndex` for row-scoped actions** (Delete/Edit/View/DrillDown/New). Previously these were silently ignored and the action hit whatever row BC had selected — a Delete could remove the wrong record while reporting success. The cursor is now positioned on the requested row first.
 - **Concurrent tool calls no longer kill a healthy session.** The invoke timeout clock started when a call was *enqueued*, so time spent waiting behind other queued invokes counted against it; a queued call could time out and tear down a live session. The timeout now starts when the interaction is actually sent.
