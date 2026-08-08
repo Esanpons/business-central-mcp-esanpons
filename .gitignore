@@ -1,16 +1,55 @@
+# NOTA: git nomes tracta `#` com a comentari a PRINCIPI de linia. Un comentari al
+# final d'una linia de patro passa a formar part del patro i el trenca. Comentaris
+# sempre en linia propia.
+
+# --- Build & dependencies -------------------------------------------------------
 node_modules/
 dist/
-logs/
-.state/
-.env
-reference/
+# dist-dxt/: `npm run build:dxt`; CI el reconstrueix i l'adjunta a la release.
+dist-dxt/
 *.tsbuildinfo
 coverage/
-.worktrees/
-dist-dxt/
-.poc/
-screenshots/
-manuals/_verify/
-.arxius/
-.report-capture/
+
+# --- Runtime state --------------------------------------------------------------
+# Mai al repo: credencials vives i cache regenerable.
+.env
+# .secrets/: devel1.env i saas.env.
 .secrets/
+# .state/: aad-profile = sessio SSO d'Entra viva (equival a credencials);
+# object-index.json = cache reconstruible amb bc_refresh_objects.
+.state/
+logs/
+.worktrees/
+
+# --- Codi/binaris de tercers ----------------------------------------------------
+# reference/: DLLs de BC descompilades (Microsoft), no distribuibles.
+reference/
+
+# --- Sortides de tools i scripts ------------------------------------------------
+# Dirs que omplen bc_screenshot / bc_download_report / els scripts de POC.
+# Son reproduibles: es regeneren executant l'eina, no s'han de versionar.
+# screenshots/: BC_SCREENSHOT_DIR per defecte.
+screenshots/
+# .arxius/: BC_REPORT_DIR per defecte (.arxius/reports).
+.arxius/
+# .poc/: scripts/screenshot-poc.ts, demo-fasttab-states.ts, verify-expand.ts.
+.poc/
+# .report-capture/: scripts/capture-report-requestpage.ts.
+.report-capture/
+
+# --- Sortides de test que aterren DINS de carpetes versionades ------------------
+# manuals/ conte un exemple real (crear-client) que SI es versiona, perque els seus
+# PNG son fixtures d'entrada de `npm run verify:manual-html`. La resta que hi
+# apareix son manuals generats per proves: `npm run test-battery` reescriu
+# battery-docker/battery-saas, scripts/test-mcp-e2e.mjs reescriu e2e-smoke i
+# `npm run verify:manual-html` escriu _verify/. Es reciclen a cada execucio.
+# Llista blanca explicita: afegeix un `!` nomes si un manual nou es realment
+# documentacio o fixture, no la sortida d'un test.
+manuals/*
+!manuals/crear-client.md
+!manuals/crear-client-img/
+
+# tests/recordings/ nomes ha de contenir gravacions que un test LLEGEIXI.
+# scripts/dump-control-tree.ts hi escriu volcats de depuracio (pageNN-*.json) de
+# ~1 MB cadascun que cap test consumeix; es regeneren executant l'script.
+tests/recordings/page*.json

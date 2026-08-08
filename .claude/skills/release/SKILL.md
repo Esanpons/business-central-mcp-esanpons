@@ -134,8 +134,9 @@ Look for:
 - NOTHING from `reference/`, `tests/`, `scripts/`, `.env*`, `logs/`,
   `docs/`, `*.md` other than README/CHANGELOG
 
-If the tarball looks wrong, stop and fix `files` or `.npmignore`. Don't
-publish a leaky tarball — `npm unpublish` is restricted.
+If the tarball looks wrong, stop and fix the `files` field in `package.json`
+(there is no `.npmignore` — `files` alone bounds the tarball). Don't publish
+a leaky tarball — `npm unpublish` is restricted.
 
 ## Step 5: Verify the bin shebang
 

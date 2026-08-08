@@ -71,6 +71,35 @@ npm run start:stdio-direct           # Direct stdio for Claude Desktop
 - Always run `npx tsc --noEmit` after changes
 - Run integration tests after any protocol-level change
 - ESM project -- use `.js` extensions in all imports
+- NEVER commit generated output -- see "What is generated vs versioned" below
+
+### What is generated vs versioned
+
+Running the tools and scripts writes real files into the working tree. Almost all of it is
+reproducible and must stay OUT of git; `.gitignore` is the enforcement point and every rule
+there carries the comment explaining WHY. Before adding a file to git, ask which bucket it is in:
+
+| Bucket | Examples | Rule |
+|---|---|---|
+| Reproducible output | `screenshots/`, `.arxius/` (reports), `manuals/battery-*`, `manuals/e2e-smoke*`, `manuals/_verify/`, `.poc/`, `.report-capture/`, `logs/`, `tests/recordings/page*.json` | Never commit. Regenerate by re-running the tool |
+| Credentials / live session | `.secrets/`, `.state/aad-profile/` | Never commit, ever |
+| Regenerable cache | `.state/object-index.json` | Never commit (`bc_refresh_objects` rebuilds it) |
+| Fixture a test READS | `tests/recordings/cdo-wizard-*.json`, `manuals/crear-client-img/*.png` (input to `npm run verify:manual-html`), `src/protocol/captures/*` | Commit, and keep the consumer discoverable |
+
+Two dirs are versioned but receive test output, so they use an explicit allow-list in
+`.gitignore` (`manuals/*` + `!` exceptions, and `tests/recordings/page*.json`). Adding a `!`
+exception means asserting the file is documentation or a fixture -- not the output of a run.
+
+`scripts/` is for repeatable tooling, not for one-off probes. A script that answered a question
+once has served its purpose: fold the finding into code, a test, or a doc, then delete the
+script. Everything under `scripts/` should be either wired into `package.json` or documented
+here as a live diagnostic.
+
+Two gotchas that have already bitten this repo:
+- In `.gitignore`, git only treats `#` as a comment at the START of a line. A trailing comment
+  becomes part of the pattern and silently disables it.
+- `package.json` `"files": ["dist/"]` is what bounds the npm tarball. There is no `.npmignore`
+  (it was inert and stale); do not reintroduce one -- change `files` instead.
 
 ## Protocol Verification Procedure
 
