@@ -436,23 +436,54 @@ export class BCSession {
     const MAX_ATTEMPTS = 10;
     for (let i = 0; i < MAX_ATTEMPTS && this.modalStack.size > 0; i++) {
       const top = this.modalStack.peek()!;
-      const result = await this.invokeUnqueued(
-        { type: 'InvokeAction', formId: top, controlPath: 'server:', systemAction: 320 },
-        (event) => event.type === 'InvokeCompleted',
-        this.timeoutMs,
-      );
-      if (isErr(result)) {
-        return err(new ProtocolError(`reconcileModalStack: Abort on formId=${top} failed: ${result.error.message}`));
+      // B1: Abort=320 alone does NOT close a confirm dialog server-side (live
+      // observation, BC28) — the local stack was force-popped, BC kept the dialog,
+      // the next invoke violated modality again and the whole session was reset,
+      // losing every open page. So escalate through the answers a confirm dialog
+      // actually accepts, stopping at the first one BC acknowledges with FormClosed.
+      // No=390 is the same answer closeGracefully already uses successfully.
+      const attempts: Array<{ label: string; interaction: BCInteraction }> = [
+        { label: 'No=390', interaction: { type: 'InvokeAction', formId: top, controlPath: 'server:', systemAction: 390 } },
+        { label: 'Cancel=310', interaction: { type: 'InvokeAction', formId: top, controlPath: 'server:', systemAction: 310 } },
+        { label: 'Abort=320', interaction: { type: 'InvokeAction', formId: top, controlPath: 'server:', systemAction: 320 } },
+        { label: 'CloseForm', interaction: { type: 'CloseForm', formId: top } },
+      ];
+
+      let lastError: ProtocolError | null = null;
+      let closed = false;
+      for (const attempt of attempts) {
+        const result = await this.invokeUnqueued(
+          attempt.interaction,
+          (event) => event.type === 'InvokeCompleted',
+          this.timeoutMs,
+        );
+        if (isErr(result)) {
+          // A rejected answer (BC may refuse No on a dialog with no No button) is
+          // not fatal — try the next one. Only a dead session stops the walk.
+          lastError = result.error;
+          if (this.dead) {
+            return err(new ProtocolError(`reconcileModalStack: session died while closing formId=${top}: ${result.error.message}`));
+          }
+          continue;
+        }
+        collected.push(...result.value);
+        // updateFormTracking pops the stack when BC emits FormClosed for this form.
+        if (this.modalStack.peek() !== top) {
+          this.logger.info(`reconcileModalStack: dialog formId=${top} closed by ${attempt.label}`);
+          closed = true;
+          break;
+        }
+        this.logger.warn(`reconcileModalStack: ${attempt.label} did not close formId=${top} — escalating`);
       }
-      collected.push(...result.value);
-      // If BC didn't emit FormClosed for this formId, force-pop to make progress.
-      // Live observation (BC28): confirm dialogs do NOT emit FormClosed on
-      // Abort=320 against controlPath:'server:'. The local stack is force-popped
-      // here for client-state consistency, but BC may still consider the
-      // dialog open server-side -- in that case the next invoke triggers
-      // another LogicalModalityViolation and falls back to session reset.
-      if (this.modalStack.peek() === top) {
-        this.logger.warn(`reconcileModalStack: BC did not emit FormClosed for formId=${top} after Abort -- force-popping local stack (server-side dialog may still be open)`);
+
+      if (!closed) {
+        // Every answer was refused. Force-pop so the client state stays consistent,
+        // but say so loudly: BC may still hold the dialog, and the next invoke will
+        // fall back to the session reset.
+        this.logger.warn(
+          `reconcileModalStack: formId=${top} survived No/Cancel/Abort/CloseForm — force-popping local stack `
+          + `(server-side dialog may still be open${lastError ? `; last error: ${lastError.message}` : ''})`,
+        );
         this.modalStack.pop();
         this._openFormIds.delete(top);
       }
@@ -505,6 +536,32 @@ export class BCSession {
 
     this.dead = true;
     this.ws.close();
+  }
+
+  /**
+   * Switch the session's company (SystemAction.ChangeCompany = 500) and reflect the
+   * result on this session, so `companyName` — and everything derived from it
+   * (bc_health, screenshot/report deep-links) — stops reporting the old company.
+   *
+   * Lives here rather than in the operation because SessionManager must replay it
+   * after a reconnect (B2: a recovered session came back on the server-default
+   * company and nothing re-applied the user's choice).
+   */
+  async changeCompany(companyName: string): Promise<Result<BCEvent[], ProtocolError>> {
+    const result = await this.invoke(
+      {
+        type: 'SessionAction',
+        actionName: 'InvokeSessionAction',
+        namedParameters: { systemAction: 500, company: companyName },
+      },
+      (e) => e.type === 'InvokeCompleted',
+    );
+    if (!isOk(result)) return result;
+    this.setCompany(companyName);
+    // Refine with the server-confirmed company when the response carried a
+    // SessionSettingsChanged handler.
+    this.applySessionInfo(result.value);
+    return result;
   }
 
   async runReport(reportId: number): Promise<Result<BCEvent[], ProtocolError>> {

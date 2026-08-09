@@ -2,6 +2,7 @@
 import { ProtocolError } from '../core/errors.js';
 import type { BCEvent } from './types.js';
 import type { PageContext } from './page-context.js';
+import type { OpenFormFilter } from './filter-query.js';
 import type { FormState } from './form-state.js';
 import { FormProjection } from './form-state.js';
 import { SectionResolver } from './section-resolver.js';
@@ -43,7 +44,7 @@ export class PageContextRepository {
   create(
     pageContextId: string,
     rootFormId: string,
-    options?: { isModal?: boolean; wizardState?: PageContext['wizardState'] },
+    options?: { isModal?: boolean; wizardState?: PageContext['wizardState']; activeFilters?: readonly OpenFormFilter[] },
   ): PageContext {
     const rootForm = this.formProjection.createInitial(rootFormId);
     const headerSection = this.sectionResolver.createHeaderSection(rootFormId);
@@ -59,6 +60,7 @@ export class PageContextRepository {
       ownedFormIds: [rootFormId],
       isModal: options?.isModal ?? false,
       wizardState: options?.wizardState ?? null,
+      activeFilters: options?.activeFilters ?? [],
     };
 
     this.pages.set(pageContextId, ctx);

@@ -14,6 +14,15 @@ import { isFormHostNode, isGroupNode, isLogicalFormNode } from '../protocol/form
 import type { Logger } from '../core/logger.js';
 import type { SectionKind } from '../protocol/section-resolver.js';
 import type { WizardState } from '../protocol/types.js';
+import { buildOpenFormFilter, type OpenFormFilter } from '../protocol/filter-query.js';
+
+/**
+ * `mode=` values BC's OpenForm query accepts, mirroring the web client URL.
+ * `Create` opens a NEW, initialised record (runs OnNewRecord / No. Series) instead
+ * of positioning on an existing one — the only way to create a record over the
+ * protocol, since `InvokeAction(New)` on a card just navigates.
+ */
+export type OpenFormMode = 'Create' | 'Edit' | 'View';
 
 /**
  * Recognise the NavigatePage / multi-step wizard pattern. Returns null for
@@ -78,22 +87,28 @@ export class PageService {
     this.authMode = options?.authMode ?? 'UserPassword';
   }
 
-  async openPage(pageId: string, options?: { bookmark?: string; tenantId?: string; filter?: string }): Promise<Result<PageContext, ProtocolError>> {
+  async openPage(pageId: string, options?: { bookmark?: string; tenantId?: string; filters?: readonly OpenFormFilter[]; mode?: OpenFormMode }): Promise<Result<PageContext, ProtocolError>> {
     // Precedence: explicit per-call tenant > server-configured tenant > 'default'.
     const tenantId = options?.tenantId ?? this.defaultTenantId;
-    const query = this.buildOpenFormQuery(pageId, tenantId, options);
+    const filters = options?.filters ?? [];
+    const query = this.buildOpenFormQuery(pageId, tenantId, {
+      bookmark: options?.bookmark,
+      filter: buildOpenFormFilter(filters) || undefined,
+      mode: options?.mode,
+    });
     const pageContextId = `session:page:${pageId}:${uuid().substring(0, 8)}`;
-    return this.materializePage(pageId, query, pageContextId);
+    return this.materializePage(pageId, query, pageContextId, filters);
   }
 
   /**
    * Re-open a list page's form IN PLACE with an OpenForm `filter=` expression,
    * reusing the same pageContextId. This is how list filtering actually works on
    * BC27/BC28 (the filter pane is a no-op — see protocol/filter-query.ts). Pass an
-   * empty filterExpr to clear the filter. The old form(s) are closed first; the
-   * caller's pageContextId keeps pointing at the freshly-filtered form.
+   * empty array to clear the filter. The old form(s) are closed first; the caller's
+   * pageContextId keeps pointing at the freshly-filtered form, and the context's
+   * `activeFilters` is replaced with exactly what was sent.
    */
-  async reopenWithFilters(pageContextId: string, filterExpr: string): Promise<Result<PageContext, ProtocolError>> {
+  async reopenWithFilters(pageContextId: string, filters: readonly OpenFormFilter[]): Promise<Result<PageContext, ProtocolError>> {
     const ctx = this.repo.get(pageContextId);
     if (!ctx) return err(this.repo.notFoundError(pageContextId));
     const parts = pageContextId.split(':');
@@ -108,16 +123,22 @@ export class PageService {
       this.session.removeOpenForm(formId);
     }
     this.repo.remove(pageContextId);
-    const query = this.buildOpenFormQuery(pageId, this.defaultTenantId, { filter: filterExpr || undefined });
-    return this.materializePage(pageId, query, pageContextId);
+    const query = this.buildOpenFormQuery(pageId, this.defaultTenantId, { filter: buildOpenFormFilter(filters) || undefined });
+    return this.materializePage(pageId, query, pageContextId, filters);
   }
 
-  private buildOpenFormQuery(pageId: string, tenantId: string, options?: { bookmark?: string; filter?: string }): string {
+  private buildOpenFormQuery(pageId: string, tenantId: string, options?: { bookmark?: string; filter?: string; mode?: OpenFormMode }): string {
     // SaaS binds the tenant at session open (path-based URL); the OpenForm query
     // must not carry &tenant=. On-prem keeps the explicit query tenant.
     let query = this.authMode === 'AAD' ? `page=${pageId}` : `page=${pageId}&tenant=${tenantId}`;
     if (options?.bookmark) {
       query += `&bookmark=${encodeURIComponent(options.bookmark)}`;
+    }
+    if (options?.mode) {
+      // Same `mode=` the web client puts in its URL: Create opens a blank, initialised
+      // record (OnNewRecord runs, No. Series fires) instead of the first existing one;
+      // Edit/View force the editability of an existing record.
+      query += `&mode=${options.mode}`;
     }
     if (options?.filter) {
       // BC honors a filter in the OpenForm query (verified live against page 9174
@@ -128,7 +149,7 @@ export class PageService {
     return query;
   }
 
-  private async materializePage(pageId: string, query: string, pageContextId: string): Promise<Result<PageContext, ProtocolError>> {
+  private async materializePage(pageId: string, query: string, pageContextId: string, activeFilters: readonly OpenFormFilter[] = []): Promise<Result<PageContext, ProtocolError>> {
     const interaction: OpenFormInteraction = {
       type: 'OpenForm',
       query,
@@ -171,7 +192,7 @@ export class PageService {
     // Create page context and apply all events. The repo recognises a
     // DialogOpened whose formId equals rootFormId and treats it as the root
     // layout (see applyRootControlTree).
-    this.repo.create(pageContextId, formId, { isModal, wizardState });
+    this.repo.create(pageContextId, formId, { isModal, wizardState, activeFilters });
     this.repo.applyToPage(pageContextId, events);
 
     // Discover child forms embedded in the root form's control tree (fhc -> lf nodes)

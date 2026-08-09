@@ -34,8 +34,21 @@ export class SessionManager {
   private readonly reconnectOptions: ReconnectOptions;
   /** Recovery en curs compartit: coalesça crides concurrents en un sol intent (un sol /SignIn). */
   private recovering: Promise<BCSession | null> | null = null;
+  /**
+   * B3: set for the whole duration of a RECOVERY (dead session -> new session), with
+   * the page contexts that died with it. A concurrent getSession() that arrives while
+   * `session` is momentarily null must join this and receive the same SessionLostError
+   * — otherwise it took the "first create" branch, got a session back with no warning,
+   * and failed later with a baffling "page context not found".
+   */
+  private recovery: { promise: Promise<BCSession | null>; impactedIds: string[] } | null = null;
   /** Last session-create error message, surfaced in SessionLostError when all retries fail. */
   private lastCreateError: string | null = null;
+  /**
+   * B2: the company the caller last switched to, re-applied to every session created
+   * from here on. Null = never switched, so BC's default stands.
+   */
+  private desiredCompany: string | null = null;
 
   /** Exposed for testing -- override to avoid real delays. */
   protected delay(ms: number): Promise<void> {
@@ -80,6 +93,19 @@ export class SessionManager {
       return this.session;
     }
 
+    // B3: a recovery started by another concurrent caller is in flight. `session` is
+    // null right now, but this is NOT a first connect — join the same attempt and
+    // report the same loss, so this caller learns its page contexts are gone too.
+    if (this.recovery !== null) {
+      const { promise, impactedIds } = this.recovery;
+      const joined = await promise;
+      if (joined === null) throw this.reconnectFailedError(impactedIds);
+      throw new SessionLostError(
+        'Session was lost and has been recreated. Previous page contexts are no longer valid. Please re-open any pages you need.',
+        impactedIds,
+      );
+    }
+
     // Session is dead -- recover
     if (this.session !== null) {
       this.logger.info('Session is dead, initiating recovery...');
@@ -95,24 +121,25 @@ export class SessionManager {
       this.pageContextRepo.clearAll();
       this.servicesInvalidated = true;
 
-      // Attempt reconnect with exponential backoff
-      const newSession = await this.createWithBackoff();
+      // Publish the in-flight recovery BEFORE awaiting it, so a concurrent caller
+      // takes the branch above instead of the first-create branch.
+      const promise = this.createWithBackoff();
+      this.recovery = { promise, impactedIds };
+      let newSession: BCSession | null;
+      try {
+        newSession = await promise;
+      } finally {
+        this.recovery = null;
+      }
 
       if (newSession === null) {
-        // Surface the underlying auth/connect reason (e.g. AAD needs an interactive
-        // `npm run login:aad` because the persisted Entra session expired) instead
-        // of a generic "cannot reach BC".
-        const detail = this.lastCreateError ? ` Last error: ${this.lastCreateError}` : '';
-        throw new SessionLostError(
-          `Session was lost and all reconnect attempts failed. The server cannot reach Business Central.${detail}`,
-          impactedIds,
-          { reconnectFailed: true },
-        );
+        throw this.reconnectFailedError(impactedIds);
       }
 
       this.session = newSession;
       this.metrics?.recordReconnect();
       this.metrics?.recordSessionCreated();
+      await this.applyDesiredCompany(newSession);
       this.logger.info('Session recovered successfully');
 
       // Throw SessionLostError so the MCP handler returns a clear message to the LLM
@@ -128,10 +155,56 @@ export class SessionManager {
       throw new Error('Session creation failed after all retry attempts');
     }
 
+    // Another caller may have won the race and already installed a session; keep
+    // theirs so both callers share one session (createWithBackoff coalesces, so
+    // this is the same object in practice — the guard is for correctness, and it
+    // is also why recordSessionCreated must not fire twice for one session).
+    if (this.session !== null) return this.session;
+
     this.session = newSession;
     this.metrics?.recordSessionCreated();
+    await this.applyDesiredCompany(newSession);
     this.logger.info('BC session established');
     return this.session;
+  }
+
+  /**
+   * B2: remember the company the caller switched to. Called by
+   * `SwitchCompanyOperation` on success; re-applied to every session created after
+   * a recovery so the user's choice survives a reconnect.
+   */
+  rememberCompany(companyName: string | null): void {
+    this.desiredCompany = companyName;
+  }
+
+  /** The company that will be re-applied on the next reconnect (null = BC default). */
+  get pinnedCompany(): string | null {
+    return this.desiredCompany;
+  }
+
+  private async applyDesiredCompany(session: BCSession): Promise<void> {
+    const want = this.desiredCompany;
+    if (!want || session.companyName === want) return;
+    this.logger.info(`Re-applying company "${want}" on the new session (was "${session.companyName}")`);
+    const result = await session.changeCompany(want).catch((e: unknown) => {
+      this.logger.warn(`Could not re-apply company "${want}": ${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    });
+    if (result && isErr(result)) {
+      this.logger.warn(`Could not re-apply company "${want}": ${result.error.message}`);
+    }
+  }
+
+  private reconnectFailedError(impactedIds: string[]): SessionLostError {
+    // Surface the underlying auth/connect reason (e.g. AAD needs an interactive
+    // `npm run login:aad` because the persisted Entra session expired) instead
+    // of a generic "cannot reach BC".
+    const detail = this.lastCreateError ? ` Last error: ${this.lastCreateError}` : '';
+    return new SessionLostError(
+      `Session was lost and all reconnect attempts failed. The server cannot reach Business Central.${detail}`,
+      impactedIds,
+      { reconnectFailed: true },
+    );
   }
 
   /**

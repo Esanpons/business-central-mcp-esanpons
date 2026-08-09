@@ -12,7 +12,6 @@ import type { BCSession } from './session/bc-session.js';
 import { PageService } from './services/page-service.js';
 import { DataService } from './services/data-service.js';
 import { ActionService } from './services/action-service.js';
-import { FilterService } from './services/filter-service.js';
 import { NavigationService } from './services/navigation-service.js';
 import { SearchService } from './services/search-service.js';
 import { ScreenshotService } from './services/screenshot-service.js';
@@ -79,7 +78,6 @@ async function main() {
     const pageService = new PageService(s, pageContextRepo, logger, { tenantId: config.bc.tenantId, authMode: config.bc.authMode });
     const dataService = new DataService(s, pageContextRepo, logger, config.logging.redactValues);
     const actionService = new ActionService(s, pageContextRepo, logger);
-    const filterService = new FilterService(s, pageContextRepo, logger, config.logging.redactValues);
     const navigationService = new NavigationService(s, pageContextRepo, logger);
     const searchService = new SearchService(s, logger);
     const screenshotService = new ScreenshotService(config.bc, config.screenshotDir, () => s.companyName, logger, authProvider);
@@ -88,14 +86,14 @@ async function main() {
 
     const operations: Operations = {
       openPage: new OpenPageOperation(pageService),
-      readData: new ReadDataOperation(dataService, filterService, pageContextRepo, pageService),
+      readData: new ReadDataOperation(dataService, pageContextRepo, pageService),
       writeData: new WriteDataOperation(dataService, pageContextRepo),
       executeAction: new ExecuteActionOperation(actionService, pageContextRepo),
       closePage: new ClosePageOperation(pageService),
       searchPages: new SearchPagesOperation(searchService),
       navigate: new NavigateOperation(navigationService),
       respondDialog: new RespondDialogOperation(s, pageContextRepo),
-      switchCompany: new SwitchCompanyOperation(s, pageContextRepo, logger),
+      switchCompany: new SwitchCompanyOperation(s, pageContextRepo, logger, (c) => sessionManager.rememberCompany(c)),
       listCompanies: new ListCompaniesOperation(pageService, dataService, () => s.companyName, logger),
       runReport: new RunReportOperation(s),
       downloadReport: new DownloadReportOperation(reportDownloadService),

@@ -87,7 +87,7 @@ const reportDownloadService = new ReportDownloadService(cfg.bc, cfg.reportDir, (
 const objectIndexService = new ObjectIndexService(pageService, cfg.stateDir, cfg.bc.baseUrl, cfg.bc.tenantId, logger);
 
 const openPage = new OpenPageOperation(pageService);
-const readData = new ReadDataOperation(dataService, filterService, repo, pageService);
+const readData = new ReadDataOperation(dataService, repo, pageService);
 const writeData = new WriteDataOperation(dataService, repo);
 const executeAction = new ExecuteActionOperation(actionService, repo);
 const closePage = new ClosePageOperation(pageService);

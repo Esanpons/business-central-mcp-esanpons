@@ -2,6 +2,7 @@
 import type { FormState } from './form-state.js';
 import type { SectionDescriptor } from './section-resolver.js';
 import type { DialogInfo, PageType, WizardState } from './types.js';
+import type { OpenFormFilter } from './filter-query.js';
 
 export interface PageContext {
   readonly pageContextId: string;
@@ -27,4 +28,14 @@ export interface PageContext {
    * pages — leave it untouched.
    */
   readonly wizardState: WizardState | null;
+  /**
+   * Server-side filters currently applied to this page's form, as they were sent in
+   * the OpenForm `filter=` query. Empty = unfiltered.
+   *
+   * Filtering re-opens the form (see `PageService.reopenWithFilters`), so this is
+   * REPLACED on every open/re-open and is always the full truth — never a delta. It
+   * is echoed back to the caller as `activeFilters` so an agent can tell what it is
+   * actually looking at instead of tracking filters on its own side.
+   */
+  readonly activeFilters: readonly OpenFormFilter[];
 }

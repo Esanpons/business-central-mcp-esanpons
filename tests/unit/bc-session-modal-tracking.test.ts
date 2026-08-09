@@ -133,13 +133,71 @@ describe('BCSession.reconcileModalStack', () => {
 
     const calls = (s as any).invokeUnqueued.mock.calls.map((c: any[]) => c[0]);
     expect(calls.map((c: any) => c.formId)).toEqual(['M2', 'M1']);
-    expect(calls.every((c: any) => c.systemAction === 320)).toBe(true);
+    // B1: the FIRST answer tried is No=390 — the one a confirm dialog actually
+    // accepts. Abort=320 alone left the dialog open server-side and cost a full
+    // session reset. One call per dialog here, because No closed it.
+    expect(calls.every((c: any) => c.systemAction === 390)).toBe(true);
   });
 
-  it('returns error if Abort itself fails', async () => {
+  it('escalates No -> Cancel -> Abort -> CloseForm until the dialog really closes', async () => {
     const s = new ReconcileProbe();
     s.feed([{ type: 'DialogOpened', formId: 'M1', controlTree: {} }]);
+
+    // BC ignores No and Cancel (the sticky-dialog case), then honours Abort.
+    (s as any).invokeUnqueued = vi.fn(async (interaction: any) => {
+      if (interaction.type === 'InvokeAction' && interaction.systemAction === 320) {
+        s.feed([{ type: 'FormClosed', formId: interaction.formId }]);
+      }
+      return ok([]);
+    });
+
+    const result = await s.reconcile();
+    expect(result.ok).toBe(true);
+    expect(s.stack()).toEqual([]);
+
+    const sent = (s as any).invokeUnqueued.mock.calls.map((c: any[]) => c[0]);
+    expect(sent.map((c: any) => c.systemAction ?? c.type)).toEqual([390, 310, 320]);
+  });
+
+  it('falls back to CloseForm when no system answer closes the dialog', async () => {
+    const s = new ReconcileProbe();
+    s.feed([{ type: 'DialogOpened', formId: 'M1', controlTree: {} }]);
+
+    (s as any).invokeUnqueued = vi.fn(async (interaction: any) => {
+      if (interaction.type === 'CloseForm') {
+        s.feed([{ type: 'FormClosed', formId: interaction.formId }]);
+      }
+      return ok([]);
+    });
+
+    const result = await s.reconcile();
+    expect(result.ok).toBe(true);
+    expect(s.stack()).toEqual([]);
+    const sent = (s as any).invokeUnqueued.mock.calls.map((c: any[]) => c[0]);
+    expect(sent[sent.length - 1].type).toBe('CloseForm');
+  });
+
+  it('does not give up on the first rejected answer — it tries the rest, then force-pops', async () => {
+    const s = new ReconcileProbe();
+    s.feed([{ type: 'DialogOpened', formId: 'M1', controlTree: {} }]);
+    // Every answer is refused by BC (and the session stays alive).
     (s as any).invokeUnqueued = vi.fn(async () => ({ ok: false, error: { message: 'BOOM' } }));
+
+    const result = await s.reconcile();
+    // The local stack is cleared so the client stays consistent; the caller's next
+    // invoke is what discovers whether BC still holds the dialog.
+    expect(result.ok).toBe(true);
+    expect(s.stack()).toEqual([]);
+    expect((s as any).invokeUnqueued.mock.calls.length).toBe(4);
+  });
+
+  it('stops immediately when the session dies mid-reconcile', async () => {
+    const s = new ReconcileProbe();
+    s.feed([{ type: 'DialogOpened', formId: 'M1', controlTree: {} }]);
+    (s as any).invokeUnqueued = vi.fn(async () => {
+      (s as any).dead = true;
+      return { ok: false, error: { message: 'InvalidSessionException' } };
+    });
     const result = await s.reconcile();
     expect(result.ok).toBe(false);
   });

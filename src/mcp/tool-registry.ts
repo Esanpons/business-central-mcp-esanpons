@@ -259,11 +259,16 @@ Example: { "reportId": 6 }`,
 
 Pass reportId (required). Optionally company (defaults to the session company), out (file path; absolute used as-is, relative goes under BC_REPORT_DIR; omit to auto-name), and timeoutMs (how long to wait for the download, default 60000).
 
-Reports that run with no required parameters download immediately. Reports that need parameters return downloaded:false with requestPageShown:true -- in that case fill the parameters via bc_run_report (which exposes the request page over the WebSocket) and re-run, or extend this call once request-page parameterisation is supported. Always check the downloaded flag; the saved file path is in "path" when downloaded is true.
+Fill the request page from here: "filters" sets the FILTER fields (RequestFilterFields, e.g. { "No.": "2000052" } to print one document) and "parameters" sets the OPTIONS area -- dates, numbers, option pickers, and booleans that map to checkboxes (e.g. { "Show Amounts in LCY": true }). Both are keyed by the caption exactly as the request page displays it (locale-dependent); anything that did not match comes back in filtersApplied/parametersApplied with matched:false plus availableFilterLabels so you can retry with the exact caption.
+
+Choose the output with "format": "pdf" | "excel" | "word" | "xml". Omit it for BC's default (PDF). If the report does not offer the requested format the download is ABORTED (downloaded:false) and availableFormats lists what its "Send to" dialog really offered -- you never receive a PDF pretending to be an Excel.
+
+Reports that still need something this call could not supply return downloaded:false with requestPageShown:true and a "note" explaining what was missing; you can then inspect the request page over the WebSocket with bc_run_report. Always check the downloaded flag; the saved file path is in "path" when downloaded is true.
 
 Requires Chrome or Edge installed (or BC_SCREENSHOT_CHROME set). Do NOT use this for server-side processing reports (batch posting) -- use bc_run_report. Do NOT use it for reading data -- use bc_open_page / bc_read_data.
 
-Example: { "reportId": 6 } -> { "downloaded": true, "path": "C:/.../report-6-....pdf", "fileName": "Trial Balance.pdf" }`,
+Example: { "reportId": 6 } -> { "downloaded": true, "path": "C:/.../report-6-....pdf", "fileName": "Trial Balance.pdf" }
+Example: { "reportId": 6, "format": "excel" } -> an .xlsx, or downloaded:false + availableFormats when report 6 has no Excel option.`,
       inputSchema: toMcpJsonSchema(DownloadReportSchema),
       zodSchema: DownloadReportSchema,
       execute: (input) => ops.downloadReport.execute(input as Parameters<typeof ops.downloadReport.execute>[0]),

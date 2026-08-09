@@ -24,7 +24,17 @@ Do NOT use it to open a page (use `bc_open_page`), to write values (use `bc_writ
 On success the operation returns a `ReadDataOutput`:
 
 ```
-{ section: Section }
+{
+  section: Section,
+  activeFilters: Array<{ column, value }>,   // server-side filters in force (may be empty)
+  rowFilter?: {                              // present ONLY when the rows were filtered client-side
+    mode: "client",
+    filters: Array<{ column, value }>,
+    scanned: number,   // rows examined
+    matched: number,   // rows kept
+    truncated: boolean // true if the 2000-row scan cap was hit
+  }
+}
 ```
 
 `Section` (from `src/protocol/section-dto.ts`):

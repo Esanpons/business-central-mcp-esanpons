@@ -14,6 +14,19 @@ export interface Filter {
   value: string;
 }
 
+/**
+ * BC's "filter pane" interaction (Filter/AddLine) — NOT wired into the MCP tools.
+ *
+ * It is a no-op on BC27/BC28: list columns carry a `ColumnBinder.Name` but no `.Path`,
+ * so BC silently ignores an AddLine keyed by name and returns every row. The paths that
+ * DO filter are:
+ *   - main list  -> the OpenForm `filter=` query (`PageService.reopenWithFilters`)
+ *   - lines/subpage -> client-side row matching (`protocol/row-filter.ts`, G8)
+ *
+ * This class stays as the live probe that documents that behaviour (the integration
+ * suites call it directly). Do not re-wire it into `ReadDataOperation` without first
+ * proving on a live build that the columns finally ship a binder path.
+ */
 export class FilterService {
   constructor(
     private readonly session: BCSession,

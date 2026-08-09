@@ -45,7 +45,7 @@ describe.sequential('Phase 4: FactBox Data & Full Paging', () => {
     pageService = new PageService(session, repo, logger);
     dataService = new DataService(session, repo, logger);
     const filterService = new FilterService(session, repo, logger);
-    readData = new ReadDataOperation(dataService, filterService, repo);
+    readData = new ReadDataOperation(dataService, repo);
   });
 
   afterAll(async () => {

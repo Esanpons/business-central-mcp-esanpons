@@ -54,6 +54,14 @@ export interface CaptureInput {
    * turns out to be hidden (reveal-when-needed).
    */
   expand?: boolean;
+  /**
+   * G6: captions of controls to CLICK before capturing, in order — the deterministic
+   * companion to `expand`. Use it when a section only reveals its content on an
+   * explicit toggle (a document's "Lines", a collapsed part, a tab) and you want to
+   * name it rather than rely on the generic reveal pass. Matching is by visible text
+   * or aria-label, exact first then prefix, across every frame.
+   */
+  clickBeforeCapture?: string[];
   out?: string;
   width?: number;
   height?: number;
@@ -138,6 +146,16 @@ export class ScreenshotService {
       if (input.expand) {
         await this.revealAll(p);
         await sleep(800); // let the relayout settle before locating controls
+      }
+
+      // G6: explicit toggles, after the generic reveal so a caption the reveal pass
+      // already opened is not toggled shut again.
+      if (input.clickBeforeCapture?.length) {
+        for (const caption of input.clickBeforeCapture) {
+          const hit = await this.clickByCaption(p, caption);
+          this.logger.info(`[screenshot] clickBeforeCapture "${caption}" -> ${hit ? 'clicked' : 'NOT FOUND'}`);
+          await sleep(600);
+        }
       }
 
       // Redacted captions are just blur-style annotations.
@@ -355,20 +373,80 @@ export class ScreenshotService {
   // Both steps are independent: expanding a FastTab shows its standard fields, while the
   // additional ("Importance = Additional") fields stay hidden until Show more is clicked.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  /**
+   * G6: click the first VISIBLE control whose visible text or aria-label matches
+   * `caption` (exact, then prefix), across every frame. Returns true when something
+   * was clicked. The in-browser callback holds NO named nested functions — tsx/esbuild
+   * wraps those in a `__name` helper that does not exist in the page.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async clickByCaption(p: any, caption: string): Promise<boolean> {
+    for (const f of p.frames()) {
+      try {
+        const hit: boolean = await f.evaluate((want: string) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const doc = (globalThis as any).document;
+          const els = doc.querySelectorAll('button,[role="button"],a,[aria-expanded],[class*="caption"],[class*="header"],summary');
+          const norm = (s: string): string => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+          const target = norm(want);
+          let prefixHit: { click: () => void } | null = null;
+          for (let i = 0; i < els.length; i++) {
+            const el = els[i];
+            const visible = el.offsetParent !== null || (el.getClientRects && el.getClientRects().length > 0);
+            if (!visible) continue;
+            const text = norm(el.textContent || '');
+            const label = norm(el.getAttribute('aria-label') || '');
+            if (text === target || label === target) { el.click(); return true; }
+            if (!prefixHit && (text.indexOf(target) === 0 || label.indexOf(target) === 0)) prefixHit = el;
+          }
+          if (prefixHit) { prefixHit.click(); return true; }
+          return false;
+        }, caption);
+        if (hit) return true;
+      } catch {
+        // cross-origin / detached frame
+      }
+    }
+    return false;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async revealAll(p: any): Promise<void> {
     for (const f of p.frames()) {
       try {
-        // 1. Expand collapsed FastTabs/groups. Loop because expanding one can surface
-        //    nested collapsibles; bounded so a pathological page can't spin forever.
+        // 1. Expand every collapsed section header. Loop because expanding one can
+        //    surface nested collapsibles; bounded so a pathological page can't spin.
+        //
+        //    G6: this used to match ONLY `.ms-nav-columns-caption` /
+        //    `.ms-nav-group-caption`, i.e. FastTabs and sub-groups. A document's
+        //    LINES part ("Lines >") is a different header, so line-grid captions
+        //    (Quantity, Line Amount, ...) were never revealed and every highlight or
+        //    crop that named one came back found:false. Any caption-ish header that
+        //    declares itself collapsed is now expanded, which covers the lines part
+        //    and any future part header, while menus/dropdowns/dialogs are excluded
+        //    so this never opens an unrelated popup.
         for (let pass = 0; pass < 6; pass++) {
           const clicked: number = await f.evaluate(() => {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const doc = (globalThis as any).document;
-            const caps = doc.querySelectorAll(
-              '.ms-nav-columns-caption[aria-expanded="false"], .ms-nav-group-caption[aria-expanded="false"]',
-            );
-            for (let i = 0; i < caps.length; i++) caps[i].click();
-            return caps.length;
+            const all = doc.querySelectorAll('[aria-expanded="false"]');
+            let n = 0;
+            for (let i = 0; i < all.length; i++) {
+              const el = all[i];
+              const cls = String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className || '');
+              const looksLikeHeader = /caption|header|part|group|section|expander/i.test(cls);
+              if (!looksLikeHeader) continue;
+              // Never touch menus, dropdowns, comboboxes or anything inside a dialog:
+              // "expanding" those opens a popup that covers the page we are capturing.
+              const role = el.getAttribute('role') || '';
+              if (/menuitem|menu|combobox|listbox|tab$/i.test(role)) continue;
+              if (el.closest('[role="menu"],[role="dialog"],[role="listbox"],[class*="dropdown"],[class*="menu"]')) continue;
+              const visible = el.offsetParent !== null || (el.getClientRects && el.getClientRects().length > 0);
+              if (!visible) continue;
+              el.click();
+              n++;
+            }
+            return n;
           });
           if (!clicked) break;
           await sleep(300);

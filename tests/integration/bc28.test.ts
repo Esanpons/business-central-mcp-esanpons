@@ -14,17 +14,23 @@ import { DataService } from '../../src/services/data-service.js';
 import { isOk, unwrap } from '../../src/core/result.js';
 import type { BCConfig } from '../../src/core/config.js';
 
+// A second BC (BC28) is required by the suites below. Upstream hardcoded its own
+// host ('http://cronus28/BC'), which does not exist on this fork's machines, so every
+// run reported these files as FAILED at beforeAll — noise that buried real failures.
+// They now read BC28_BASE_URL and skip cleanly when it is absent.
+const BC28_BASE_URL = process.env.BC28_BASE_URL ?? '';
+const hasBc28 = BC28_BASE_URL.length > 0;
 const BC28_CONFIG: BCConfig = {
-  baseUrl: 'http://cronus28/BC',
-  username: 'sshadows',
-  password: '1234',
+  baseUrl: BC28_BASE_URL,
+  username: process.env.BC28_USERNAME ?? '',
+  password: process.env.BC28_PASSWORD ?? '',
   tenantId: 'default',
   clientVersionString: '28.0.0.0',
   serverMajor: 28,
   timeoutMs: 120000,
 };
 
-describe('BC28 Compatibility (integration)', () => {
+describe.skipIf(!hasBc28)('BC28 Compatibility (integration)', () => {
   let session: BCSession;
   let pageService: PageService;
   let dataService: DataService;

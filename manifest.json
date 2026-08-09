@@ -1,14 +1,14 @@
 {
   "dxt_version": "0.1",
-  "name": "business-central-mcp",
+  "name": "business-central-mcp-esanpons",
   "display_name": "Business Central",
   "version": "1.1.0",
-  "description": "Direct access to Microsoft Dynamics 365 Business Central via its native WebSocket protocol.",
+  "description": "Direct access to Microsoft Dynamics 365 Business Central (on-prem and BC Online/SaaS) via its native WebSocket protocol.",
   "author": {
-    "name": "Torben Leth",
-    "email": "sshadows@sshadows.dk"
+    "name": "Esteve Sanpons (AESVA)",
+    "email": "esteve@aesva.es"
   },
-  "homepage": "https://github.com/SShadowS/business-central-mcp",
+  "homepage": "https://github.com/Esanpons/business-central-mcp-esanpons",
   "license": "MIT",
   "icon": "icon.png",
   "server": {
@@ -18,14 +18,15 @@
       "command": "npx",
       "args": [
         "-y",
-        "business-central-mcp"
+        "business-central-mcp-esanpons"
       ],
       "env": {
         "BC_BASE_URL": "${user_config.bc_base_url}",
         "BC_USERNAME": "${user_config.bc_username}",
         "BC_PASSWORD": "${user_config.bc_password}",
         "BC_PROFILE": "${user_config.bc_profile}",
-        "BC_APPLICATION_ID": "${user_config.bc_application_id}"
+        "BC_APPLICATION_ID": "${user_config.bc_application_id}",
+        "BC_AUTH": "${user_config.bc_auth}"
       }
     }
   },
@@ -58,7 +59,13 @@
     "bc_application_id": {
       "type": "string",
       "title": "BC application id",
-      "description": "Optional navigationContext.applicationId for OpenSession. Leave empty for the default (NAV). BC 27 expects NAV; FIN triggers NavCancelCredentialPromptException. Override only for other builds.",
+      "description": "Optional navigationContext.applicationId for OpenSession. Leave empty for the default (NAV on-prem, FIN on SaaS). BC 27 expects NAV; FIN triggers NavCancelCredentialPromptException. Override only for other builds.",
+      "required": false
+    },
+    "bc_auth": {
+      "type": "string",
+      "title": "Authentication mode",
+      "description": "Leave empty for on-prem (NavUserPassword forms auth). Set to AAD for BC Online / SaaS, which additionally needs an interactive one-time sign-in (npm run login:aad) to create the browser profile.",
       "required": false
     }
   },

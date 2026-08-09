@@ -12,14 +12,18 @@ const StringOrNumberInput = z.union([z.string(), z.number()]);
 // (a value-level union is fine; only a ROOT-level combinator breaks the MCP client).
 const WriteValue = z.union([z.string(), z.number(), z.boolean()]);
 
-export const OpenPageSchema = z.object({
-  pageId: StringOrNumber.describe('Numeric BC page ID (e.g., 22 for Customer List, 21 for Customer Card). Use bc_search_pages to find IDs.'),
+// Every bc_open_page field EXCEPT pageId. Shared verbatim between the runtime schema
+// (which coerces pageId via .transform()) and the JSON-Schema-safe variant below, so
+// the two can never drift again — a missing key there means the tool silently stops
+// advertising a real parameter (it already happened once: `filters` was invisible).
+const openPageFields = {
   bookmark: z.string().optional().describe('Open the page to a specific record. Bookmarks come from list row results in bc_open_page or bc_read_data.'),
   tenantId: z.string().optional().describe('BC tenant ID. Defaults to the server-configured tenant. Only needed in multi-tenant deployments.'),
+  mode: z.enum(['Create', 'Edit', 'View']).optional().describe('Record mode. "Create" opens a BLANK, initialised record (BC runs OnNewRecord and the No. Series) ready to fill with bc_write_data — this is how you CREATE a record; bc_execute_action {action:"New"} only navigates. "Edit"/"View" force editability of the record the page lands on. Omit for BC\'s default.'),
   filters: z.array(z.object({
     column: z.string().describe('AL field NAME (invariant), e.g. "No.", "Name", "City" — NOT the localized caption ("Nº"/"Nombre" fail).'),
     value: z.string().describe('BC filter value: exact ("10000"), range ("10000..30000"), wildcard ("A*", "*consulting*"), expression (">1000").'),
-  })).optional().describe('Server-side filters applied when the page opens (via the OpenForm query — the filter mechanism that works on BC27/BC28; the read-time filter pane does not). Multiple filters combine with AND. Use AL field names, not localized captions.'),
+  })).optional().describe('Server-side filters applied when the page opens (via the OpenForm query — the filter mechanism that works on BC27/BC28; the read-time filter pane does not). Multiple filters combine with AND. Use AL field names, not localized captions. The response echoes them back as activeFilters.'),
   sections: z.array(z.string()).optional().describe('Only return these sectionIds (e.g. ["header"]). Use to avoid pulling every line and factbox of a big document. Omit for all sections.'),
   summary: z.boolean().optional().describe('Return only sectionId/kind/caption (+totalRowCount) per section, with no fields/rows. Best first call on a large page (e.g. page 41 Sales Quote): discover the sections, then pull each with bc_read_data. Avoids token-limit overflows.'),
   tab: z.string().optional().describe('Filter header fields to a tab (e.g. "General", "Shipping and Billing"). Applies to the header section only.'),
@@ -28,6 +32,13 @@ export const OpenPageSchema = z.object({
     offset: z.number().describe('0-based starting row index.'),
     limit: z.number().describe('Maximum number of rows to return.'),
   }).optional().describe('Slice already-loaded repeater rows. For deep pagination use bc_read_data (which scrolls to load more).'),
+};
+
+const PAGE_ID_DESC = 'Numeric BC page ID (e.g., 22 for Customer List, 21 for Customer Card). Use bc_search_pages to find IDs.';
+
+export const OpenPageSchema = z.object({
+  pageId: StringOrNumber.describe(PAGE_ID_DESC),
+  ...openPageFields,
 });
 
 export const ReadDataSchema = z.object({
@@ -36,10 +47,10 @@ export const ReadDataSchema = z.object({
   tab: z.string().optional().describe('Tab name to filter header fields by (e.g., "General", "Invoice Details", "Shipping and Billing"). Omit to return all header fields.'),
   group: z.string().optional().describe('Restrict returned card fields to those inside the group with this caption (e.g. "Bill-to", "Ship-to"). Use to disambiguate documents whose Sell-to/Bill-to/Ship-to groups repeat captions like "Name"/"Address"/"City". Each returned field also carries its own "group" and "controlPath".'),
   filters: z.array(z.object({
-    column: z.string().describe('AL field NAME (invariant), e.g. "No.", "Name", "City" — NOT the localized caption ("Nº"/"Nombre" fail).'),
-    value: z.string().describe('Filter value. Supports exact match ("London"), ranges ("10000..20000"), wildcards ("*consulting*"), expressions (">1000").'),
-  })).optional().describe('Server-side filters applied by re-opening the page via the OpenForm query (the mechanism that works on BC27/BC28; the read-time filter pane does not). Multiple filters combine with AND and REPLACE any prior filter. Use AL field names, not localized captions. For document LINE sections filtering is not supported (returns a clear error).'),
-  appendFilters: z.boolean().optional().describe('Set true to AND the filters on top of the ones already applied to this page context, instead of replacing them. Default false (replace).'),
+    column: z.string().describe('For the main list: the AL field NAME (invariant) — "No.", "Name", "City" — NOT the localized caption. For a lines/subpage section: the column CAPTION exactly as it appears in the returned rows (that filtering happens client-side, so it matches what you can see).'),
+    value: z.string().describe('Filter value. Exact ("London"), range ("10000..20000"), wildcard ("*consulting*"), comparison (">1000", "<=5", "<>x"), or a set ("10|20|30").'),
+  })).optional().describe('Filters the rows. Main list: server-side, by re-opening the page with the OpenForm query (the mechanism that works on BC27/BC28), REPLACING any prior filter — echoed back as activeFilters. Lines/subpage section: filtered client-side over every materialized row, reported as rowFilter {mode:"client", scanned, matched, truncated} so you always know which mechanism ran.'),
+  appendFilters: z.boolean().optional().describe('Set true to AND the filters on top of the ones already applied to this page context, instead of replacing them. Default false (replace). Main-list filters only.'),
   columns: z.array(z.string()).optional().describe('Column caption names to include in results. Omit to return all columns. Reduces output size.'),
   range: z.object({
     offset: z.number().describe('0-based starting row index.'),
@@ -104,12 +115,19 @@ export const RunReportSchema = z.object({
   reportId: StringOrNumber.describe('Numeric BC report ID to execute (e.g., 1306 for Customer Statement, 6 for Trial Balance).'),
 });
 
-export const DownloadReportSchema = z.object({
-  reportId: StringOrNumber.describe('Numeric BC report ID to render and download (e.g., 6 Trial Balance, 1306 Customer Statement).'),
+// Shared between the runtime schema and the JSON-Schema-safe variant (see toMcpJsonSchema).
+const downloadReportFields = {
   company: z.string().optional().describe('Company to run in. Defaults to the session company.'),
   out: z.string().optional().describe('Output file path. Absolute is used as-is; a relative name goes under BC_REPORT_DIR. Omit to auto-name report-<id>-<timestamp>.<ext>.'),
   timeoutMs: z.number().optional().describe('How long to wait for the download to complete after the report runs (ms, default 60000).'),
-  filters: z.record(z.string(), WriteValue).optional().describe('Request-page filters to set before running, keyed by the filter field caption shown on the report request page (e.g. { "No.": "2000052" }). Values may be strings, numbers or booleans. Needed to print ONE specific document for reports whose RequestFilterFields expose a key like "No." but that have no mandatory parameters — without it the report runs unfiltered and no usable file is produced (requestPageShown:true). Pass the caption exactly as the request page displays it (locale-dependent, e.g. "Nº"); if it does not match, the result\'s availableFilterLabels lists the fields found so you can retry with the exact caption.'),
+  format: z.enum(['pdf', 'excel', 'word', 'xml']).optional().describe('Output format. Omit for BC\'s default (PDF). The format is chosen in the "Send to…" dialog; if this report does not offer it, NOTHING is downloaded and the result comes back downloaded:false with availableFormats listing what it does offer — you never get a PDF silently relabelled.'),
+  filters: z.record(z.string(), WriteValue).optional().describe('Request-page FILTER fields (RequestFilterFields), keyed by the caption shown on the report request page (e.g. { "No.": "2000052" }). Needed to print ONE specific document. Pass the caption exactly as the request page displays it (locale-dependent, e.g. "Nº"); if it does not match, the result\'s availableFilterLabels lists the fields found so you can retry with the exact caption.'),
+  parameters: z.record(z.string(), WriteValue).optional().describe('Request-page OPTIONS-area parameters: dates ("Starting Date": "01/01/2026"), booleans that map to checkboxes ("Show Amounts in LCY": true), option/dropdown values, numbers. Same caption matching as filters. Use this for reports that need parameters rather than filters (e.g. statements 116/1316) — a boolean toggles the checkbox only when its state differs.'),
+};
+
+export const DownloadReportSchema = z.object({
+  reportId: StringOrNumber.describe('Numeric BC report ID to render and download (e.g., 6 Trial Balance, 1306 Customer Statement).'),
+  ...downloadReportFields,
 });
 
 export const ListCompaniesSchema = z.object({});
@@ -144,6 +162,7 @@ export const ScreenshotSchema = z.object({
   redact: z.array(z.string()).optional().describe('Captions to black out for privacy (each drawn as an opaque box).'),
   crop: z.union([z.string(), z.array(z.string())]).optional().describe('Caption(s) to crop the screenshot to. The image is clipped to the bounding box enclosing the located caption(s) plus padding — use to capture just one section/FactBox/field area.'),
   expand: z.boolean().optional().describe('Reveal hidden content before capturing: expand every collapsed FastTab/group and click every "Show more" toggle so additional fields appear. Default false. Even when false, a reveal pass runs automatically if a requested highlight/crop caption turns out to be hidden behind a collapsed group or "Show more" (reveal-when-needed). Set true to force the fully-expanded view for a whole-section screenshot.'),
+  clickBeforeCapture: z.array(z.string()).optional().describe('Captions of controls to CLICK before capturing, in order (e.g. ["Lines"] to open a document line grid, or a tab name). Use when a section only reveals its content on an explicit toggle and you want to name it instead of relying on expand. Matched by visible text or aria-label, exact then prefix.'),
   out: z.string().optional().describe('Output file path. Absolute path is used as-is; a relative name is placed under BC_SCREENSHOT_DIR. Omit to auto-name as page-<id>-<timestamp>.png.'),
   width: z.number().optional().describe('Viewport width in pixels (default 1600).'),
   height: z.number().optional().describe('Viewport height in pixels (default 1000).'),
@@ -160,6 +179,7 @@ const ManualScreenshotSchema = z.object({
   redact: z.array(z.string()).optional().describe('Captions to black out for privacy.'),
   crop: z.union([z.string(), z.array(z.string())]).optional().describe('Caption(s) to crop the image to.'),
   expand: z.boolean().optional().describe('Expand all collapsed FastTabs/groups and click every "Show more" before capturing, so additional fields are visible. Default false (a reveal pass still runs automatically when a highlight/crop caption is hidden).'),
+  clickBeforeCapture: z.array(z.string()).optional().describe('Captions of controls to CLICK before capturing, in order (e.g. ["Lines"] to open a document line grid, or a tab name). Use when a section only reveals its content on an explicit toggle and you want to name it instead of relying on expand. Matched by visible text or aria-label, exact then prefix.'),
   width: z.number().optional(),
   height: z.number().optional(),
   scale: z.number().optional(),
@@ -199,17 +219,8 @@ export function toMcpJsonSchema(schema: z.ZodType): Record<string, unknown> {
   // OpenPageSchema uses StringOrNumber with .transform() — use the safe variant
   if (schema === OpenPageSchema) {
     const safe = z.object({
-      pageId: StringOrNumberInput.describe('Numeric BC page ID (e.g., 22 for Customer List, 21 for Customer Card). Use bc_search_pages to find IDs.'),
-      bookmark: z.string().optional().describe('Open the page to a specific record. Bookmarks come from list row results in bc_open_page or bc_read_data.'),
-      tenantId: z.string().optional().describe('BC tenant ID. Defaults to the server-configured tenant. Only needed in multi-tenant deployments.'),
-      sections: z.array(z.string()).optional().describe('Only return these sectionIds (e.g. ["header"]). Use to avoid pulling every line and factbox of a big document. Omit for all sections.'),
-      summary: z.boolean().optional().describe('Return only sectionId/kind/caption (+totalRowCount) per section, with no fields/rows. Best first call on a large page (e.g. page 41 Sales Quote): discover the sections, then pull each with bc_read_data. Avoids token-limit overflows.'),
-      tab: z.string().optional().describe('Filter header fields to a tab (e.g. "General", "Shipping and Billing"). Applies to the header section only.'),
-      columns: z.array(z.string()).optional().describe('Keep only these fields/columns (by caption or controlPath) across all returned sections. Reduces output size.'),
-      range: z.object({
-        offset: z.number().describe('0-based starting row index.'),
-        limit: z.number().describe('Maximum number of rows to return.'),
-      }).optional().describe('Slice already-loaded repeater rows. For deep pagination use bc_read_data (which scrolls to load more).'),
+      pageId: StringOrNumberInput.describe(PAGE_ID_DESC),
+      ...openPageFields,
     });
     return z.toJSONSchema(safe) as Record<string, unknown>;
   }
@@ -224,10 +235,7 @@ export function toMcpJsonSchema(schema: z.ZodType): Record<string, unknown> {
   if (schema === DownloadReportSchema) {
     const safe = z.object({
       reportId: StringOrNumberInput.describe('Numeric BC report ID to render and download (e.g., 6 Trial Balance, 1306 Customer Statement).'),
-      company: z.string().optional().describe('Company to run in. Defaults to the session company.'),
-      out: z.string().optional().describe('Output file path. Absolute is used as-is; a relative name goes under BC_REPORT_DIR. Omit to auto-name report-<id>-<timestamp>.<ext>.'),
-      timeoutMs: z.number().optional().describe('How long to wait for the download to complete after the report runs (ms, default 60000).'),
-      filters: z.record(z.string(), WriteValue).optional().describe('Request-page filters to set before running, keyed by the filter field caption shown on the report request page (e.g. { "No.": "2000052" }). Values may be strings, numbers or booleans. Needed to print ONE specific document for reports whose RequestFilterFields expose a key like "No." but that have no mandatory parameters. Pass the caption exactly as the request page displays it (locale-dependent, e.g. "Nº"); if it does not match, the result\'s availableFilterLabels lists the fields found so you can retry.'),
+      ...downloadReportFields,
     });
     return z.toJSONSchema(safe) as Record<string, unknown>;
   }

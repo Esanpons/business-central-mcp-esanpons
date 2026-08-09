@@ -30,6 +30,21 @@ import { ensureAuthJar, deepLinkReport, onSignIn, inPageLogin, waitReady } from 
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * G3: the output format the "Send to…" dialog can produce. BC renders it as a radio
+ * group whose labels are LOCALIZED ("Documento PDF", "Microsoft Excel Document", …),
+ * so each format is matched by a token that survives translation.
+ */
+export type ReportOutputFormat = 'pdf' | 'excel' | 'word' | 'xml';
+
+/** Token that identifies each format in the radio label, in any locale BC ships. */
+const FORMAT_TOKENS: Record<ReportOutputFormat, RegExp> = {
+  pdf: /pdf/i,
+  excel: /excel|xlsx|hoja de c(á|a)lculo|full de c(à|a)lcul/i,
+  word: /word|docx|documento de word|document de word/i,
+  xml: /xml/i,
+};
+
 export interface DownloadReportInput {
   reportId: string;
   company?: string;
@@ -43,6 +58,23 @@ export interface DownloadReportInput {
    * document report (RequestFilterFields = "No.") print one specific record.
    */
   filters?: Record<string, string>;
+  /**
+   * G4: Options-area request-page parameters — everything that is NOT a filter field:
+   * dates, booleans (checkboxes), option/dropdown selectors, numbers. Keyed by the
+   * visible caption, same locale-tolerant matching as `filters`. Booleans set the
+   * checkbox state; everything else is typed/selected.
+   *
+   * `filters` and `parameters` share one implementation (BC's DOM does not reliably
+   * separate the two areas); they are applied filters-first, then parameters.
+   */
+  parameters?: Record<string, string | number | boolean>;
+  /**
+   * G3: force the output format instead of accepting BC's default (PDF). When the
+   * requested format is NOT offered by this report, the download is ABORTED rather
+   * than silently producing a PDF: the result comes back `downloaded:false` with
+   * `availableFormats` listing what the dialog actually offered.
+   */
+  format?: ReportOutputFormat;
 }
 
 export interface FilterApplied {
@@ -69,8 +101,16 @@ export interface DownloadReportResult {
   pageTitle: string;
   /** Per-requested-filter outcome (present when `filters` was passed). */
   filtersApplied?: FilterApplied[];
+  /** G4: per-requested-parameter outcome (present when `parameters` was passed). */
+  parametersApplied?: FilterApplied[];
   /** Editable field labels discovered on the request page (for retrying a missed caption). */
   availableFilterLabels?: string[];
+  /** G3: the format that was requested, echoed back. */
+  format?: ReportOutputFormat;
+  /** G3: true when that format was actually selected in the Send-to dialog. */
+  formatSelected?: boolean;
+  /** G3: the format labels this report's Send-to dialog offered (verbatim, localized). */
+  availableFormats?: string[];
 }
 
 export class ReportDownloadService {
@@ -148,13 +188,23 @@ export class ReportDownloadService {
       // Set request-page filters (e.g. No. = a document number) BEFORE running, so
       // a document report prints exactly one record instead of nothing usable.
       let filtersApplied: FilterApplied[] | undefined;
+      let parametersApplied: FilterApplied[] | undefined;
       let availableFilterLabels: string[] | undefined;
       if (input.filters && Object.keys(input.filters).length > 0) {
-        const r = await this.applyFilters(p, input.filters);
+        const r = await this.applyRequestPageValues(p, input.filters);
         filtersApplied = r.applied;
         availableFilterLabels = r.availableLabels;
         this.logger.info(`[report] filters applied: ${JSON.stringify(r.applied)}`);
         await sleep(900); // let BC commit the filter before running
+      }
+      // G4: Options-area parameters (dates, booleans, option pickers). Same matcher,
+      // applied after the filters so a filter-driven request page is already settled.
+      if (input.parameters && Object.keys(input.parameters).length > 0) {
+        const r = await this.applyRequestPageValues(p, input.parameters);
+        parametersApplied = r.applied;
+        availableFilterLabels = [...new Set([...(availableFilterLabels ?? []), ...r.availableLabels])];
+        this.logger.info(`[report] parameters applied: ${JSON.stringify(r.applied)}`);
+        await sleep(900);
       }
 
       // Drive the request page to produce a download. Verified live on devel1
@@ -162,8 +212,22 @@ export class ReportDownloadService {
       // format dialog, then "Aceptar" / "OK" generates the file. The buttons carry
       // empty aria-labels / GUID titles, so we locate them by VISIBLE TEXT and
       // only click visible ones. Falls back to a direct confirm for simpler pages.
-      const drivenFlow = await this.driveRequestPage(p);
-      this.logger.info(`[report] request-page flow: ${drivenFlow ?? 'none'}`);
+      const driven = await this.driveRequestPage(p, input.format);
+      this.logger.info(`[report] request-page flow: ${driven.flow ?? 'none'}`);
+
+      // G3: the requested format is not on offer — do NOT fall through to the
+      // default (which would hand back a PDF labelled as the requested format).
+      if (input.format && driven.formatSelected === false) {
+        return {
+          reportId, url, authenticated: !(await onSignIn(p)),
+          downloaded: false, requestPageShown: true, pageTitle: await p.title(),
+          note: `Output format "${input.format}" is not offered by report ${reportId}. `
+            + `The Send to dialog offered: [${(driven.availableFormats ?? []).join(' | ')}]. `
+            + 'Re-run without `format` to accept the default, or pick one of those.',
+          filtersApplied, parametersApplied, availableFilterLabels,
+          format: input.format, formatSelected: false, availableFormats: driven.availableFormats,
+        };
+      }
 
       // Poll for a completed download (Chrome writes *.crdownload while in flight).
       const file = await this.waitForDownload(dlDir, timeoutMs);
@@ -242,52 +306,148 @@ export class ReportDownloadService {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async driveRequestPage(p: any): Promise<string | null> {
+  private async driveRequestPage(p: any, format?: ReportOutputFormat): Promise<{
+    flow: string | null;
+    formatSelected?: boolean;
+    availableFormats?: string[];
+  }> {
     // "Enviar a..." / "Send to..." — match by prefix (the caption ends in "...").
     const sendTo = await this.clickByText(p, ['Enviar a', 'Envia a', 'Send to'], true);
     if (sendTo) {
       await sleep(1800); // let the format dialog render
+      if (format) {
+        // G3: the dialog is a radio group of output formats. Pick the requested one
+        // BEFORE confirming; if it isn't there, stop — returning a PDF for a request
+        // that asked for Excel would be worse than failing.
+        const picked = await this.selectOutputFormat(p, format);
+        if (!picked.selected) {
+          return { flow: `sendTo:"${sendTo}" -> format "${format}" not offered`, formatSelected: false, availableFormats: picked.available };
+        }
+        await sleep(400);
+        const okF = await this.clickByText(p, ['Aceptar', 'OK', "D'acord", 'Accept', 'Acceptar'], false);
+        await sleep(500);
+        return {
+          flow: `sendTo:"${sendTo}" -> format:"${picked.matchedLabel}" -> confirm:"${okF ?? 'none'}"`,
+          formatSelected: true,
+          availableFormats: picked.available,
+        };
+      }
       const ok = await this.clickByText(p, ['Aceptar', 'OK', "D'acord", 'Accept', 'Acceptar'], false);
       await sleep(500);
-      return `sendTo:"${sendTo}" -> confirm:"${ok ?? 'none'}"`;
+      return { flow: `sendTo:"${sendTo}" -> confirm:"${ok ?? 'none'}"` };
     }
     // Fallback: a request page that just needs a confirm (no Send-to split button).
     // Confirm-only (NOT Print/Preview, which open a print view rather than a download).
     const direct = await this.clickByText(p, ['Aceptar', 'OK', "D'acord", 'Accept', 'Acceptar'], false);
-    return direct ? `direct:"${direct}"` : null;
+    if (format) {
+      // No Send-to dialog means no format choice exists on this report.
+      return { flow: direct ? `direct:"${direct}"` : null, formatSelected: false, availableFormats: [] };
+    }
+    return { flow: direct ? `direct:"${direct}"` : null };
   }
 
   /**
-   * Set request-page filter fields by visible caption before the report runs.
-   * Used so a document report (RequestFilterFields = "No.") prints one record.
+   * G3: pick an output format in the "Send to…" dialog.
    *
-   * Locating the field is locale-fragile (BC may show "Nº" for "No."), so we
-   * collect every editable text input across all frames WITH its label signals
-   * (aria-label / placeholder / aria-labelledby / nearest short ancestor text),
-   * match the requested caption against those signals in Node (normalised), and
-   * type with real key events (BC's filter binding ignores a bare .value set).
-   * `availableLabels` is returned so a missed caption can be retried exactly.
+   * The dialog is a radio group (`name="b13"`, options `b13_0..b13_5` on BC27) whose
+   * labels are localized, so each radio is matched by a locale-proof token from
+   * FORMAT_TOKENS against every label signal we can see (aria-label, the <label> bound
+   * by id/for, and the nearest short ancestor text). Returns the labels found either
+   * way, so a caller that asked for something unavailable gets told what IS available.
+   *
+   * The in-browser callback contains NO named nested functions (tsx/esbuild wraps
+   * those in a `__name` helper that does not exist in the page).
+   */
+  private async selectOutputFormat(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    p: any,
+    format: ReportOutputFormat,
+  ): Promise<{ selected: boolean; matchedLabel?: string; available: string[] }> {
+    const token = FORMAT_TOKENS[format];
+    const available: string[] = [];
+
+    for (const f of p.frames()) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let radios: any[] = [];
+      try {
+        radios = await f.$$('input[type="radio"], [role="radio"]');
+      } catch {
+        continue; // detached / cross-origin frame
+      }
+      for (const h of radios) {
+        const info = await h
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .evaluate((el: any) => {
+            const visible = el.offsetParent !== null || (el.getClientRects && el.getClientRects().length > 0);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const docu = (globalThis as any).document;
+            const sig: string[] = [];
+            const a = el.getAttribute('aria-label'); if (a && a.trim()) sig.push(a.trim());
+            if (el.id) {
+              const lbl = docu.querySelector(`label[for="${el.id}"]`);
+              if (lbl && (lbl.textContent || '').trim()) sig.push((lbl.textContent || '').trim());
+            }
+            const lid = el.getAttribute('aria-labelledby');
+            if (lid) { const l = docu.getElementById(lid); if (l && (l.textContent || '').trim()) sig.push((l.textContent || '').trim()); }
+            let n = el.parentElement; let depth = 0;
+            while (n && depth < 3) { const t = (n.textContent || '').trim(); if (t && t.length <= 60) { sig.push(t); break; } n = n.parentElement; depth++; }
+            return { visible, sig };
+          })
+          .catch(() => null);
+        if (!info || !info.visible) continue;
+        for (const s of info.sig) if (s && !available.includes(s)) available.push(s);
+        const matchedLabel = info.sig.find((s: string) => token.test(s));
+        if (matchedLabel) {
+          try {
+            await h.click();
+            this.logger.info(`[report] output format "${format}" selected via "${matchedLabel}"`);
+            return { selected: true, matchedLabel, available };
+          } catch (e) {
+            this.logger.warn(`[report] could not click the "${matchedLabel}" format radio: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+      }
+    }
+    return { selected: false, available };
+  }
+
+  /**
+   * Set request-page values by visible caption before the report runs — both the
+   * FILTER fields (RequestFilterFields, e.g. "No." so a document report prints one
+   * record) and, since G4, the OPTIONS area: dates, numbers, booleans (checkboxes)
+   * and option pickers.
+   *
+   * Locating the field is locale-fragile (BC may show "Nº" for "No."), so we collect
+   * every editable control across all frames WITH its label signals (aria-label /
+   * placeholder / aria-labelledby / nearest short ancestor text), match the requested
+   * caption against those signals in Node (normalised), and then set it according to
+   * its KIND: a checkbox is clicked only when its state differs from the requested
+   * boolean, a <select> gets its option chosen, everything else is typed with real key
+   * events (BC's binding ignores a bare `.value` set). `availableLabels` is returned so
+   * a missed caption can be retried exactly.
    *
    * The in-browser evaluate callbacks contain NO named nested functions — under
    * tsx/esbuild those get a `__name` wrapper that is undefined in the page.
    */
-  private async applyFilters(
+  private async applyRequestPageValues(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     p: any,
-    filters: Record<string, string>,
+    values: Record<string, string | number | boolean>,
   ): Promise<{ applied: FilterApplied[]; availableLabels: string[] }> {
     // Normalise for locale-tolerant matching: lowercase, drop dots/spaces/colons,
     // and fold the ordinal indicator so the Spanish "Nº" matches the caption "No.".
     const norm = (s: string): string => s.toLowerCase().replace(/º/g, 'o').replace(/ª/g, 'a').replace(/[.\s:]/g, '').trim();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const candidates: Array<{ handle: any; signals: string[] }> = [];
+    const candidates: Array<{ handle: any; signals: string[]; kind: 'text' | 'checkbox' | 'select' }> = [];
     const labelSet = new Set<string>();
 
     for (const f of p.frames()) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let handles: any[] = [];
       try {
-        handles = await f.$$('input:not([type=hidden]):not([type=button]):not([type=submit]):not([type=checkbox]):not([type=radio]), textarea, [contenteditable="true"]');
+        // G4 widened this: checkboxes (booleans) and selects (option fields) used to be
+        // excluded, which is exactly why only RequestFilterFields could be set.
+        handles = await f.$$('input:not([type=hidden]):not([type=button]):not([type=submit]):not([type=radio]), textarea, select, [contenteditable="true"]');
       } catch {
         continue; // detached / cross-origin frame
       }
@@ -297,6 +457,8 @@ export class ReportDownloadService {
           .evaluate((el: any) => {
             const vis = el.offsetParent !== null || (el.getClientRects && el.getClientRects().length > 0);
             const ro = el.readOnly === true || el.getAttribute('aria-readonly') === 'true' || el.disabled === true;
+            const tag = (el.tagName || '').toLowerCase();
+            const kind = tag === 'select' ? 'select' : (el.type === 'checkbox' ? 'checkbox' : 'text');
             const sig: string[] = [];
             const a = el.getAttribute('aria-label'); if (a && a.trim()) sig.push(a.trim());
             const ph = el.getAttribute('placeholder'); if (ph && ph.trim()) sig.push(ph.trim());
@@ -304,38 +466,66 @@ export class ReportDownloadService {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const docu = (globalThis as any).document;
             if (lid) { const l = docu.getElementById(lid); if (l && (l.textContent || '').trim()) sig.push((l.textContent || '').trim()); }
+            if (el.id) {
+              const lbl = docu.querySelector(`label[for="${el.id}"]`);
+              if (lbl && (lbl.textContent || '').trim()) sig.push((lbl.textContent || '').trim());
+            }
             let n = el.parentElement; let depth = 0;
             while (n && depth < 4) { const t = (n.textContent || '').trim(); if (t && t.length <= 50) { sig.push(t); break; } n = n.parentElement; depth++; }
-            return { vis, ro, sig };
+            return { vis, ro, sig, kind };
           })
           .catch(() => null);
         if (!info || !info.vis || info.ro) continue;
         for (const s of info.sig) labelSet.add(s);
-        candidates.push({ handle: h, signals: info.sig });
+        candidates.push({ handle: h, signals: info.sig, kind: info.kind as 'text' | 'checkbox' | 'select' });
       }
     }
 
     const applied: FilterApplied[] = [];
-    for (const [caption, value] of Object.entries(filters)) {
+    for (const [caption, value] of Object.entries(values)) {
       const want = norm(caption);
+      // A boolean can only mean a checkbox — never let it land on a text field that
+      // happens to share a caption prefix.
+      const pool = typeof value === 'boolean' ? candidates.filter(c => c.kind === 'checkbox') : candidates;
       // Prefer an exact normalised label, then prefix, then substring (>=2 chars).
-      const exact = candidates.find(c => c.signals.some(s => norm(s) === want));
-      const prefix = exact ?? candidates.find(c => c.signals.some(s => { const n = norm(s); return n.length > 0 && (n.startsWith(want) || want.startsWith(n)); }));
-      const hit = prefix ?? (want.length >= 2 ? candidates.find(c => c.signals.some(s => { const n = norm(s); return n.length >= 2 && (n.includes(want) || want.includes(n)); })) : undefined);
+      const exact = pool.find(c => c.signals.some(s => norm(s) === want));
+      const prefix = exact ?? pool.find(c => c.signals.some(s => { const n = norm(s); return n.length > 0 && (n.startsWith(want) || want.startsWith(n)); }));
+      const hit = prefix ?? (want.length >= 2 ? pool.find(c => c.signals.some(s => { const n = norm(s); return n.length >= 2 && (n.includes(want) || want.includes(n)); })) : undefined);
       if (!hit) {
         applied.push({ caption, matched: false });
-        this.logger.warn(`[report] filter caption "${caption}" matched no request-page field`);
+        this.logger.warn(`[report] caption "${caption}" matched no request-page field`);
         continue;
       }
       const matchedLabel = hit.signals[0];
       try {
-        await hit.handle.click({ clickCount: 3 }); // select existing content
-        await hit.handle.type(String(value));
-        await hit.handle.press('Enter');
+        if (hit.kind === 'checkbox') {
+          // Click only when the current state differs — clicking a checkbox that is
+          // already right would toggle it wrong.
+          const wanted = value === true || value === 'true' || value === 1 || value === '1';
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const current: boolean = await hit.handle.evaluate((el: any) => el.checked === true);
+          if (current !== wanted) await hit.handle.click();
+        } else if (hit.kind === 'select') {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await hit.handle.evaluate((el: any, v: string) => {
+            const opts = Array.prototype.slice.call(el.options || []);
+            const match = opts.find((o: { text?: string; value?: string }) =>
+              (o.text || '').trim().toLowerCase() === v.trim().toLowerCase()
+              || (o.value || '').trim().toLowerCase() === v.trim().toLowerCase());
+            if (match) {
+              el.value = (match as { value: string }).value;
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          }, String(value));
+        } else {
+          await hit.handle.click({ clickCount: 3 }); // select existing content
+          await hit.handle.type(String(value));
+          await hit.handle.press('Enter');
+        }
         applied.push({ caption, matched: true, matchedLabel });
       } catch (e) {
         applied.push({ caption, matched: false, matchedLabel });
-        this.logger.warn(`[report] failed to type filter "${caption}": ${e instanceof Error ? e.message : String(e)}`);
+        this.logger.warn(`[report] failed to set "${caption}": ${e instanceof Error ? e.message : String(e)}`);
       }
     }
     return { applied, availableLabels: [...labelSet].slice(0, 40) };

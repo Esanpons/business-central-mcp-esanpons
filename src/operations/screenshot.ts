@@ -13,6 +13,7 @@ export interface ScreenshotInput {
   redact?: string[];
   crop?: string | string[];
   expand?: boolean;
+  clickBeforeCapture?: string[];
   out?: string;
   width?: number;
   height?: number;
@@ -57,6 +58,7 @@ export class ScreenshotOperation {
       redact: input.redact,
       crop: input.crop === undefined ? undefined : Array.isArray(input.crop) ? input.crop : [input.crop],
       expand: input.expand,
+      clickBeforeCapture: input.clickBeforeCapture,
       out: input.out,
       width: input.width,
       height: input.height,

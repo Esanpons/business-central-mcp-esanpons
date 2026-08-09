@@ -23,6 +23,7 @@ function makeFakeCtx(pageType: string, treeChildren: unknown[]) {
     dialogs: [],
     ownedFormIds: ['root'],
     wizardState: null,
+    activeFilters: [],
     rootFormId: 'root',
   };
 }

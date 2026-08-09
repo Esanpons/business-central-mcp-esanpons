@@ -79,15 +79,7 @@ describe('ReadDataOperation post-mutation context', () => {
       },
     } as unknown as Parameters<typeof ReadDataOperation>[0];
 
-    const filterService = {
-      applyFilters: async () => ok([]),
-    } as unknown as Parameters<typeof ReadDataOperation>[1];
-
-    const op = new ReadDataOperation(
-      dataService as never,
-      filterService as never,
-      repo,
-    );
+    const op = new ReadDataOperation(dataService as never, repo);
 
     const result = await op.execute({
       pageContextId: pcId,
@@ -116,15 +108,7 @@ describe('ReadDataOperation post-mutation context', () => {
       scrollRepeater: async () => { serviceCalls += 1; return ok([]); },
     } as unknown as Parameters<typeof ReadDataOperation>[0];
 
-    const filterService = {
-      applyFilters: async () => { serviceCalls += 1; return ok([]); },
-    } as unknown as Parameters<typeof ReadDataOperation>[1];
-
-    const op = new ReadDataOperation(
-      dataService as never,
-      filterService as never,
-      repo,
-    );
+    const op = new ReadDataOperation(dataService as never, repo);
 
     const result = await op.execute({ pageContextId: 'pc:does-not-exist' });
     expect(result.ok).toBe(false);

@@ -1,6 +1,6 @@
 import { ok, err, type Result } from '../core/result.js';
 import { ProtocolError } from '../core/errors.js';
-import type { ReportDownloadService, DownloadReportInput, DownloadReportResult } from '../services/report-download-service.js';
+import type { ReportDownloadService, DownloadReportInput, DownloadReportResult, ReportOutputFormat } from '../services/report-download-service.js';
 
 export interface DownloadReportOperationInput {
   reportId: string | number;
@@ -8,6 +8,10 @@ export interface DownloadReportOperationInput {
   out?: string;
   timeoutMs?: number;
   filters?: Record<string, string | number | boolean>;
+  /** G4: Options-area request-page parameters (dates, booleans, option pickers). */
+  parameters?: Record<string, string | number | boolean>;
+  /** G3: force the output format instead of BC's default (PDF). */
+  format?: ReportOutputFormat;
 }
 
 export type DownloadReportOutput = DownloadReportResult;
@@ -26,6 +30,10 @@ export class DownloadReportOperation {
       out: input.out,
       timeoutMs: input.timeoutMs,
       filters,
+      // Parameters keep their type: a boolean must stay a boolean so the service can
+      // recognise it as a checkbox rather than typing the word "true" into a field.
+      parameters: input.parameters,
+      format: input.format,
     };
     try {
       const r = await this.service.download(dlInput);

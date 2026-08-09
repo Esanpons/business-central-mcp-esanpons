@@ -4,7 +4,8 @@ import type { PageService } from '../services/page-service.js';
 import { buildAllSections, type Section } from '../protocol/section-dto.js';
 import { fields as treeFields, cues as treeCues, tabs as treeTabs } from '../protocol/form-views.js';
 import { toSectionSummary, filterColumns, sliceRows } from '../protocol/section-filters.js';
-import { buildOpenFormFilter, type OpenFormFilter } from '../protocol/filter-query.js';
+import type { OpenFormFilter } from '../protocol/filter-query.js';
+import type { OpenFormMode } from '../services/page-service.js';
 
 export interface OpenPageInput {
   pageId: string;
@@ -27,6 +28,13 @@ export interface OpenPageInput {
   range?: { offset: number; limit: number };
   /** Server-side filters applied via the OpenForm query (AL field names). */
   filters?: OpenFormFilter[];
+  /**
+   * G2: open the page in a specific record mode. `Create` opens a BLANK, initialised
+   * record ready to be filled with bc_write_data — the only way to create a record
+   * (`bc_execute_action New` on a card just navigates). `Edit`/`View` force the
+   * editability of the record the page lands on.
+   */
+  mode?: OpenFormMode;
 }
 
 export interface OpenPageOutput {
@@ -36,6 +44,11 @@ export interface OpenPageOutput {
   caption: string;
   /** True when the page opened as a modal (wizard, request page, confirmation). */
   isModal: boolean;
+  /**
+   * G9: the server-side filters this page context is currently under, exactly as sent.
+   * Empty array = unfiltered. Echoed so the caller never has to track filters itself.
+   */
+  activeFilters: OpenFormFilter[];
   /**
    * Every visible page section in canonical order: header, lines, subpages,
    * factboxes, requestPage. See `Section` in protocol/section-dto.ts.
@@ -47,11 +60,11 @@ export class OpenPageOperation {
   constructor(private readonly pageService: PageService) {}
 
   async execute(input: OpenPageInput): Promise<Result<OpenPageOutput, ProtocolError>> {
-    const filterExpr = input.filters && input.filters.length > 0 ? buildOpenFormFilter(input.filters) : undefined;
     const result = await this.pageService.openPage(input.pageId, {
       bookmark: input.bookmark,
       tenantId: input.tenantId,
-      filter: filterExpr,
+      filters: input.filters,
+      mode: input.mode,
     });
     if (!isOk(result)) return result;
 
@@ -133,6 +146,7 @@ export class OpenPageOperation {
       pageType: ctx.pageType,
       caption: ctx.caption || ctx.rootFormId,
       isModal: ctx.isModal,
+      activeFilters: [...ctx.activeFilters],
       sections: out,
     });
   }

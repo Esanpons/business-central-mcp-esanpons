@@ -1,5 +1,5 @@
 <p align="center">
-  <h1 align="center">business-central-mcp</h1>
+  <h1 align="center">business-central-mcp-esanpons</h1>
   <p align="center">
     Give AI assistants direct access to Microsoft Dynamics 365 Business Central.<br/>
     Native WebSocket protocol -- no OData, no APIs, no browser automation.
@@ -7,11 +7,11 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/business-central-mcp"><img src="https://img.shields.io/npm/v/business-central-mcp" alt="npm version"></a>
-  <a href="https://www.npmjs.com/package/business-central-mcp"><img src="https://img.shields.io/npm/dm/business-central-mcp" alt="npm downloads"></a>
-  <a href="https://github.com/SShadowS/business-central-mcp/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/business-central-mcp" alt="license"></a>
-  <a href="vscode:mcp/install?%7B%22name%22%3A%22business-central%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22business-central-mcp%22%5D%7D"><img src="https://img.shields.io/badge/VSCode-Install-007ACC?logo=visualstudiocode" alt="Install in VSCode"></a>
-  <a href="https://github.com/SShadowS/business-central-mcp/releases/latest"><img src="https://img.shields.io/badge/Claude%20Desktop-Download%20.dxt-d97757" alt="Download .dxt for Claude Desktop"></a>
+  <a href="https://www.npmjs.com/package/business-central-mcp-esanpons"><img src="https://img.shields.io/npm/v/business-central-mcp-esanpons" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/business-central-mcp-esanpons"><img src="https://img.shields.io/npm/dm/business-central-mcp-esanpons" alt="npm downloads"></a>
+  <a href="https://github.com/Esanpons/business-central-mcp-esanpons/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/business-central-mcp-esanpons" alt="license"></a>
+  <a href="vscode:mcp/install?%7B%22name%22%3A%22business-central%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22business-central-mcp-esanpons%22%5D%7D"><img src="https://img.shields.io/badge/VSCode-Install-007ACC?logo=visualstudiocode" alt="Install in VSCode"></a>
+  <a href="https://github.com/Esanpons/business-central-mcp-esanpons/releases/latest"><img src="https://img.shields.io/badge/Claude%20Desktop-Download%20.dxt-d97757" alt="Download .dxt for Claude Desktop"></a>
 </p>
 
 ---
@@ -32,7 +32,7 @@
 
 ### VSCode
 
-[![Install in VSCode](https://img.shields.io/badge/VSCode-Install-007ACC?logo=visualstudiocode)](vscode:mcp/install?%7B%22name%22%3A%22business-central%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22business-central-mcp%22%5D%7D)
+[![Install in VSCode](https://img.shields.io/badge/VSCode-Install-007ACC?logo=visualstudiocode)](vscode:mcp/install?%7B%22name%22%3A%22business-central%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22business-central-mcp-esanpons%22%5D%7D)
 
 Click the badge. VSCode opens, prompts to add the server, and writes to your user `mcp.json`.
 
@@ -48,7 +48,7 @@ Workspace: create `.vscode/mcp.json`:
   "servers": {
     "business-central": {
       "command": "npx",
-      "args": ["-y", "business-central-mcp"],
+      "args": ["-y", "business-central-mcp-esanpons"],
       "env": {
         "BC_BASE_URL": "http://your-bc-server/BC",
         "BC_USERNAME": "your-user",
@@ -68,7 +68,7 @@ claude mcp add business-central \
   -e BC_BASE_URL=http://your-bc-server/BC \
   -e BC_USERNAME=you \
   -e BC_PASSWORD=secret \
-  -- npx -y business-central-mcp
+  -- npx -y business-central-mcp-esanpons
 ```
 
 Scope it to the current project with `--scope project`. See `claude mcp --help` for scoping options.
@@ -79,7 +79,7 @@ use it — running the compiled server from `dist/` rather than npm — see
 
 ### Claude Desktop
 
-1. Download the latest `.dxt` from [Releases](https://github.com/SShadowS/business-central-mcp/releases/latest).
+1. Download the latest `.dxt` from [Releases](https://github.com/Esanpons/business-central-mcp-esanpons/releases/latest).
 2. Double-click. Claude Desktop opens Settings → Extensions and prompts for BC URL, username, and password.
 3. Restart Claude Desktop.
 
@@ -97,7 +97,7 @@ Edit `claude_desktop_config.json`:
   "mcpServers": {
     "business-central": {
       "command": "npx",
-      "args": ["-y", "business-central-mcp"],
+      "args": ["-y", "business-central-mcp-esanpons"],
       "env": {
         "BC_BASE_URL": "http://your-bc-server/BC",
         "BC_USERNAME": "your-user",
@@ -184,7 +184,7 @@ One WebSocket connection per session. All operations serialized through a promis
 LLM (Claude / Copilot / etc.)
    |
    v   MCP (stdio or HTTP)
-business-central-mcp
+business-central-mcp-esanpons
    |
    v   WebSocket + JSON-RPC
 BC Web Service Tier (BC27 / BC28)
@@ -250,12 +250,12 @@ Each section carries its own content shape:
 ## Development
 
 ```bash
-git clone https://github.com/SShadowS/business-central-mcp
-cd business-central-mcp
+git clone https://github.com/Esanpons/business-central-mcp-esanpons
+cd business-central-mcp-esanpons
 npm install
 npm run start:stdio-direct   # Run from source
-npm test                     # 284 unit + protocol tests
-npm run test:integration     # 111 integration tests against real BC (requires running BC server)
+npm test                     # 403 unit + protocol tests
+npm run test:integration     # 117 integration tests against real BC (requires running BC server)
 ```
 
 ## Roadmap

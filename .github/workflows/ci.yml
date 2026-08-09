@@ -5,6 +5,9 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  # Lets the integration gate below be triggered by hand when a BC-capable runner
+  # is online (it needs a live server, so it cannot run on every push).
+  workflow_dispatch:
 
 jobs:
   test:
@@ -35,5 +38,36 @@ jobs:
       - name: Unit + protocol tests
         run: npm run test
 
-      # Integration tests need a live BC server; skipped in CI.
-      # Run locally with: npm run test:integration
+  # T4: the integration gate. GitHub-hosted runners cannot reach `devel1` (it lives on
+  # the AESVA network) and a BC container is far too heavy to spin up per push, so this
+  # job runs on a SELF-HOSTED runner that can see BC, and only when one is available.
+  # `continue-on-error` keeps a missing runner from blocking a PR while still surfacing
+  # the result; the credentials come from repo secrets, never from a committed file.
+  integration:
+    # Opt-in: label a self-hosted runner `bc` to enable, or dispatch manually.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'run-integration')
+    runs-on: [self-hosted, bc]
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Integration tests against live BC
+        env:
+          BC_BASE_URL: ${{ secrets.BC_BASE_URL }}
+          BC_USERNAME: ${{ secrets.BC_USERNAME }}
+          BC_PASSWORD: ${{ secrets.BC_PASSWORD }}
+          BC_TENANT_ID: ${{ secrets.BC_TENANT_ID }}
+          NODE_TLS_REJECT_UNAUTHORIZED: '0'
+        # Files run one at a time (vitest.integration.config.ts sets fileParallelism:
+        # false) because each opens its own BC session and BC refuses a burst of
+        # concurrent /SignIn requests.
+        run: npm run test:integration

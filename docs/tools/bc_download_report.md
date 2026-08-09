@@ -10,7 +10,7 @@ Renders a Business Central report by its numeric report ID and downloads the ren
 - USE it as the binary-capture step after exploring/filling a request page with `bc_run_report`.
 - Do NOT use it for server-side **processing** reports (batch posting, inventory adjustment, data processing such as report 295) — those have no downloadable output; use `bc_run_report`.
 - Do NOT use it to read or extract data — use `bc_open_page` / `bc_read_data`.
-- For reports whose request page exposes filter fields (e.g. a `No.` on a document report), pass the `filters` map to print one specific record. What is NOT yet supported: **mandatory** non-filter parameters (dates/options on the Options FastTab — e.g. per-customer statements 116/1316) and forcing a specific output format; those still return `requestPageShown: true`.
+- For reports whose request page exposes filter fields (e.g. a `No.` on a document report), pass the `filters` map to print one specific record; for the **Options area** (dates, booleans, option pickers — e.g. per-customer statements 116/1316) pass `parameters`. Choose the file type with `format`. A report that still cannot be satisfied returns `requestPageShown: true` with a `note` saying what was missing.
 - Requires Chrome or Edge installed on the host running the server (or `BC_SCREENSHOT_CHROME` set to a browser path).
 
 ## Parameters
@@ -37,7 +37,9 @@ The operation returns the `DownloadReportResult` shape (`src/services/report-dow
 | `path` | string (optional) | Absolute path of the saved file. Present only when `downloaded` is true. |
 | `fileName` | string (optional) | Original download filename as Chrome named it. Present only when `downloaded` is true. |
 | `requestPageShown` | boolean | True when BC showed a request page (parameters needed) instead of downloading. Set when no file was captured AND no output trigger was clicked. |
-| `availableFilterLabels` | string[] (optional) | When a `filters` key did not match any request-page filter field, the list of filter captions that WERE found — retry with one of these. |
+| `availableFilterLabels` | string[] (optional) | When a `filters`/`parameters` key did not match any request-page field, the captions that WERE found — retry with one of these. |
+| `parametersApplied` | array (optional) | Per-parameter outcome, same shape as `filtersApplied`. |
+| `format` / `formatSelected` / `availableFormats` | string / boolean / string[] (optional) | The requested format, whether it was actually selected, and the format labels the Send-to dialog offered (verbatim, localized). |
 | `pageTitle` | string | The document title of the loaded page after the SPA settled. |
 
 On failure the operation returns an error with code `REPORT_DOWNLOAD_ERROR`. Note: a `downloaded: false` / `requestPageShown: true` result is NOT treated as an error — it is returned as a successful result describing that BC needs parameters, so the caller can fall back to `bc_run_report`.

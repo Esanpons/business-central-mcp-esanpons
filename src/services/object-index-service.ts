@@ -24,6 +24,51 @@ import { buildAllSections } from '../protocol/section-dto.js';
 const OBJECTS_PAGE = '9174';
 const SAFETY_MAX_READS = 30000;
 
+/**
+ * Page 9174's columns arrive with LOCALIZED captions — English on one environment
+ * ("Object ID"), Spanish on another ("Id. objeto"), Catalan on a third. Hardcoding
+ * the English names made every row unparseable on a Spanish tenant, and because the
+ * refresh then merged an EMPTY result over the cached range, a single run silently
+ * wiped a good 14k-object index (observed live on SaaS, 2026-08-09).
+ *
+ * So the columns are resolved from whatever keys the rows actually carry.
+ */
+export interface ObjectColumnKeys {
+  id: string;
+  type: string;
+  name: string;
+  caption?: string;
+  app?: string;
+}
+
+/** lowercase, strip accents and every non-letter/digit, so "Id. objeto" -> "idobjeto". */
+function normalizeKey(key: string): string {
+  return key.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+const OBJECT_WORDS = ['object', 'objeto', 'objecte'];
+const includesAny = (haystack: string, words: readonly string[]): boolean => words.some((w) => haystack.includes(w));
+
+/**
+ * Map the five columns the index needs onto the row's real cell keys.
+ * Returns null when the mandatory three (id / type / name) can't be identified —
+ * the caller must then fail loudly instead of collecting nothing.
+ */
+export function resolveObjectColumns(cellKeys: readonly string[]): ObjectColumnKeys | null {
+  const norm = cellKeys.map((k) => ({ key: k, n: normalizeKey(k) }));
+  // "Subtipo de objeto" / "Object Subtype" must never win the `type` slot.
+  const objectCols = norm.filter((c) => includesAny(c.n, OBJECT_WORDS) && !c.n.includes('sub'));
+
+  const id = objectCols.find((c) => c.n.includes('id'))?.key;
+  const type = objectCols.find((c) => includesAny(c.n, ['type', 'tipo', 'tipus']))?.key;
+  const name = objectCols.find((c) => includesAny(c.n, ['name', 'nombre', 'nom']))?.key;
+  const caption = objectCols.find((c) => includesAny(c.n, ['caption', 'titulo', 'titol', 'title']))?.key;
+  const app = norm.find((c) => includesAny(c.n, ['app', 'aplicacion', 'aplicacio']))?.key;
+
+  if (!id || !type || !name) return null;
+  return { id, type, name, ...(caption ? { caption } : {}), ...(app ? { app } : {}) };
+}
+
 export interface BcObject {
   type: string;
   id: number;
@@ -105,10 +150,14 @@ export class ObjectIndexService {
     const WINDOW_FULL = 45; // a read returning >= this many rows may be truncated -> split
     const collected = new Map<string, BcObject>();
     let reads = 0;
+    // Resolved once from the first non-empty read, then reused (the page's columns
+    // don't change mid-run). `seenKeys` feeds the error message when they can't be.
+    let cols: ObjectColumnKeys | null = null;
+    let seenKeys: string[] = [];
 
     const readRange = async (lo: number, hi: number): Promise<void> => {
       if (lo > hi || reads >= SAFETY_MAX_READS) return;
-      const r = await this.pageService.openPage(OBJECTS_PAGE, { filter: `'Object ID' IS '${lo}..${hi}'`, tenantId: this.tenantId });
+      const r = await this.pageService.openPage(OBJECTS_PAGE, { filters: [{ column: 'Object ID', value: `${lo}..${hi}` }], tenantId: this.tenantId });
       reads++;
       if (!isOk(r)) {
         this.logger.warn(`[objects] refresh open failed for ${lo}..${hi}: ${r.error.message}`);
@@ -126,20 +175,45 @@ export class ObjectIndexService {
         await readRange(mid + 1, hi);
         return;
       }
+      if (!cols) {
+        seenKeys = Object.keys(rows[0]!.cells);
+        cols = resolveObjectColumns(seenKeys);
+      }
+      if (!cols) return; // reported after the walk — never silently collect nothing
       for (const row of rows) {
-        const id = Number(row.cells['Object ID']);
+        const id = Number(row.cells[cols.id]);
         if (Number.isNaN(id)) continue;
-        collected.set(`${String(row.cells['Object Type'] ?? '')}:${id}`, {
-          type: String(row.cells['Object Type'] ?? ''),
+        const type = String(row.cells[cols.type] ?? '');
+        collected.set(`${type}:${id}`, {
+          type,
           id,
-          name: String(row.cells['Object Name'] ?? ''),
-          caption: String(row.cells['Object Caption'] ?? ''),
-          app: String(row.cells['App Name'] ?? ''),
+          name: String(row.cells[cols.name] ?? ''),
+          caption: cols.caption ? String(row.cells[cols.caption] ?? '') : '',
+          app: cols.app ? String(row.cells[cols.app] ?? '') : '',
         });
       }
     };
 
     await readRange(from, to);
+
+    if (reads > 0 && !cols && seenKeys.length > 0) {
+      throw new Error(
+        `Could not identify page ${OBJECTS_PAGE}'s columns from [${seenKeys.join(', ')}]. `
+        + 'The index was left untouched. Expected an Object ID / Object Type / Object Name column '
+        + '(any locale). Extend resolveObjectColumns() with this locale.',
+      );
+    }
+    // A scan that found nothing must NEVER be merged: with `all: true` the merge keeps
+    // nothing outside [from,to], so saving an empty result would wipe the whole cache
+    // (that is exactly how a good 14k index was lost once).
+    if (collected.size === 0) {
+      const existing = this.load();
+      throw new Error(
+        `Refresh of range ${from}..${to} found 0 objects in ${reads} reads — refusing to overwrite the `
+        + `existing index (${existing.objects.length} objects, updated ${existing.updatedAt || 'never'}). `
+        + 'Check that page 9174 is accessible and returns rows for this range.',
+      );
+    }
 
     // Merge: replace everything in [from,to] with the freshly read set (handles deletions).
     const index = this.load();

@@ -13,7 +13,7 @@ const iconPath = resolve(repoRoot, 'icon.png');
 const readmePath = resolve(repoRoot, 'README.md');
 const licensePath = resolve(repoRoot, 'LICENSE');
 const outDir = resolve(repoRoot, 'dist-dxt');
-const outPath = resolve(outDir, 'business-central-mcp.dxt');
+const outPath = resolve(outDir, 'business-central-mcp-esanpons.dxt');
 
 function syncManifestVersion(): string {
   const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf8'));

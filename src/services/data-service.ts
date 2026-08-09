@@ -11,6 +11,23 @@ import { isFieldNode, type FieldNode, type FormNode, type RepeaterNode } from '.
 import { fieldNodeToControlField } from '../protocol/mcp-adapters.js';
 import { mapRowCellKeys } from '../protocol/row-mapping.js';
 
+/**
+ * The last `StringValue` BC echoed for a control in this response, or undefined if
+ * it echoed none. This is the authoritative post-write value: BC always echoes the
+ * validated/formatted result of a SaveValue (see "SaveValue Echo Behavior"), whereas
+ * the projected tree can miss it on some page shapes.
+ */
+function lastEchoedStringValue(events: readonly BCEvent[], controlPath: string): string | undefined {
+  let found: string | undefined;
+  for (const e of events) {
+    if (e.type !== 'PropertyChanged' || e.controlPath !== controlPath) continue;
+    const changes = e.changes as Record<string, unknown>;
+    const raw = changes['StringValue'] ?? changes['stringValue'];
+    if (typeof raw === 'string') found = raw;
+  }
+  return found;
+}
+
 export interface FieldWriteResult {
   fieldName: string;
   controlPath: string;
@@ -204,10 +221,18 @@ export class DataService {
     const events = result.value;
     this.repo.applyToPage(pageContextId, events);
 
+    // Ground truth is what BC echoed on the wire for THIS control. The projected
+    // tree is a second opinion: on some pages (a document opened with mode=Create,
+    // and pages whose groups use `Editable = <expression>`) the echo arrives but the
+    // projection still reads empty, which made a write that BC had accepted — the
+    // order was created, the customer resolved — report `changed:false, reason:
+    // "validation reverted"`. Verified live on devel1 (SO20000027 / customer 2000001).
+    const echoed = lastEchoedStringValue(events, fieldNode.controlPath);
     const updatedCtx = this.repo.get(pageContextId);
     const updatedForm = updatedCtx?.forms.get(form.formId);
     const updatedNode = updatedForm ? findByControlPath(updatedForm.root, fieldNode.controlPath) : undefined;
-    const newValue = updatedNode && isFieldNode(updatedNode) ? (updatedNode.properties.stringValue ?? value) : value;
+    const projected = updatedNode && isFieldNode(updatedNode) ? updatedNode.properties.stringValue : undefined;
+    const newValue = echoed ?? projected ?? value;
 
     // P6: did the value actually move? BC may reformat (e.g. customer no -> name),
     // so we compare against the PRE-write value, not against `value`.

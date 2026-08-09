@@ -36,7 +36,7 @@ function docCtx(): PageContext {
       ['header', { sectionId: 'header', kind: 'header', caption: 'Sales Quote', formId: 'root', valid: true }],
       ['lines', { sectionId: 'lines', kind: 'lines', caption: 'Lines', formId: 'child', repeaterControlPath: 'server:c[0]', valid: true }],
     ]),
-    dialogs: [], ownedFormIds: ['root'], isModal: false, wizardState: null,
+    dialogs: [], ownedFormIds: ['root'], isModal: false, wizardState: null, activeFilters: [],
   } as PageContext;
 }
 

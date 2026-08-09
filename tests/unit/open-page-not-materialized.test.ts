@@ -23,6 +23,7 @@ function ctxStub(over: Partial<PageContext>): PageContext {
     ownedFormIds: ['root'],
     isModal: false,
     wizardState: null,
+    activeFilters: [],
     ...over,
   } as PageContext;
 }

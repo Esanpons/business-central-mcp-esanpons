@@ -20,24 +20,34 @@ This project is NOT released and in active development:
 ## Quick Start
 
 ### Project Location
-- **v2 source**: `U:/git/bc-mcp/`
-- **v1 reference** (deprecated): `C:\bc4ubuntu\Decompiled\bc-poc\`
-- **Decompiled BC28**: `U:/git/bc-mcp/reference/bc28/decompiled/`
-- **Decompiled BC27**: `C:\bc4ubuntu\Decompiled\` (various Microsoft.Dynamics.* directories)
-- **Architecture spec**: `C:\bc4ubuntu\Decompiled\bc-poc\docs\superpowers\specs\2026-04-03-bc-mcp-v2-design.md`
+- **This fork (the working copy)**: `D:/Proyectos/Aesva/business-central-mcp-esanpons/`
+- **Upstream reference paths** (`U:/git/bc-mcp/`, `C:\bc4ubuntu\Decompiled\...`) belong to the
+  upstream author's machine and **do not exist here**. The decompiled BC assemblies are NOT
+  vendored in this repo: there is no `reference/` directory. Any protocol claim that cites a
+  decompiled file is inherited from upstream — re-verify it live (see Protocol Verification
+  Procedure) rather than assuming the source is on disk.
 
 ### BC Test Environments
 
-| | BC27 | BC28 |
-|---|---|---|
-| URL | http://cronus27/BC/?tenant=default | http://cronus28/BC/?tenant=default |
-| Username | sshadows | sshadows |
-| Password | 1234 | 1234 |
-| Auth | NavUserPassword | NavUserPassword |
-| License popup | Auto-dismissed | Auto-dismissed |
-| Protocol version | 15041 | 15041 (identical) |
+Upstream's environments (`cronus27` / `cronus28`, user `sshadows`) are **not reachable from this
+fork**. The two environments this fork is actually verified against are below; credentials live in
+`.secrets/devel1.env` and `.secrets/saas.env` (gitignored), which every live script loads.
 
-Both use NavUserPassword authentication (not Windows/NTLM).
+| | Docker (`devel1`) | SaaS (BC Online) |
+|---|---|---|
+| Base URL | `https://devel1/BC` (HTTPS, self-signed) | `https://businesscentral.dynamics.com/{aadTenantId}/{environment}` |
+| Auth | NavUserPassword (`BC_AUTH` unset) | Entra/AAD browser profile (`BC_AUTH=AAD`) |
+| applicationId | `NAV` | `FIN` (mode default) |
+| Env file | `.secrets/devel1.env` | `.secrets/saas.env` |
+| Live check | `npm run test-battery docker` | `npm run test-battery saas` |
+
+Both are exercised by the same harness (`scripts/lib/harness.ts`), so any live script takes
+`docker` | `saas` as its first argument and needs no other change.
+
+**A second BC (BC28) is optional.** Two integration suites (`bc28.test.ts` and the BC28 half of
+`multi-section.test.ts`) re-check BC27-vs-BC28 wire compatibility. They are skipped unless you
+point them at a real BC28 with `BC28_BASE_URL` (+ `BC28_USERNAME` / `BC28_PASSWORD`). Upstream
+hardcoded `http://cronus28/BC`, which made them fail on every run here for no useful reason.
 
 ### Fork environment (AESVA `devel1`)
 
@@ -56,13 +66,20 @@ Server config read from the container: `ClientServicesCredentialType=NavUserPass
 
 ### Essential Commands
 ```bash
-cd U:/git/bc-mcp
-npx tsc --noEmit                    # Type check
-npx vitest run                       # Unit + protocol tests (128 tests)
-npx vitest run --config vitest.integration.config.ts  # Integration tests against real BC (103 tests)
+npx tsc --noEmit                     # Type check
+npx vitest run                       # Unit + protocol tests
+npm run test:integration             # Integration tests against real BC (devel1 must be up)
 npm start                            # HTTP server on port 3000
 npm run start:stdio-direct           # Direct stdio for Claude Desktop
+
+npm run test-battery docker          # Full 18-tool functional battery vs devel1
+npm run test-battery saas            # Same battery vs BC Online (needs the AAD profile)
+npm run objects:refresh -- saas --all # Rebuild .state/object-index.json (bc_find_object's index)
+npm run login:aad                    # One-time interactive Entra sign-in for SaaS
 ```
+
+Test counts move with every change, so they are deliberately NOT written here — run the command.
+`docs/ROADMAP.md` §0 carries the last measured snapshot with its date.
 
 ### Rules
 - Use Windows paths with forward slashes in bash
@@ -107,7 +124,7 @@ Two gotchas that have already bitten this repo:
 
 V1 had several incorrect assumptions (per-page connections, SaveValue not echoing, etc.). When implementing or debugging any BC protocol interaction:
 
-1. **Check the decompiled BC source first** at `U:/git/bc-mcp/reference/bc28/decompiled/`
+1. **Check the decompiled BC source first** if you have a copy (NOT vendored in this repo — see Project Location). Otherwise verify live against `devel1`/SaaS and record the evidence.
 2. Use v1 (`C:\bc4ubuntu\Decompiled\bc-poc\src\`) as a secondary reference only
 3. If v1 and decompiled code disagree, trust the decompiled code
 4. Document which decompiled file/class confirmed the behavior
@@ -138,7 +155,7 @@ All invokes are serialized via a promise queue in `BCSession`. BC's protocol is 
 ### Session Lifecycle
 `SessionManager` (`src/session/session-manager.ts`) owns lazy session creation and dead-session recovery with exponential backoff (1s, 2s, 4s, 8s). Server entry points (`server.ts`, `stdio-server.ts`) use it instead of managing sessions directly. When a dead session is detected, all page contexts are cleared and `SessionLostError` is thrown. `LogicalModalityViolationException` (stale modal state from crashed sessions) is handled with the same retry logic. License/evaluation dialogs are auto-dismissed during session init.
 
-Configurable via env vars: `BC_INVOKE_TIMEOUT` (default 30s), `BC_RECONNECT_MAX_RETRIES` (default 4), `BC_RECONNECT_BASE_DELAY` (default 1s), `BC_PROFILE` (BC profile id e.g. `BUSINESS MANAGER`; empty = server default — see Tell Me Search section).
+Configurable via env vars: `BC_INVOKE_TIMEOUT` (default 30s), `BC_RECONNECT_MAX_RETRIES` (default 6), `BC_RECONNECT_BASE_DELAY` (default 2000ms), `BC_PROFILE` (BC profile id e.g. `BUSINESS MANAGER`; empty = server default — see Tell Me Search section).
 
 ## BC Protocol Patterns (Verified from Decompiled Source)
 
@@ -327,7 +344,7 @@ Verify against real BC first. Codify verified behavior as unit tests second. Nev
 ### Test Tiers
 1. **Unit tests** (`tests/unit/`, `tests/protocol/`): Pure logic, no BC needed. Run with `npx vitest run`.
 2. **Integration tests** (`tests/integration/`): Against real BC27/BC28. Run with `npx vitest run --config vitest.integration.config.ts`.
-3. **Workflow smoke tests**: Exercises all 11 MCP tools in realistic multi-step workflows.
+3. **Workflow smoke tests**: Exercise every MCP tool in realistic multi-step workflows. The live end-to-end equivalent is `npm run test-battery <docker|saas>`, which runs the same Operations the tools wrap against BOTH environments.
 4. **Edge case tests**: Protocol edge cases, error handling, cross-version compatibility.
 
 ### Stale Server Process
@@ -382,7 +399,7 @@ Agent rules of thumb:
 
 ## Screenshot Capture (`bc_screenshot`) — Fork addition
 
-`bc_screenshot` (the 13th tool) captures a REAL PNG of the BC web client for a page/record,
+`bc_screenshot` captures a REAL PNG of the BC web client for a page/record,
 with an optional `highlight` callout box around a named field/action. Built for manuals/docs.
 It is **additive and out-of-band**: a headless system Chrome/Edge (via `puppeteer-core`, no
 bundled download) is launched on demand and torn down — it does NOT touch the WebSocket
@@ -605,39 +622,51 @@ unaffected.
 Document pages (Sales Order=42/43, Purchase Order=50/51) have both a header repeater and a lines subpage repeater. The current PageState only tracks one repeater. Drilling down from document list pages may use the wrong repeater's bookmarks. This is a known architectural limitation to be addressed.
 
 ### Session Recovery
-After a session-killing error, BC holds the NTLM slot for ~15 seconds. The SessionManager handles this with exponential backoff (up to 4 retries). If an invoke hangs indefinitely (confirmed BC bug), the session-level timeout (default 30s) kills the connection and triggers auto-recovery on the next request.
+After a session-killing error, BC holds the NTLM slot for ~15 seconds. The SessionManager handles this with exponential backoff (up to `BC_RECONNECT_MAX_RETRIES` = 6 by default). If an invoke hangs indefinitely (confirmed BC bug), the session-level timeout (default 30s) kills the connection and triggers auto-recovery on the next request.
 
-### Report Output Capture (Phase 6)
-`bc_run_report` can execute reports and fill request pages, but cannot capture the rendered output (PDF/Excel/Word). After execution, BC delivers the report binary via `FileActionDialog` / `BrowserDownloadFileRequest` over a separate streaming channel (WCF `StreamTransfer`), not inline in the WebSocket response. Phase 6 will investigate intercepting this stream.
+### Report Output Capture — only the WS-side path is missing
+Report output **is** captured today: `bc_download_report` renders and downloads the PDF/Excel/Word
+out-of-band through the headless browser (the same engine as `bc_screenshot`), and returns the file
+path. What is still not possible is capturing the binary **over the WebSocket session itself**:
+`bc_run_report` can execute a report and fill its request page, but BC delivers the rendered file via
+`FileActionDialog` / `BrowserDownloadFileRequest` on a separate streaming channel (WCF
+`StreamTransfer`), never inline in the WS response. So: to get a file, use `bc_download_report`; to
+drive a request page interactively, use `bc_run_report`.
 
-Reference: `ReportResultSetDownloadDecorator.SendReportStreamToClient()`, `NSClientCallback.DownloadFileAction()`, `Connection.DownloadStream` (decompiled)
+Reference: `ReportResultSetDownloadDecorator.SendReportStreamToClient()`, `NSClientCallback.DownloadFileAction()`, `Connection.DownloadStream` (decompiled, upstream)
 
 ### Async Message Timing
 The invoke quiescence window (150ms) is a best-effort wait for trailing async `Message` notifications. In rare cases, late-arriving messages may be missed.
 
 ## Claude Desktop Configuration
 
+Run from source (this repo) with `tsx`:
+
 ```json
 {
   "mcpServers": {
     "business-central": {
       "command": "node",
-      "args": ["U:/git/bc-mcp/node_modules/tsx/dist/cli.mjs", "U:/git/bc-mcp/src/stdio-server.ts"],
-      "cwd": "U:/git/bc-mcp",
+      "args": [
+        "D:/Proyectos/Aesva/business-central-mcp-esanpons/node_modules/tsx/dist/cli.mjs",
+        "D:/Proyectos/Aesva/business-central-mcp-esanpons/src/stdio-server.ts"
+      ],
+      "cwd": "D:/Proyectos/Aesva/business-central-mcp-esanpons",
       "env": {
-        "BC_BASE_URL": "http://Cronus27/BC",
-        "BC_USERNAME": "sshadows",
-        "BC_PASSWORD": "1234",
+        "BC_BASE_URL": "https://devel1/BC",
+        "BC_USERNAME": "admin",
+        "BC_PASSWORD": "<password>",
+        "NODE_TLS_REJECT_UNAUTHORIZED": "0",
         "BC_TENANT_ID": "default",
         "LOG_LEVEL": "info",
-        "LOG_DIR": "U:/git/bc-mcp/logs"
+        "LOG_DIR": "D:/Proyectos/Aesva/business-central-mcp-esanpons/logs"
       }
     }
   }
 }
 ```
 
-Note: `tsx` via `npx` pollutes stdout with `◇ injecting...` which breaks JSON-RPC. Use the direct path `node_modules/tsx/dist/cli.mjs` instead.
+Note: `tsx` via `npx` pollutes stdout with `◇ injecting...` which breaks JSON-RPC. Use the direct path `node_modules/tsx/dist/cli.mjs` instead. For day-to-day use prefer the compiled `dist/` config below (no tsx in the loop).
 
 ### Fork config (AESVA `devel1`, compiled `dist`)
 

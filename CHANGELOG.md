@@ -13,6 +13,87 @@ disambiguation, write verification, payload control). Additive and out-of-band w
 relevant — none of the browser tooling touches the WebSocket protocol path, so the
 existing data tools keep their full speed.
 
+### Added (2026-08-09) — verified live on BOTH devel1 (on-prem) and the SaaS sandbox
+
+Every item below was checked end to end with `npm run verify:features <docker|saas>`,
+which drives the same Operations the MCP tools wrap. Remaining work: [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+- **Create records (`bc_open_page { mode: "Create" }`).** Opens a BLANK, initialised record
+  (BC runs OnNewRecord and the No. Series) that `bc_write_data` can fill — previously the only
+  way to create anything was to fall back to browser automation, because
+  `bc_execute_action { action: "New" }` merely navigates. `Edit`/`View` are accepted too.
+- **Filter a document's lines (`bc_read_data { section: "lines", filters }`).** The OpenForm
+  `filter=` query can only target a page's main list and BC's filter pane is a no-op on
+  BC27/BC28, so line filtering was impossible. Lines are now matched client-side over every
+  materialized row, and the response says so: `rowFilter { mode: "client", scanned, matched,
+  truncated }`. Full BC value syntax (exact / `a..b` / `*x*` / `>n` / `<>x` / `a|b|c`).
+- **Reads report their filters (`activeFilters`).** `bc_open_page` and `bc_read_data` now echo
+  the server-side filters actually in force, so a caller no longer has to track them itself.
+- **`bc_download_report` picks the output format** (`format: "pdf" | "excel" | "word" | "xml"`).
+  If the report does not offer the requested format the download is ABORTED rather than
+  silently returning a PDF, with `availableFormats` listing what its Send-to dialog offered.
+- **`bc_download_report` fills Options-area request-page parameters** (`parameters`): dates,
+  numbers, option pickers and booleans that map to checkboxes (a checkbox is only clicked when
+  its state differs). Previously only RequestFilterFields could be set.
+- **`bc_screenshot` reveals a document's Lines grid.** The reveal pass now expands every
+  collapsed section header, not just FastTabs and sub-groups, so line captions (Quantity, Line
+  Amount) can be highlighted or cropped. New `clickBeforeCapture: ["Lines"]` names a toggle
+  explicitly when the sweep is not wanted.
+- **`npm run objects:refresh -- <docker|saas> [--all]`** rebuilds the `bc_find_object` index
+  from a terminal, and **`npm run verify:features <docker|saas>`** is the live cross-environment
+  check for everything above. Both share one bootstrap (`scripts/lib/harness.ts`).
+
+### Removed (2026-08-09)
+
+- **Field-metadata assertions on the Customer Card** (`isLookup` on `No.`, `showMandatory` on
+  `Name`). BC27 does not populate either flag for those controls; they are presentational hints
+  that no tool behaviour depends on, so the expectations were dropped by decision instead of being
+  left permanently red. The code that reads them is untouched — a build that emits them still
+  surfaces them. Recorded in ROADMAP §7 so it is not re-filed as a bug.
+- **The "dynamic AL editability" bug entry.** Its symptom (a write reported as `changed:false,
+  reason:"not editable"` on a writable field) was the same false negative fixed below by trusting
+  BC's wire echo. Re-file with the page and the raw `events` if it ever reappears.
+
+### Fixed (2026-08-09)
+
+- **`bc_write_data` no longer reports a successful write as failed.** The change check read the
+  projected control tree, which stays empty on some page shapes (a document opened with
+  `mode=Create`, pages whose groups use `Editable = <expression>`), so a write BC had accepted —
+  the order was created, the customer resolved — came back `changed:false, reason:"validation
+  reverted"`. It now trusts the value BC echoes on the wire for that control.
+- **The object index no longer wipes itself on a non-English tenant.** Page 9174's columns are
+  localized (`Id. objeto`, `Tipo objeto`), the English captions were hardcoded, so a refresh on
+  the Spanish SaaS tenant parsed zero rows AND merged that empty result over the cache,
+  destroying a 14k-object index. Columns are now resolved per locale, and a scan that finds
+  nothing refuses to overwrite anything.
+- **A sticky confirm dialog no longer resets the whole session.** Modal reconciliation sent only
+  `Abort=320`, which BC ignores for confirm dialogs; the local stack was force-popped, BC kept
+  the dialog, and the next interaction degraded into a full session reset that lost every open
+  page. It now escalates `No=390` → `Cancel=310` → `Abort=320` → `CloseForm`, stopping at the
+  first answer BC honours.
+- **The selected company survives a reconnect.** After a session death (or an `al_publish`) the
+  recreated session returned to the server-default company; the last `bc_switch_company` is now
+  replayed on the new session.
+- **Session-recovery race.** A tool call arriving while another was recovering took the
+  "first connect" path, received a session with no warning, and failed later with a baffling
+  "page context not found". Concurrent callers now join the same recovery and all receive
+  `SessionLostError`.
+- **A deleted repeater row no longer lingers.** BC does not reliably announce a row removal
+  (verified live: a row Delete produced `InvokeCompleted` + `PropertyChanged` and no row-change
+  payload at all), so the repeater is re-synced from the server after a Delete instead of
+  trusting an incremental event.
+- **`bc_open_page`'s `filters` parameter was invisible to MCP clients** — the JSON-Schema-safe
+  variant of the schema had drifted from the runtime one and omitted it. Both are now generated
+  from one shared field set, so they cannot drift again.
+- **Integration suites are runnable again**: they load `.secrets/devel1.env` (with an actionable
+  error when it is missing), run one file at a time so BC does not refuse a burst of concurrent
+  sign-ins, and the MCP-endpoint suite no longer looks for the repo at the upstream author's
+  hardcoded path — its three tests had never executed in this fork. The two suites that need a
+  second BC (BC28) no longer fail against upstream's hardcoded `cronus28` host: they read
+  `BC28_BASE_URL` and skip when it is unset.
+- **Documentation drift**: CLAUDE.md, README and `manifest.json` no longer point at upstream
+  paths, upstream releases or stale counters.
+
 ### Fixed (2026-07-04 audit)
 
 Remaining work from that audit (re-verified 2026-08-09) lives in [`docs/ROADMAP.md`](docs/ROADMAP.md); the audit order-of-work document itself was consolidated into it and removed.

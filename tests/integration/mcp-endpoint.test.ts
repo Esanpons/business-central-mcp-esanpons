@@ -1,24 +1,31 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { config as dotenvConfig } from 'dotenv';
 
 dotenvConfig();
 
 const PORT = '3456'; // Use a non-default port to avoid conflicts
 const BASE_URL = `http://127.0.0.1:${PORT}`;
+// Derive the repo root from THIS file — never hardcode a machine-specific path, or the
+// suite silently skips on every machine but the author's (it did: `cwd: 'U:/git/bc-mcp'`).
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 describe('MCP Endpoint (integration)', () => {
   let serverProcess: ChildProcess;
   let serverStderr = '';
 
   beforeAll(async () => {
-    // Start the server as a child process
-    serverProcess = spawn('node', ['node_modules/tsx/dist/cli.mjs', 'src/server.ts'], {
-      cwd: 'U:/git/bc-mcp',
+    // No `shell: true`: on Windows it spawns cmd.exe, so a failed launch surfaces as an
+    // unhandled `spawn cmd.exe ENOENT` AFTER the run instead of failing this hook.
+    let spawnError: Error | null = null;
+    serverProcess = spawn(process.execPath, [resolve(REPO_ROOT, 'node_modules/tsx/dist/cli.mjs'), resolve(REPO_ROOT, 'src/server.ts')], {
+      cwd: REPO_ROOT,
       env: { ...process.env, PORT },
       stdio: ['pipe', 'pipe', 'pipe'],
-      shell: true,
     });
+    serverProcess.on('error', (err) => { spawnError = err; });
 
     // Capture stderr for debugging
     serverProcess.stderr?.on('data', (chunk: Buffer) => {
@@ -33,6 +40,10 @@ describe('MCP Endpoint (integration)', () => {
     const start = Date.now();
     let ready = false;
     while (Date.now() - start < maxWait) {
+      if (spawnError) throw new Error(`Failed to spawn the MCP server: ${(spawnError as Error).message}`);
+      if (serverProcess.exitCode !== null) {
+        throw new Error(`MCP server exited with code ${serverProcess.exitCode} before becoming ready.\n${serverStderr}`);
+      }
       try {
         const resp = await fetch(`${BASE_URL}/health`);
         if (resp.ok) {
@@ -46,8 +57,7 @@ describe('MCP Endpoint (integration)', () => {
     }
 
     if (!ready) {
-      console.error('Server stderr:\n', serverStderr);
-      throw new Error('Server did not become ready within 30s');
+      throw new Error(`Server did not become ready within 30s.\nServer output:\n${serverStderr}`);
     }
   }, 60_000);
 

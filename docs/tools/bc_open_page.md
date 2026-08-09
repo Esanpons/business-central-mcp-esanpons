@@ -19,6 +19,8 @@ Do NOT call it if the page is already open — reuse the existing `pageContextId
 | `pageId` | string \| number (coerced to trimmed string) | Yes | Numeric BC page ID (e.g., 22 for Customer List, 21 for Customer Card). Use bc_search_pages to find IDs. |
 | `bookmark` | string | No | Open the page to a specific record. Bookmarks come from list row results in bc_open_page or bc_read_data. |
 | `tenantId` | string | No | BC tenant ID. Defaults to the server-configured tenant. Only needed in multi-tenant deployments. |
+| `mode` | `"Create" | "Edit" | "View"` | No | Record mode. **`Create` opens a BLANK, initialised record** (BC runs OnNewRecord and the No. Series) ready to fill with `bc_write_data` — this is how you create a record; `bc_execute_action {action:"New"}` only navigates. `Edit`/`View` force the editability of the record the page lands on. Omit for BC default. |
+| `filters` | `Array<{ column, value }>` | No | Server-side filters applied as the page opens, via the OpenForm query (the mechanism that works on BC27/BC28). `column` is the **AL field NAME** (`No.`, `Name`, `City`) — never a localized caption. Echoed back as `activeFilters`. |
 | `sections` | string[] | No | Only return these sectionIds (e.g. ["header"]). Use to avoid pulling every line and factbox of a big document. Omit for all sections. |
 | `summary` | boolean | No | Return only sectionId/kind/caption (+totalRowCount) per section, with no fields/rows. Best first call on a large page (e.g. page 41 Sales Quote): discover the sections, then pull each with bc_read_data. Avoids token-limit overflows. |
 | `tab` | string | No | Filter header fields to a tab (e.g. "General", "Shipping and Billing"). Applies to the header section only. |

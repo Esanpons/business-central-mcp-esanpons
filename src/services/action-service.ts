@@ -253,7 +253,41 @@ export class ActionService {
       controlPath = action?.controlPath ?? 'server:c[0]';
     }
 
-    return this.invokeAction(pageContextId, form, controlPath, systemAction);
+    const result = await this.invokeAction(pageContextId, form, controlPath, systemAction);
+
+    // B4: after deleting a repeater row, re-sync the repeater from the server instead
+    // of trusting an incremental removal event. BC does NOT reliably announce the
+    // removal (verified live on devel1: a row Delete produced InvokeCompleted and
+    // PropertyChanged, and no row-change payload at all), so the deleted row stayed
+    // in the projection and a later bookmark action on it would hit
+    // InvalidBookmarkException. A full reload is cheap next to a destructive action
+    // and makes the client state true regardless of the wire shape.
+    if (isOk(result) && repeater && systemAction === SystemAction.Delete) {
+      const refreshed = await this.reloadFormData(pageContextId, form.formId);
+      if (isOk(refreshed)) {
+        const ctx3 = this.repo.get(pageContextId);
+        if (ctx3) return ok({ ...result.value, updatedState: ctx3 });
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Ask BC to re-send a form's data and fold it into the projection. Used after a
+   * destructive row action, where an incremental update cannot be trusted.
+   */
+  private async reloadFormData(pageContextId: string, formId: string): Promise<Result<void, ProtocolError>> {
+    const result = await this.session.invoke(
+      { type: 'LoadForm', formId, loadData: true },
+      (event) => event.type === 'InvokeCompleted',
+    );
+    if (isErr(result)) {
+      this.logger.warn(`[action] post-delete reload failed for form ${formId}: ${result.error.message}`);
+      return result;
+    }
+    this.repo.applyToPage(pageContextId, result.value);
+    return ok(undefined);
   }
 
   /** Resolve a bookmark from an explicit bookmark or a 0-based rowIndex into the loaded rows. */
