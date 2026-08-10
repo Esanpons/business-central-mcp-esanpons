@@ -8,6 +8,8 @@ import {
   type ManualModel, type ManualStepModel, type ManualImage,
 } from './manual-render.js';
 import { renderHtmlDocument, type ManualAssets } from './manual-html.js';
+import { renderDocx } from './manual-docx.js';
+import { measurePageBreaks, type PageBreakMap } from './manual-paginate.js';
 import type { Metrics } from './metrics.js';
 
 export interface ManualScreenshotSpec {
@@ -27,7 +29,10 @@ export interface ManualScreenshotSpec {
 
 export interface ManualStepInput {
   heading: string;
+  /** Prose above the figure. */
   body?: string;
+  /** Prose BELOW the figure. */
+  after?: string;
   /** Capture a fresh annotated screenshot for this step. */
   screenshot?: ManualScreenshotSpec;
   /** Or reference an already-captured image (absolute, or relative to the manual dir). */
@@ -36,7 +41,7 @@ export interface ManualStepInput {
   caption?: string;
 }
 
-export type ManualFormat = 'md' | 'html';
+export type ManualFormat = 'md' | 'html' | 'docx';
 
 export interface BuildManualInput {
   title: string;
@@ -47,17 +52,18 @@ export interface BuildManualInput {
   name?: string;
   /** HTML only: self-contained single file (default) or separate .css/.js/PNG files. */
   assets?: ManualAssets;
-  /** HTML only: language of the generated chrome (cover, index, footer). Default `ca`. */
+  /** HTML/DOCX: language of the generated chrome (cover, index, footer). Default `ca`. */
   lang?: string;
-  /** HTML only: emit a cover sheet. Default true. */
+  /** HTML/DOCX: emit a cover sheet. Default true. */
   cover?: boolean;
-  /** HTML only: emit an index sheet. Default: only from 4 steps up. */
+  /** HTML/DOCX: emit an index sheet. Default: only from 4 steps up. */
   toc?: boolean;
 }
 
 export interface BuildManualOutput {
   md?: string;
   html?: string;
+  docx?: string;
   /** Only when HTML was built with `assets: "files"`. */
   css?: string;
   js?: string;
@@ -82,8 +88,12 @@ function slugify(s: string): string {
  * spec it captures an annotated PNG (reusing ScreenshotService), then renders the whole
  * document to the requested formats. Additive and out-of-band.
  *
- * Two outputs share one authoring model: `md` (plain Markdown, images linked) and
- * `html` (a printable A4 web page -- open it and Ctrl+P for a paged PDF).
+ * Three outputs share one authoring model: `md` (plain Markdown, images linked),
+ * `html` (a printable A4 web page -- open it and Ctrl+P for a paged PDF) and
+ * `docx` (an editable Word document). The Word output is derived FROM the HTML:
+ * the page is paginated in the headless browser and the measured breaks are
+ * replayed into the .docx, so all three tell the same story and the printed
+ * pages match.
  */
 export class ManualService {
   constructor(
@@ -187,7 +197,7 @@ export class ManualService {
           warnings.push(`Step ${i + 1} ("${st.heading}"): the capture returned without writing ${absImg} — `
             + 'the step was written WITHOUT a figure.');
         }
-        stepModels.push({ heading: st.heading, body: st.body, image });
+        stepModels.push({ heading: st.heading, body: st.body, after: st.after, image });
       }
     } finally {
       if (session) await session.close();
@@ -195,10 +205,6 @@ export class ManualService {
 
     const model: ManualModel = { title: input.title, intro: input.intro, steps: stepModels };
     const out: BuildManualOutput = { images, steps: stepModels.length };
-    if (warnings.length) {
-      out.warnings = warnings;
-      for (const w of warnings) this.logger.warn(`[manual] ${w}`);
-    }
 
     if (formats.includes('md')) {
       const p = resolve(dir, `${slug}.md`);
@@ -228,7 +234,59 @@ export class ManualService {
       }
     }
 
-    this.logger.info(`[manual] built "${input.title}" (${out.steps} steps) -> ${[out.md, out.html].filter(Boolean).join(', ')}`);
+    if (formats.includes('docx')) {
+      const p = resolve(dir, `${slug}.docx`);
+      const doc = await renderDocx(model, {
+        lang: input.lang,
+        cover: input.cover,
+        toc: input.toc,
+        breaks: await this.measureBreaks(model, input, warnings),
+      });
+      writeFileSync(p, doc.buffer);
+      out.docx = p;
+      warnings.push(...doc.warnings);
+    }
+
+    // Collected across all three renderers, so a figure that only the Word
+    // output had to drop is still reported.
+    if (warnings.length) {
+      out.warnings = warnings;
+      for (const w of warnings) this.logger.warn(`[manual] ${w}`);
+    }
+
+    this.logger.info(`[manual] built "${input.title}" (${out.steps} steps) -> ${[out.md, out.html, out.docx].filter(Boolean).join(', ')}`);
     return out;
+  }
+
+  /**
+   * Measures the A4 page breaks by paginating the real HTML in the headless browser.
+   *
+   * This is what makes the Word output break where the printed HTML breaks: the
+   * browser is the only thing that knows how tall a rendered step actually is,
+   * and Word will not measure anything for us (see `manual-paginate.ts`).
+   *
+   * A missing browser must not cost the caller their manual, so a failure here
+   * degrades to the declarative layout (one step per page, headings kept with
+   * their figure) and says so in the warnings rather than throwing.
+   */
+  private async measureBreaks(
+    model: ManualModel,
+    input: BuildManualInput,
+    warnings: string[],
+  ): Promise<PageBreakMap | undefined> {
+    try {
+      const { html } = renderHtmlDocument(model, {
+        assets: 'inline',
+        lang: input.lang,
+        cover: input.cover,
+        toc: input.toc,
+      });
+      return await measurePageBreaks(html);
+    } catch (e) {
+      warnings.push('The Word page breaks could not be measured in the browser '
+        + `(${e instanceof Error ? e.message : String(e)}) -- the .docx was written with Word choosing `
+        + 'its own breaks, so its pages may not match the HTML/PDF.');
+      return undefined;
+    }
   }
 }

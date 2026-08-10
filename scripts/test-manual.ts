@@ -1,5 +1,5 @@
 // Functional test of the ManualService against live BC (md + printable A4 html).
-// Run: tsx scripts/test-manual.ts   -- for a BC-free layout check use scripts/verify-manual-html.ts
+// Run: tsx scripts/test-manual.ts   -- for a BC-free layout check use scripts/verify-manual.ts
 import { loadConfig } from '../src/core/config.js';
 import { createLogger } from '../src/core/logger.js';
 import { ScreenshotService } from '../src/services/screenshot-service.js';

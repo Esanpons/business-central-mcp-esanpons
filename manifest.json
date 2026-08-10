@@ -3,7 +3,7 @@
   "name": "business-central-mcp-esanpons",
   "display_name": "Business Central",
   "version": "1.1.0",
-  "description": "Direct access to Microsoft Dynamics 365 Business Central (on-prem and BC Online/SaaS) via its native WebSocket protocol.",
+  "description": "Direct access to Microsoft Dynamics 365 Business Central (on-prem and BC Online/SaaS) via its native WebSocket protocol. Includes annotated screenshots and step-by-step user manuals in Markdown, printable A4 HTML or editable Word.",
   "author": {
     "name": "Esteve Sanpons (AESVA)",
     "email": "esteve@aesva.es"

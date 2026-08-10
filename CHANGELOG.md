@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (2026-08-10) — `bc_build_manual` exports to Word, with the HTML's page breaks
+
+- **`formats: ["docx"]` writes an editable Word document.** Third renderer over the same
+  `ManualModel` (`src/services/manual-docx.ts`), so a manual is still authored once. It emits real
+  Word paragraph styles (`ManualHeading`, `ManualBody`, `ManualNote`, `ManualCaption`, …) rather
+  than hard formatting — the reader restyles the whole manual from the Styles pane — plus a running
+  header, live `PAGE`/`NUMPAGES` footers, and an index of `PAGEREF` fields pointing at per-step
+  bookmarks. `lang`, `cover` and `toc` now apply to HTML **and** DOCX; `assets` stays HTML-only.
+- **The Word pages match the printed HTML.** The two outputs paginate incompatibly: the HTML by
+  MEASUREMENT (the browser measures each unit against a real sheet), Word DECLARATIVELY (it
+  re-flows and honours only rules). So the .docx is not built from rules alone —
+  `measurePageBreaks` (`src/services/manual-paginate.ts`) renders the real HTML in the headless
+  browser, reads back which sheet each unit landed on, and that map is replayed into Word as
+  explicit `pageBreakBefore` flags. Every HTML unit gained a stable `data-uid` as the join key.
+  The measured page number is also cached into each index field, so the index reads correctly
+  before any F9.
+- **A missing browser costs the breaks, not the manual.** `ManualService.measureBreaks` degrades to
+  the declarative layout (a step per page, headings kept with their figure) and says so in
+  `warnings` instead of throwing.
+- **Prose is parsed once for all outputs.** `markdown-inline.ts` now exposes `parseBlocks` /
+  `parseInline` returning a tiny AST that the HTML and Word renderers both walk; `renderBlocks` /
+  `renderInline` became HTML renderers over it. Escaping stays in the HTML renderer, so the AST
+  holds plain text and prose still cannot inject markup.
+- **`imageInfo` reads PNG, JPEG, GIF and BMP headers** (`manual-render.ts`). The HTML can let the
+  browser measure a figure; Word stores an absolute size, so an unreadable size means the figure
+  cannot be placed at all. Anything still unreadable is dropped from the .docx **with a warning**,
+  never silently.
+- **`npm run verify:manual-html` is now `npm run verify:manual`** (`scripts/verify-manual.ts`). It
+  keeps every HTML assertion and adds the Word export, built from the same measured layout. The
+  claim that the Word pages match needs something that re-flows a .docx, so it converts with
+  LibreOffice and compares page counts when `soffice` is installed — and reports the check as
+  SKIPPED when it is not, rather than passing silently.
+- Three library traps are documented in `CLAUDE.md` because each produced a file that opened but
+  was subtly wrong: docx's `Bookmark` class gives every bookmark numeric id 1 (so all PAGEREFs
+  resolve to the first step), its `bullet` shorthand injects a second `w:pStyle` that overrides the
+  manual's body style, and rounding a scaled image width up pushes the figure past the printable
+  area at 9525 EMU/px.
+- **Every step now starts on a new page**, in the HTML and in Word. A numbered heading halfway down
+  a page reads as a subsection of what precedes it rather than as a new step.
+- **A figure that misses its page by a little is scaled down instead of moved.** The paginator
+  closes the overflow by shrinking the image, but only down to 75% of its natural size — past that
+  a capture stops being readable in print and moving it whole is the better answer. The measured
+  size travels to Word in `PageBreakMap.figures`, so both outputs embed the same figure. Verified in
+  `verify:manual`: the fixture step lands in the window and saves a page (`step-5-fig=93%`).
+- **Steps gained an `after` field: prose printed BELOW the figure.** `body` says what to do, `after`
+  says what to notice in the image or what comes next. Rendered in all three outputs.
+- **A step longer than a sheet no longer overflows the paper.** Prose used to be emitted as ONE
+  unit per step (heading + the whole body), and the paginator's unit-by-unit fallback cannot split
+  a single unit — so a long body ran off the bottom of the page. Prose is now measured one unit per
+  Markdown block (`renderBlockList`), with the first block riding WITH the heading so a lone heading
+  is never left at the foot of a sheet. Verified: a 9-paragraph step now flows across two sheets
+  with `overflowing: []`, and the verify fixture covers the case.
+- The Word break calculation takes a step's LAST unit, not its figure. With prose below the image
+  the figure is no longer what closes a step, and comparing against it emitted spurious breaks.
+- `docx` is a runtime dependency again. It was removed when the PDF/DOCX renderers were dropped in
+  favour of print-to-PDF; the goal now is different — an **editable** deliverable, which the HTML
+  print path cannot be.
+
 ### Fixed (2026-08-09, second pass) — full-codebase review
 
 A five-subsystem review read every file in `src/` and produced ~60 verified findings; all of them

@@ -205,7 +205,8 @@ const ManualScreenshotSchema = z.object({
 
 const ManualStepSchema = z.object({
   heading: z.string().describe('Step heading / title (e.g. "Open the Customer Card").'),
-  body: z.string().optional().describe('Prose explaining the step.'),
+  body: z.string().optional().describe('Prose explaining the step, printed ABOVE the screenshot.'),
+  after: z.string().optional().describe('Prose printed BELOW the screenshot -- what the reader should notice once they have seen it, or what to do next. Same Markdown subset as body.'),
   screenshot: ManualScreenshotSchema.optional().describe('Capture a fresh annotated screenshot for this step.'),
   image: z.string().optional().describe('Or reference an existing PNG (absolute path, or relative to the manual dir).'),
   caption: z.string().optional().describe('Caption printed under this step\'s figure (e.g. "Customer Card, General FastTab"). Rendered as a <figcaption> in the HTML and as an italic line in Markdown.'),
@@ -215,13 +216,13 @@ export const BuildManualSchema = z.object({
   title: z.string().describe('Manual title (also used to name the output files unless name is given).'),
   intro: z.string().optional().describe('Optional introduction paragraph.'),
   steps: z.array(ManualStepSchema).min(1).describe('Ordered steps. Each may capture a screenshot and/or carry prose.'),
-  formats: z.array(z.enum(['md', 'html'])).optional().describe('Output formats. "md" = plain Markdown (default). "html" = a printable A4 web page: paged on screen, Ctrl+P prints/saves it as a paged PDF. Pass both to get both.'),
+  formats: z.array(z.enum(['md', 'html', 'docx'])).optional().describe('Output formats. "md" = plain Markdown (default). "html" = a printable A4 web page: paged on screen, Ctrl+P prints/saves it as a paged PDF. "docx" = an editable Word document with the SAME page breaks as the HTML (they are measured in the browser and replayed into Word), real Word styles and a live index -- use it when the reader must edit or restyle the manual. Pass several to get several.'),
   outDir: z.string().optional().describe('Output directory (absolute, or relative to BC_MANUAL_DIR). Defaults to BC_MANUAL_DIR.'),
   name: z.string().optional().describe('Base file name (slugified). Defaults to the title.'),
   assets: z.enum(['inline', 'files']).optional().describe('HTML only. "inline" (default): one self-contained .html with CSS, JS and images embedded -- portable, mail it as-is. "files": .html + .css + .js + linked PNGs -- easier to restyle by hand.'),
-  lang: z.string().optional().describe('HTML only. Language of the generated chrome (cover kicker, index title, print button): ca (default), es or en. The step text itself is whatever you write.'),
-  cover: z.boolean().optional().describe('HTML only. Emit a cover sheet with the title, intro and date. Default true.'),
-  toc: z.boolean().optional().describe('HTML only. Emit an index sheet with the real page number of each step. Default: only when the manual has 4 or more steps.'),
+  lang: z.string().optional().describe('HTML and DOCX. Language of the generated chrome (cover kicker, index title, print button): ca (default), es or en. The step text itself is whatever you write.'),
+  cover: z.boolean().optional().describe('HTML and DOCX. Emit a cover sheet with the title, intro and date. Default true.'),
+  toc: z.boolean().optional().describe('HTML and DOCX. Emit an index sheet with the real page number of each step. Default: only when the manual has 4 or more steps.'),
 });
 
 export const WizardNavigateSchema = z.object({

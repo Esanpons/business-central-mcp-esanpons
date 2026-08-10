@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { escapeHtml, renderBlocks } from './markdown-inline.js';
+import { escapeHtml, renderBlocks, renderBlockList } from './markdown-inline.js';
 import { MANUAL_CSS } from './manual-html-theme.js';
 import { MANUAL_JS } from './manual-html-paginator.js';
 import type { ManualModel, ManualStepModel } from './manual-render.js';
@@ -125,14 +125,14 @@ function coverSheet(model: ManualModel, l: Labels, lang: string, date: Date): st
 }
 
 function tocUnits(model: ManualModel, l: Labels): string[] {
-  const units = [`<div class="unit toc-title" data-unit data-group="toc-head">${escapeHtml(l.toc)}</div>`];
+  const units = [`<div class="unit toc-title" data-unit data-uid="toc-title" data-group="toc-head">${escapeHtml(l.toc)}</div>`];
   model.steps.forEach((s, i) => {
     // The first row rides with the title so the index never opens on an orphan heading.
     const group = i === 0 ? 'toc-head' : `toc-${i}`;
     // The last row closes the sheet, so the steps always start on a fresh page.
     const brk = i === model.steps.length - 1 ? ' data-break="after"' : '';
     units.push(
-      `<div class="unit toc-row" data-unit data-group="${group}" data-target="step-${i + 1}"${brk}>` +
+      `<div class="unit toc-row" data-unit data-uid="toc-row-${i + 1}" data-group="${group}" data-target="step-${i + 1}"${brk}>` +
       `<span class="t-num">${i + 1}</span>` +
       `<span class="t-name">${escapeHtml(s.heading)}</span>` +
       '<span class="t-dots"></span><span class="t-page"></span></div>',
@@ -141,14 +141,31 @@ function tocUnits(model: ManualModel, l: Labels): string[] {
   return units;
 }
 
+/**
+ * One step, as measurable units.
+ *
+ * Prose is emitted one unit PER BLOCK so a long step can flow across sheets --
+ * a whole body in a single unit is indivisible, and once it outgrows the paper
+ * the paginator has nothing left to split and the sheet overflows.
+ *
+ * The FIRST block rides with the heading on purpose. Units of a group that does
+ * not fit are placed one by one, so a heading emitted alone would be left at the
+ * foot of a sheet with its text on the next one.
+ */
 function stepUnits(step: ManualStepModel, index: number, assets: ManualAssets): string[] {
   const n = index + 1;
   const group = `step-${n}`;
-  const body = step.body ? `<div class="step-body">${renderBlocks(step.body)}</div>` : '';
+  const blocks = step.body ? renderBlockList(step.body) : [];
+  const lead = blocks.length ? `<div class="step-body">${blocks[0]}</div>` : '';
   const units = [
-    `<section class="unit step-head" data-unit data-group="${group}" data-anchor="${group}">` +
-    `<h2><span class="step-num">${n}</span>${escapeHtml(step.heading)}</h2>${body}</section>`,
+    // Every step opens a sheet of its own: a numbered heading halfway down a page
+    // reads as a subsection of what precedes it rather than as a new step.
+    `<section class="unit step-head" data-unit data-uid="${group}-head" data-group="${group}" data-anchor="${group}" data-break="before">` +
+    `<h2><span class="step-num">${n}</span>${escapeHtml(step.heading)}</h2>${lead}</section>`,
   ];
+  blocks.slice(1).forEach((html, i) => {
+    units.push(`<div class="unit step-body" data-unit data-uid="${group}-b${i + 2}" data-group="${group}">${html}</div>`);
+  });
   if (step.image) {
     const { width, height, caption } = step.image;
     // Intrinsic size keeps the aspect box correct before the image decodes,
@@ -157,9 +174,14 @@ function stepUnits(step: ManualStepModel, index: number, assets: ManualAssets): 
     const dims = width && height ? ` width="${width}" height="${height}"` : '';
     const figcaption = caption ? `<figcaption>${escapeHtml(caption)}</figcaption>` : '';
     units.push(
-      `<figure class="unit step-fig" data-unit data-group="${group}">` +
+      `<figure class="unit step-fig" data-unit data-uid="${group}-fig" data-group="${group}">` +
       `<img alt="${escapeHtml(caption ?? step.heading)}" src="${imageSrc(step, assets)}"${dims}>${figcaption}</figure>`,
     );
+  }
+  if (step.after) {
+    renderBlockList(step.after).forEach((html, i) => {
+      units.push(`<div class="unit step-body" data-unit data-uid="${group}-a${i + 1}" data-group="${group}">${html}</div>`);
+    });
   }
   return units;
 }
@@ -176,8 +198,8 @@ export function renderHtmlDocument(model: ManualModel, options: ManualHtmlOption
   const flow: string[] = [];
   if (withCover) flow.push(coverSheet(model, l, lang, date));
   else {
-    flow.push(`<div class="unit toc-title" data-unit data-group="head">${escapeHtml(model.title)}</div>`);
-    if (model.intro) flow.push(`<div class="unit step-body" data-unit data-group="head">${renderBlocks(model.intro)}</div>`);
+    flow.push(`<div class="unit toc-title" data-unit data-uid="head-title" data-group="head">${escapeHtml(model.title)}</div>`);
+    if (model.intro) flow.push(`<div class="unit step-body" data-unit data-uid="head-intro" data-group="head">${renderBlocks(model.intro)}</div>`);
   }
   if (withToc) flow.push(...tocUnits(model, l));
   model.steps.forEach((s, i) => flow.push(...stepUnits(s, i, assets)));

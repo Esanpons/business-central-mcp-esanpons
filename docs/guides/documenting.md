@@ -10,9 +10,10 @@ It answers "I need X, what do I call?" first, then the details.
 | **One** image of a page or record | `bc_screenshot` | Highlight / crop / redact in the same call. |
 | A process explained step by step, for someone to **read or print** | `bc_build_manual` with `formats: ["html"]` | Real A4 sheets, cover + index, Ctrl+P prints it. |
 | …the same, to live in a **repo or wiki** | `bc_build_manual` with `formats: ["md"]` (the default) | Markdown + relatively linked PNGs. |
-| …both at once | `bc_build_manual` with `formats: ["md", "html"]` | One capture pass, two files. |
+| …the same, for someone to **edit or restyle** | `bc_build_manual` with `formats: ["docx"]` | Editable Word, same page breaks as the HTML, real Word styles. |
+| …several at once | `bc_build_manual` with `formats: ["md", "html", "docx"]` | One capture pass, several files. |
 | A **PDF** of a manual | `formats: ["html"]`, then open it and press **Ctrl+P** | There is no PDF output and no PDF tool. The HTML *is* the print path. |
-| A **Word/DOCX** manual | Not supported | Removed on purpose — it could never match the A4 layout. |
+| Text **under** a screenshot | The step's `after` field | `body` goes above the figure, `after` below it. |
 | The **data** behind a page (values, rows, fields) | `bc_open_page` / `bc_read_data` | Never screenshot a page to read it. |
 | A **report's** rendered output (PDF/Excel/Word) | `bc_download_report` | Unrelated to manuals: that is BC rendering its own report. |
 | To find the page id you need | `bc_find_object` (cached index) or `bc_search_pages` (Tell Me) | |
@@ -35,16 +36,33 @@ drives the same engine per step and handles naming, numbering, layout and pagina
 
 ## Choosing the output format
 
-`formats` defaults to `["md"]`, so **HTML must be asked for explicitly**.
+`formats` defaults to `["md"]`, so **anything else must be asked for explicitly**.
 
-- **Pick `html`** whenever a human is going to read the result: end users, training, onboarding,
-  handovers, anything that may be printed or emailed. It produces 210×297mm sheets with a cover,
+Choose by what the reader *does* with the file, not by which looks nicest:
+
+- **Pick `html`** whenever a human is going to read or print the result: end users, training,
+  onboarding, handovers, anything that may be emailed. It produces 210×297mm sheets with a cover,
   an index with real page numbers, running headers and `N / total` footers — the screen preview is
   literally the printed page.
+- **Pick `docx`** when the reader must **edit** it: a client who will adapt the text, a colleague
+  who has to drop it into a corporate template, or simply when the user asked for "un Word". It
+  carries the **same page breaks as the HTML** (they are measured in the browser and replayed into
+  Word), real Word paragraph styles — open the Styles pane and restyle every step at once — a live
+  index and live page numbers.
 - **Pick `md`** when the target is a repository, a wiki, or further editing by an agent or a human.
-- **Pick both** when it has to be readable *and* versioned.
+- **Pick several** when it has to be readable *and* editable *and* versioned. One capture pass
+  serves them all.
 
 If the user says "fes-me un manual" without qualifying, default to `["html"]` and say so.
+
+Two things worth knowing about `docx`:
+
+- It needs Chrome/Edge, like the captures do — the page breaks come from paginating the real HTML
+  in the headless browser. Without a browser the manual is still written, but Word chooses its own
+  breaks and a **warning says so**. Read `warnings`.
+- Word cannot embed a figure whose format or size it cannot read. PNG, JPEG, GIF and BMP are fine;
+  anything else is dropped from the Word output *with a warning* (the HTML and Markdown still show
+  it).
 
 ### HTML-only options
 
@@ -57,8 +75,9 @@ If the user says "fes-me un manual" without qualifying, default to `["html"]` an
 
 ## Writing the prose
 
-`intro` and every step `body` accept a small Markdown subset, rendered the same in both outputs
-(everything is escaped first, so prose can never inject markup):
+`intro`, every step `body` (**above** the figure) and every step `after` (**below** it) accept a
+small Markdown subset, rendered the same in all three outputs (everything is escaped first, so
+prose can never inject markup):
 
 | Syntax | Result |
 |---|---|
@@ -96,8 +115,14 @@ return every field regardless of collapse state.
 
 ## Things you do not have to worry about
 
-- **Page breaks.** A step heading is never separated from its screenshot; a group that does not fit
-  moves whole to the next sheet. Captures are capped at 180mm so any screenshot fits one page.
+- **Page breaks.** Every step starts on a new page. A step heading is never left alone at the foot of a page; a step that fits moves
+  whole to the next sheet rather than being split. A step LONGER than a sheet flows across sheets at
+  its paragraph boundaries instead of overflowing, and a figure that does not fit under its text
+  moves to the next page with its `after` prose following it. Captures are capped at 180mm so any
+  screenshot fits one page.
+- **Figures that almost fit.** Rather than pushing a screenshot to the next page and leaving a gap,
+  the layout scales it down slightly (never below 75%) when that is enough to keep it with its text.
+  Below that it moves, because a capture reduced further stops being readable in print.
 - **Index page numbers.** They are resolved after pagination, from where each step actually landed.
 - **Image sizing.** PNG dimensions are read from the file and emitted as the intrinsic size.
 - **The reader's window.** Pagination always happens at true A4; a narrow window only scales the
@@ -107,7 +132,7 @@ return every field regardless of collapse state.
 ## Where the files land
 
 Under `BC_MANUAL_DIR` (default `./manuals`), or `outDir` if given (absolute, else relative to
-`BC_MANUAL_DIR`). Files are `<slug>.{md,html,css,js}` from `name` or `title`; per-step captures go
+`BC_MANUAL_DIR`). Files are `<slug>.{md,html,docx,css,js}` from `name` or `title`; per-step captures go
 to a sibling `<slug>-img/` as `step-<n>.png`. Standalone `bc_screenshot` PNGs go to
 `BC_SCREENSHOT_DIR` (default `./screenshots`) unless `out` says otherwise.
 
@@ -122,7 +147,9 @@ Always report the returned absolute paths back to the user — they are the deli
 | `MANUAL_ERROR` mentioning Chrome | Chrome/Edge is not installed on the server host, or `BC_SCREENSHOT_CHROME` points at the wrong path. Rendering the HTML itself needs no browser — only the captures do. |
 | `authenticated: false` | Wrong credentials or BC unreachable. Check `bc_health`. |
 | A CardPart page comes back empty | Known: open it through its host page instead (`CARDPART_STUB` carries a `hostHint`). |
-| The A4 layout itself looks broken | Run `npm run verify:manual-html` — it paginates a synthetic manual in a real browser and asserts no sheet overflows, every step is placed, the index resolves and printing yields exactly one page per sheet. It leaves a PNG per sheet under `manuals/_verify/`. |
+| The A4 layout itself looks broken | Run `npm run verify:manual` — it paginates a synthetic manual in a real browser and asserts no sheet overflows, every step is placed, the index resolves and printing yields exactly one page per sheet. It leaves a PNG per sheet under `manuals/_verify/`. |
+| The Word file breaks pages differently from the HTML | The break measurement failed — check `warnings` for it. `npm run verify:manual` also builds a .docx and, when LibreOffice is installed, re-flows it and compares its page count against the HTML. |
+| The Word index shows no page numbers | The measurement was unavailable, so the `PAGEREF` fields shipped without a cached value. Select all in Word and press F9 to resolve them. |
 
 ## Related
 

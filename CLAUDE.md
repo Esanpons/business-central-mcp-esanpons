@@ -101,7 +101,7 @@ there carries the comment explaining WHY. Before adding a file to git, ask which
 | Reproducible output | `screenshots/`, `.arxius/` (reports), `manuals/battery-*`, `manuals/e2e-smoke*`, `manuals/_verify/`, `.poc/`, `.report-capture/`, `logs/`, `tests/recordings/page*.json` | Never commit. Regenerate by re-running the tool |
 | Credentials / live session | `.secrets/`, `.state/aad-profile/` | Never commit, ever |
 | Regenerable cache | `.state/object-index.json` | Never commit (`bc_refresh_objects` rebuilds it) |
-| Fixture a test READS | `tests/recordings/cdo-wizard-*.json`, `manuals/crear-client-img/*.png` (input to `npm run verify:manual-html`), `src/protocol/captures/*` | Commit, and keep the consumer discoverable |
+| Fixture a test READS | `tests/recordings/cdo-wizard-*.json`, `manuals/crear-client-img/*.png` (input to `npm run verify:manual`), `src/protocol/captures/*` | Commit, and keep the consumer discoverable |
 
 Two dirs are versioned but receive test output, so they use an explicit allow-list in
 `.gitignore` (`manuals/*` + `!` exceptions, and `tests/recordings/page*.json`). Adding a `!`
@@ -471,18 +471,25 @@ those get a `__name` wrapper that is undefined in the browser (`drawn`/`crops` u
 
 **Producing documentation? Read [`docs/guides/documenting.md`](docs/guides/documenting.md) first.**
 It is the decision table any agent should follow: one image -> `bc_screenshot`; a process ->
-`bc_build_manual`; `md` for repos/wikis, `html` for anything a human reads or prints; a PDF is
-the HTML plus Ctrl+P (there is no PDF or DOCX output); page data -> `bc_open_page`/`bc_read_data`,
-never a screenshot. The rest of this section is the implementation.
+`bc_build_manual`; `md` for repos/wikis, `html` for anything a human reads or prints, `docx` when
+the reader must edit or restyle it; a PDF is the HTML plus Ctrl+P (there is no PDF output); page
+data -> `bc_open_page`/`bc_read_data`, never a screenshot. The rest of this section is the
+implementation.
 
 **`bc_build_manual`** (`src/services/manual-service.ts`, `operations/build-manual.ts`) builds a
-step-by-step manual from ONE authoring model (`ManualModel` in `manual-render.ts`) to two outputs
+step-by-step manual from ONE authoring model (`ManualModel` in `manual-render.ts`) to three outputs
 selected by `formats` (default `["md"]`):
 
 - **`md`** -- `renderMarkdown` (`manual-render.ts`): text + relative image links.
 - **`html`** -- `renderHtmlDocument` (`manual-html.ts`): a **printable A4 web page**. There is no
-  PDF/DOCX renderer any more (the `docx` dependency is gone) -- the HTML is the print path, so
-  Ctrl+P on it yields the paged PDF.
+  PDF renderer -- the HTML is the print path, so Ctrl+P on it yields the paged PDF.
+- **`docx`** -- `renderDocx` (`manual-docx.ts`): an **editable Word document**, derived FROM the
+  HTML (see "Word export" below). Real Word paragraph styles, a live index, live page numbers.
+
+Prose (`intro`, step `body`) is parsed ONCE by `markdown-inline.ts` into a tiny AST (`parseBlocks`
+-> `Block[]` / `InlineSpan[]`) that both the HTML and the Word renderer walk, which is what keeps a
+body reading identically in all three outputs. Escaping happens in the HTML renderer only, so the
+AST holds plain text and prose can never inject markup anywhere.
 
 Output under `BC_MANUAL_DIR` (default `./manuals`). The authoring recipe an agent should follow
 lives in [`docs/guides/documenting.md`](docs/guides/documenting.md) — there is no `bc-manual`
@@ -495,8 +502,24 @@ one sheet; a bundled paginator (`manual-html-paginator.ts`, a plain JS **string*
 unit against the real `clientHeight` of a `.sheet-body` and distributes them into 210x297mm
 `.sheet` elements, then numbers pages and resolves the index. Load-bearing details:
 
-- A step's heading and its figure share a `data-group` -> never split; a group that doesn't fit
-  moves whole to the next sheet, and only a group too tall for an empty sheet is split unit by unit.
+- **Every step opens a sheet of its own** (`data-break="before"` on its first unit, mirrored by an
+  unconditional `pageBreakBefore` in the Word renderer). A numbered heading halfway down a page
+  reads as a subsection of what precedes it, not as a new step.
+- **A figure that misses its sheet by a little is scaled down instead of moved.** The paginator
+  computes the overflow and shrinks the `<img>` to close it, but only down to `MIN_FIG_SCALE`
+  (0.75) -- past that the capture stops being readable in print and moving it whole is the better
+  answer. The original height is stashed in `data-h0` on first touch: without it a figure that is
+  shrunk, rejected and shrunk again on the next sheet compounds the reductions and slips past the
+  floor. The measured result travels to Word in `PageBreakMap.figures` (CSS px = 96 DPI = exactly
+  what `ImageRun.transformation` wants), so the two outputs cannot drift.
+- A step is emitted as MANY units sharing one `data-group`: `step-N-head` (heading + the FIRST
+  prose block), `step-N-b2..bn` (the remaining blocks of `body`), `step-N-fig`, `step-N-a1..an`
+  (the blocks of `after`, printed below the figure). A group that doesn't fit moves whole to the
+  next sheet, and only a group too tall for an empty sheet is split unit by unit.
+- Prose is one unit PER MARKDOWN BLOCK (`renderBlockList`) so a step longer than a sheet flows
+  instead of overflowing -- a whole body in one unit is indivisible and the paginator's unit-by-unit
+  fallback cannot help it. The first block rides WITH the heading on purpose: units are placed one
+  by one, so a lone heading unit would be left at the foot of a sheet.
   `data-break="after"` on a group's last unit closes the sheet (used by the index).
 - Sheet geometry is a CSS grid `head / 1fr / foot`; `.sheet-body { min-height: 0 }` is what keeps
   `clientHeight` equal to the real usable space -- without it the grid stretches and pagination
@@ -513,14 +536,47 @@ unit against the real `clientHeight` of a `.sheet-body` and distributes them int
 - `assets: 'inline'` (default) embeds CSS/JS/PNGs in one file; `'files'` writes `.html`+`.css`+`.js`
   and links the PNGs. `lang` (ca/es/en) only switches the generated chrome. Every colour/metric is a
   `:root` CSS variable in `manual-html-theme.ts`.
-- Prose (`intro`, step `body`) goes through `markdown-inline.ts` -- a deliberately tiny Markdown
-  subset (paragraphs, lists, `>` notes, bold/italic/code/links) that escapes first, so prose can
-  never inject markup.
+- Prose goes through the shared Markdown AST described above -- a deliberately tiny subset
+  (paragraphs, lists, `>` notes, bold/italic/code/links).
 
-Layout regressions: `npm run verify:manual-html` (`scripts/verify-manual-html.ts`) builds a
-synthetic multi-page manual from PNGs on disk, paginates it in a real browser and asserts no sheet
-overflows, every step is placed, the index resolves, and `page.pdf()` yields exactly one page per
-sheet. It writes `manuals/_verify/` (gitignored) with a PNG per sheet for eyeballing.
+**Word export — measured breaks, replayed declaratively.** The two outputs paginate in
+fundamentally different ways: the HTML paginates by MEASUREMENT (the browser measures each unit
+against a real sheet), while Word re-flows the document itself and honours only RULES. So a .docx
+built from rules alone breaks in different places than the printed HTML. The fix is to run the real
+HTML in the real headless browser, read back which sheet each unit landed on, and turn that map
+into explicit `pageBreakBefore` flags. Load-bearing details:
+
+- Every HTML unit carries a stable `data-uid` (`step-3-head`, `step-3-fig`, `toc-row-2`,
+  `head-title`) -- the join key between the two renderers. Changing one means changing both.
+- `measurePageBreaks` (`manual-paginate.ts`) writes the HTML to a temp file, waits for
+  `#doc[data-paginated="1"]`, and returns `{ uid -> sheet number, totalPages }`. This is the ONLY
+  reason a .docx build needs a browser; `ManualService.measureBreaks` degrades to the declarative
+  layout (a step per page) with a warning rather than throwing when Chrome is missing.
+- The cover is always sheet 1 and carries no measurable unit, so `pageBefore()` answers it directly
+  -- otherwise a cover-only manual compares step 1 against nothing and emits no break.
+- The index uses real `PAGEREF` fields against per-step bookmarks, seeded with the MEASURED page
+  number as the field's cached value: correct the moment the file opens, and self-correcting on F9
+  after the reader edits it.
+- Bookmarks are emitted as explicit `BookmarkStart`/`BookmarkEnd` pairs with a document-wide
+  counter. docx's `Bookmark` class builds its numeric id from a generator it creates PER INSTANCE,
+  so every bookmark comes out as id 1 and Word resolves every PAGEREF to the first one.
+- Bullets use our own `manual-ul` numbering definition, not docx's `bullet` shorthand -- the
+  shorthand injects Word's built-in `ListParagraph` style, landing a second `w:pStyle` in the
+  paragraph that silently overrides `ManualBody`. Each `ol` block gets its own numbering `instance`
+  so counters restart.
+- Image sizes are floored, never rounded: Word stores EMU at 9525 per pixel, and rounding a scaled
+  width up puts the figure a fraction of a millimetre past the printable area, which is enough for
+  Word to reflow it onto its own page.
+- Geometry (`G`) and palette (`C`) in `manual-docx.ts` mirror the `:root` variables of
+  `manual-html-theme.ts` by hand. Change one, change the other.
+
+Layout regressions: `npm run verify:manual` (`scripts/verify-manual.ts`) builds a synthetic
+multi-page manual from PNGs on disk, paginates it in a real browser and asserts no sheet overflows,
+every step is placed, the index resolves, and `page.pdf()` yields exactly one page per sheet. It
+then renders the .docx from the same measured layout. The final claim -- that the Word pages match
+the HTML -- needs something that re-flows a Word file, so it converts with LibreOffice and compares
+page counts when `soffice` is installed, and reports the check as SKIPPED when it is not. It writes
+`manuals/_verify/` (gitignored) with a PNG per sheet for eyeballing.
 
 **`bc_health`** (`src/operations/health.ts`, `src/services/metrics.ts`) reports connection,
 company, open forms, modal depth, and metrics (invokes / errors-by-code / reconnects / uptime).

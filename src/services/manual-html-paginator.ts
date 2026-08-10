@@ -60,6 +60,12 @@ export const MANUAL_JS = `(function () {
 
     var body = null;
 
+    // A figure that misses the sheet by a little is scaled down to fit instead of
+    // being sent to the next page, which would leave a hole under the text it
+    // belongs to. The floor keeps that a SLIGHT reduction: past it the capture
+    // stops being readable in print, and moving it whole is the better answer.
+    var MIN_FIG_SCALE = 0.75;
+
     function addSheet() {
       var sheet = tpl.content.firstElementChild.cloneNode(true);
       doc.appendChild(sheet);
@@ -69,24 +75,65 @@ export const MANUAL_JS = `(function () {
     function put(nodes) { for (var k = 0; k < nodes.length; k++) body.appendChild(nodes[k]); }
     function pull(nodes) { for (var k = 0; k < nodes.length; k++) body.removeChild(nodes[k]); }
 
+    // Scale is always measured against the figure's ORIGINAL height, stashed on
+    // first touch: without it a unit that is shrunk, rejected and shrunk again on
+    // the next sheet compounds the reductions and slips past the floor.
+    function figureOf(unit) { return unit.querySelector ? unit.querySelector('img') : null; }
+    function restore(unit) {
+      var img = figureOf(unit);
+      if (img) img.style.height = '';
+    }
+    function shrinkToFit(unit) {
+      var img = figureOf(unit);
+      if (!img) return false;
+      var over = body.scrollHeight - body.clientHeight;
+      if (over <= 0) return true;
+      var h0 = parseFloat(img.getAttribute('data-h0') || '0');
+      if (!h0) {
+        h0 = img.getBoundingClientRect().height;
+        img.setAttribute('data-h0', String(h0));
+      }
+      var target = img.getBoundingClientRect().height - over - 1;
+      if (h0 <= 0 || target / h0 < MIN_FIG_SCALE) return false;
+      img.style.height = target + 'px';
+      return fits();
+    }
+
     function place(grp) {
       put(grp);
       if (fits()) return;
+      // All but fits: a slightly smaller figure may be all this group needs.
+      for (var s = 0; s < grp.length; s++) if (shrinkToFit(grp[s])) return;
+      for (var r = 0; r < grp.length; r++) restore(grp[r]);
       pull(grp);
       if (body.children.length) {
         // The sheet already had content: give the whole group a fresh sheet.
         addSheet();
         put(grp);
         if (fits()) return;
+        for (var s2 = 0; s2 < grp.length; s2++) if (shrinkToFit(grp[s2])) return;
+        for (var r2 = 0; r2 < grp.length; r2++) restore(grp[r2]);
         pull(grp);
       }
       // Too tall even for an empty sheet: place unit by unit.
       for (var u = 0; u < grp.length; u++) {
         body.appendChild(grp[u]);
         if (!fits() && body.children.length > 1) {
+          if (shrinkToFit(grp[u])) continue;
+          restore(grp[u]);
           body.removeChild(grp[u]);
           addSheet();
           body.appendChild(grp[u]);
+          // Alone on a fresh sheet a figure can still overflow (a very tall
+          // capture plus its caption); shrinking is then the only way to keep it
+          // on the paper at all, so the floor does not apply.
+          if (!fits()) {
+            var lone = figureOf(grp[u]);
+            if (lone) {
+              var excess = body.scrollHeight - body.clientHeight;
+              lone.style.height = (lone.getBoundingClientRect().height - excess - 1) + 'px';
+            }
+          }
         }
       }
     }
@@ -95,7 +142,10 @@ export const MANUAL_JS = `(function () {
     var pendingBreak = false;
     for (var g = 0; g < groups.length; g++) {
       var grp = groups[g];
-      // data-break="after" on the last unit of a group ends the sheet (the index).
+      // data-break="after" on the last unit of a group ends the sheet (the index);
+      // data-break="before" on the first opens one (every step starts a page).
+      var head = grp[0];
+      if (head && head.getAttribute('data-break') === 'before') pendingBreak = true;
       if (pendingBreak && body.children.length) addSheet();
       pendingBreak = false;
       place(grp);

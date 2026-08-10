@@ -47,14 +47,47 @@ describe('renderHtmlDocument -- document shape', () => {
 
   it('groups a step heading with its figure so they are never split', () => {
     const { html } = renderHtmlDocument(model(), { date: DATE });
-    expect(html).toContain('class="unit step-head" data-unit data-group="step-1" data-anchor="step-1"');
-    expect(html).toContain('class="unit step-fig" data-unit data-group="step-1"');
+    expect(html).toContain('class="unit step-head" data-unit data-uid="step-1-head" data-group="step-1" data-anchor="step-1"');
+    expect(html).toContain('class="unit step-fig" data-unit data-uid="step-1-fig" data-group="step-1"');
+  });
+
+  it('gives every unit a stable id, which is what the Word export maps its page breaks to', () => {
+    const { html } = renderHtmlDocument(model(4), { date: DATE });
+    const uids = [...html.matchAll(/data-uid="([^"]+)"/g)].map((m) => m[1]);
+
+    expect(uids).toContain('toc-title');
+    expect(uids).toContain('toc-row-4');
+    expect(uids).toContain('step-1-head');
+    expect(uids).toContain('step-1-fig');
+    expect(new Set(uids).size).toBe(uids.length);
   });
 
   it('renders step prose through the Markdown converter', () => {
     const { html } = renderHtmlDocument(model(), { date: DATE });
-    expect(html).toContain('<p>Fes aixo.</p><ul><li>un</li><li>dos</li></ul>');
+    expect(html).toContain('<p>Fes aixo.</p>');
+    expect(html).toContain('<ul><li>un</li><li>dos</li></ul>');
     expect(html).toContain('Guia <strong>curta</strong>.');
+  });
+
+  it('splits prose into one unit per block, keeping the first with the heading', () => {
+    const { html } = renderHtmlDocument(model(), { date: DATE });
+
+    // The lead paragraph rides with the heading: placing a group unit by unit
+    // would otherwise leave the heading alone at the foot of a sheet.
+    expect(html).toMatch(/data-uid="step-1-head"[^>]*>.*?<h2>.*?<p>Fes aixo\.<\/p>/s);
+    // Every later block is measurable on its own, so a long body can flow.
+    expect(html).toContain('data-uid="step-1-b2"');
+  });
+
+  it('renders prose below the figure as its own units, still grouped with the step', () => {
+    const m = model();
+    m.steps[0]!.after = 'Comprova el resultat.\n\n- primer\n- segon';
+    const { html } = renderHtmlDocument(m, { date: DATE });
+
+    expect(html).toContain('data-uid="step-1-a1" data-group="step-1"');
+    expect(html).toContain('data-uid="step-1-a2" data-group="step-1"');
+    // Order matters: the figure comes before the text that comments on it.
+    expect(html.indexOf('data-uid="step-1-fig"')).toBeLessThan(html.indexOf('data-uid="step-1-a1"'));
   });
 
   it('escapes the title everywhere it is interpolated', () => {

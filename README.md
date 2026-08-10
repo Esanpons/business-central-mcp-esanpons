@@ -2,7 +2,8 @@
   <h1 align="center">business-central-mcp-esanpons</h1>
   <p align="center">
     Give AI assistants direct access to Microsoft Dynamics 365 Business Central.<br/>
-    Native WebSocket protocol -- no OData, no APIs, no browser automation.
+    Native WebSocket protocol -- no OData, no APIs, no browser automation.<br/>
+    Plus annotated screenshots and step-by-step user manuals in Markdown, printable A4 or Word.
   </p>
 </p>
 
@@ -25,7 +26,7 @@
 | BC versions | BC27, BC28 (wire-compatible) |
 | Auth | NavUserPassword (on-prem) + AAD/Entra browser login (BC Online / SaaS) |
 | Tools | 18 |
-| Tests | 403 unit/protocol + integration |
+| Tests | 742 unit/protocol + integration |
 | License | MIT |
 
 ## Install
@@ -136,7 +137,7 @@ Restart Claude Desktop.
 | `BC_RECONNECT_BASE_DELAY` | No | `1000` | Base delay (ms) for exponential reconnect backoff. |
 | `BC_SCREENSHOT_DIR` | No | `./screenshots` | Folder where `bc_screenshot` writes PNGs (relative paths resolve against the server's working dir). |
 | `BC_SCREENSHOT_CHROME` | No | auto-detect | Path to a Chrome/Edge executable for `bc_screenshot` / `bc_build_manual`. Auto-detected on Windows/macOS/Linux if omitted. |
-| `BC_MANUAL_DIR` | No | `./manuals` | Folder where `bc_build_manual` writes the generated Markdown / printable A4 HTML and their images. |
+| `BC_MANUAL_DIR` | No | `./manuals` | Folder where `bc_build_manual` writes the generated Markdown / printable A4 HTML / Word document and their images. |
 | `BC_REPORT_DIR` | No | `.arxius/reports` | Folder where `bc_download_report` writes downloaded report files (PDF/Excel/Word). Relative to the server's working directory. |
 
 ## What can it do?
@@ -157,7 +158,7 @@ Restart Claude Desktop.
 | `bc_download_report` | Render a report and DOWNLOAD its output (PDF/Excel/Word) to disk via the headless browser (CDP download interception). Output-capture companion to `bc_run_report`; out-of-band. Reports needing parameters return `requestPageShown:true`. |
 | `bc_wizard_navigate` | Drive NavigatePage / wizard flows (back / next / finish / cancel) |
 | `bc_screenshot` | Capture a REAL PNG of the BC web client for a page/record. Annotate with highlight callout boxes (single, auto-numbered badges, arrows), redact fields, and crop to a section -- for manuals and docs. Fields in collapsed FastTabs or behind "Show more" are revealed automatically when highlighted (or pass `expand:true`). Saves to disk and returns the image inline. Out-of-band. |
-| `bc_build_manual` | Build a step-by-step user manual with annotated screenshots from a list of steps. Outputs Markdown (default) and/or a printable A4 web page -- real 210x297mm sheets with cover, index and page numbers, so Ctrl+P prints it or saves it as a paged PDF. The high-level companion to `bc_screenshot`. |
+| `bc_build_manual` | Build a step-by-step user manual with annotated screenshots from a list of steps. Three outputs from one authoring pass (`formats`): **Markdown** (default), a **printable A4 web page** -- real 210x297mm sheets with cover, index and page numbers, so Ctrl+P prints it or saves it as a paged PDF -- and an **editable Word document** carrying the *same page breaks as the HTML* (measured in the browser and replayed into Word), real Word styles, a live index and live page numbers. The high-level companion to `bc_screenshot`. |
 | `bc_find_object` | Resolve a page/report/table/codeunit by name or keyword to its numeric ID, from a cached object index. Use before `bc_open_page` when you don't know the id. |
 | `bc_refresh_objects` | Refresh the cached object index (reads "All Objects with Caption", page 9174) used by `bc_find_object`. |
 | `bc_health` | Server/session diagnostics: connected?, active company, open forms, modal depth, and metrics (invokes, errors, reconnects, uptime). Answers even when BC is down. |
@@ -168,11 +169,13 @@ Restart Claude Desktop.
 
 > **Screenshots & manuals — which one do I use?** The
 > [documentation guide](docs/guides/documenting.md) is the decision table: one image →
-> `bc_screenshot`; a whole process → `bc_build_manual`; `md` for repos/wikis, `html` for anything a
-> human reads or prints (real A4 sheets with cover, index and page numbers — Ctrl+P gives the paged
-> PDF). Collapsed FastTabs and "Show more" (Additional) fields are revealed automatically when you
-> highlight/crop them, or pass `expand:true` for a fully-expanded page. Both tools run out-of-band
-> and never disturb the WebSocket session.
+> `bc_screenshot`; a whole process → `bc_build_manual`. Then pick the format by what the reader
+> *does* with the file: `md` for repos/wikis, `html` for anything a human reads or prints (real A4
+> sheets with cover, index and page numbers — Ctrl+P gives the paged PDF), `docx` when they must
+> **edit** it or you were asked for "a Word". The Word file is derived from the HTML, so both print
+> the same pages. Collapsed FastTabs and "Show more" (Additional) fields are revealed automatically
+> when you highlight/crop them, or pass `expand:true` for a fully-expanded page. Both tools run
+> out-of-band and never disturb the WebSocket session.
 
 ## How it works
 
