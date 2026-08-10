@@ -2,9 +2,10 @@ import { readFileSync } from 'node:fs';
 import {
   AlignmentType, BookmarkEnd, BookmarkStart, BorderStyle, Document, ExternalHyperlink, Footer,
   Header, ImageRun, InternalHyperlink, LevelFormat, Packer, PageNumber, Paragraph,
-  ShadingType, SimpleField, TabStopType, TextRun, LeaderType, convertMillimetersToTwip,
+  ShadingType, SimpleField, Table, TableCell, TableLayoutType, TableRow, TabStopType, TextRun,
+  VerticalAlign, WidthType, LeaderType, convertMillimetersToTwip,
 } from 'docx';
-import { parseBlocks, type InlineSpan } from './markdown-inline.js';
+import { parseBlocks, type Block, type CellAlign, type InlineSpan } from './markdown-inline.js';
 import { imageInfo, type ManualModel, type ManualStepModel } from './manual-render.js';
 import type { PageBreakMap } from './manual-paginate.js';
 
@@ -38,9 +39,12 @@ const C = {
   tealDark: '008293',
   tealDeep: '006673',
   ink: '111518',
+  body: '2B3238',
   grey: '687279',
   line: 'E3E8EC',
   wash: 'E6F7F8',
+  bgSoft: 'EDEFF2',
+  zebra: 'F7F9FA',
   white: 'FFFFFF',
 } as const;
 
@@ -125,16 +129,98 @@ function spansToRuns(spans: InlineSpan[]): (TextRun | ExternalHyperlink)[] {
   });
 }
 
+function alignOf(a: CellAlign | undefined): (typeof AlignmentType)[keyof typeof AlignmentType] {
+  return a === 'center' ? AlignmentType.CENTER : a === 'right' ? AlignmentType.RIGHT : AlignmentType.LEFT;
+}
+
+/** Thin grid, mirroring the 1px `--line` borders of the printed table. */
+const CELL_BORDER = { style: BorderStyle.SINGLE, size: 4, color: C.line } as const;
+
 /**
- * Markdown blocks -> Word paragraphs.
+ * A Markdown table as a real Word table.
+ *
+ * `tableHeader` on the first row is what makes Word repeat the column titles
+ * when the table runs past a page -- the same thing the HTML paginator does by
+ * cloning the `<thead>`, so both outputs read alike. Word splits the rest of the
+ * rows by itself, which is why a table needs no measured break of its own.
+ */
+function tableFor(block: Extract<Block, { kind: 'table' }>): Table {
+  const cell = (spans: InlineSpan[], style: string, align: CellAlign | undefined, header: boolean) =>
+    new TableCell({
+      children: [new Paragraph({ style, alignment: alignOf(align), children: spansToRuns(spans) })],
+      ...(header ? { shading: { type: ShadingType.CLEAR, fill: C.wash } } : {}),
+      margins: { top: 40, bottom: 40, left: 80, right: 80 },
+      verticalAlign: VerticalAlign.TOP,
+    });
+
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    layout: TableLayoutType.AUTOFIT,
+    borders: {
+      top: CELL_BORDER, bottom: CELL_BORDER, left: CELL_BORDER, right: CELL_BORDER,
+      insideHorizontal: CELL_BORDER, insideVertical: CELL_BORDER,
+    },
+    rows: [
+      new TableRow({
+        tableHeader: true,
+        children: block.head.map((h, i) => cell(h, 'ManualTableHead', block.align[i], true)),
+      }),
+      ...block.rows.map((r) => new TableRow({
+        children: r.map((c, i) => cell(c, 'ManualTableCell', block.align[i], false)),
+      })),
+    ],
+  });
+}
+
+/**
+ * A fenced code block, as one shaded paragraph PER LINE.
+ *
+ * Not one paragraph with line breaks inside: that is indivisible, and a listing
+ * longer than a page would then be pushed whole onto the next one (or overflow).
+ * Consecutive shaded paragraphs read as a single block, and Word can break
+ * between any two of them.
+ *
+ * An empty line still needs a run, or Word drops the paragraph's shading and the
+ * block comes out with a white gap through it.
+ */
+function codeParagraphs(block: Extract<Block, { kind: 'code' }>): Paragraph[] {
+  const lines = block.lines.length ? block.lines : [''];
+  return lines.map((line, i) => new Paragraph({
+    style: 'ManualCode',
+    shading: { type: ShadingType.CLEAR, fill: C.bgSoft },
+    border: { left: { style: BorderStyle.SINGLE, size: 18, color: C.tealDark, space: 6 } },
+    spacing: {
+      before: i === 0 ? 120 : 0,
+      after: i === lines.length - 1 ? 160 : 0,
+      line: 240,
+    },
+    // Indentation is the content in an ASCII diagram, so the spaces are written
+    // as they are and `xml:space="preserve"` (which docx always emits) keeps them.
+    children: [new TextRun({ text: line || ' ' })],
+  }));
+}
+
+/**
+ * Markdown blocks -> Word content.
+ *
+ * Returns paragraphs AND tables: a Word table is not a paragraph, so the caller
+ * pushes both into the section's children list.
  *
  * `olInstance` gives each ordered list its own numbering instance; sharing one
  * would make the second list in a manual continue from where the first stopped.
  */
-function blocksToParagraphs(src: string, olInstance: () => number): Paragraph[] {
-  const out: Paragraph[] = [];
+function blocksToChildren(src: string, olInstance: () => number): (Paragraph | Table)[] {
+  const out: (Paragraph | Table)[] = [];
   for (const block of parseBlocks(src)) {
-    if (block.kind === 'ul') {
+    if (block.kind === 'table') {
+      out.push(tableFor(block));
+      // Word needs a paragraph after a table: two adjacent tables merge into
+      // one, and a table as the last element of the body is not a valid
+      // document. This is also where the table's bottom spacing comes from.
+      out.push(new Paragraph({ style: 'ManualAfterTable' }));
+    } else if (block.kind === 'code') {
+      out.push(...codeParagraphs(block));
+    } else if (block.kind === 'ul') {
       // Bullets go through our own numbering definition rather than docx's
       // `bullet` shorthand: the shorthand injects Word's built-in ListParagraph
       // style, which lands a SECOND w:pStyle in the paragraph and wins over
@@ -155,6 +241,10 @@ function blocksToParagraphs(src: string, olInstance: () => number): Paragraph[] 
           numbering: { reference: 'manual-ol', level: 0, instance },
         }));
       }
+    } else if (block.kind === 'sub') {
+      // keepNext for the same reason as a step heading: a sub-section title left
+      // alone at the foot of a page is the one layout error Word makes on its own.
+      out.push(new Paragraph({ style: 'ManualSubheading', keepNext: true, children: spansToRuns(block.spans) }));
     } else if (block.kind === 'note') {
       out.push(new Paragraph({ style: 'ManualNote', children: spansToRuns(block.spans) }));
     } else {
@@ -228,8 +318,8 @@ function figureFor(
 }
 
 /** Cover page: title band, rule, intro, then the brand/date line. */
-function coverParagraphs(model: ManualModel, l: Labels, lang: string, date: Date, olInstance: () => number): Paragraph[] {
-  const out: Paragraph[] = [
+function coverParagraphs(model: ManualModel, l: Labels, lang: string, date: Date, olInstance: () => number): (Paragraph | Table)[] {
+  const out: (Paragraph | Table)[] = [
     new Paragraph({
       spacing: { before: convertMillimetersToTwip(55), after: 200 },
       children: [new TextRun({ text: l.manual.toUpperCase(), color: C.teal, bold: true, size: 20, characterSpacing: 60 })],
@@ -241,7 +331,7 @@ function coverParagraphs(model: ManualModel, l: Labels, lang: string, date: Date
       children: [],
     }),
   ];
-  if (model.intro) out.push(...blocksToParagraphs(model.intro, olInstance));
+  if (model.intro) out.push(...blocksToChildren(model.intro, olInstance));
   out.push(new Paragraph({
     spacing: { before: convertMillimetersToTwip(60) },
     tabStops: [{ type: TabStopType.RIGHT, position: convertMillimetersToTwip(USABLE_W_MM) }],
@@ -304,10 +394,10 @@ function stepParagraphs(
   warn: (s: string) => void,
   pageBreakBefore: boolean,
   figureSize?: { width: number; height: number },
-): Paragraph[] {
+): (Paragraph | Table)[] {
   const n = index + 1;
   const anchor = `step-${n}`;
-  const out: Paragraph[] = [
+  const out: (Paragraph | Table)[] = [
     new Paragraph({
       style: 'ManualHeading',
       pageBreakBefore,
@@ -322,9 +412,9 @@ function stepParagraphs(
       ],
     }),
   ];
-  if (step.body) out.push(...blocksToParagraphs(step.body, olInstance));
+  if (step.body) out.push(...blocksToChildren(step.body, olInstance));
   out.push(...figureFor(step, warn, `Step ${n} ("${step.heading}")`, figureSize));
-  if (step.after) out.push(...blocksToParagraphs(step.after, olInstance));
+  if (step.after) out.push(...blocksToChildren(step.after, olInstance));
   return out;
 }
 
@@ -350,6 +440,14 @@ function styles() {
         paragraph: { spacing: { before: 240, after: 160 }, outlineLevel: 0 },
       },
       {
+        // Based on Heading2 with outlineLevel 1: a sub-section shows up in Word's
+        // navigation pane under its step, but the manual's own index lists steps
+        // only -- it is built from bookmarks, not from an outline scan.
+        id: 'ManualSubheading', name: 'Manual Subheading', basedOn: 'Heading2', next: 'ManualBody', quickFormat: true,
+        run: { size: 23, bold: true, color: C.tealDark, font: FONT },
+        paragraph: { spacing: { before: 200, after: 80 }, outlineLevel: 1 },
+      },
+      {
         id: 'ManualBody', name: 'Manual Body', basedOn: 'Normal', next: 'ManualBody', quickFormat: true,
         run: { size: BODY_SIZE },
         paragraph: { spacing: { after: 120, line: 300 } },
@@ -367,6 +465,30 @@ function styles() {
       {
         id: 'ManualFigure', name: 'Manual Figure', basedOn: 'Normal', next: 'ManualBody',
         paragraph: { alignment: AlignmentType.CENTER, spacing: { before: 160, after: 80 } },
+      },
+      {
+        // 9pt, like the printed table: a three-column cell grid at body size
+        // wraps into unreadable columns on A4.
+        id: 'ManualTableHead', name: 'Manual Table Head', basedOn: 'Normal', next: 'ManualTableCell',
+        run: { size: 18, bold: true, color: C.tealDeep },
+        paragraph: { spacing: { before: 20, after: 20, line: 240 } },
+      },
+      {
+        id: 'ManualTableCell', name: 'Manual Table Cell', basedOn: 'Normal', next: 'ManualTableCell',
+        run: { size: 18, color: C.body },
+        paragraph: { spacing: { before: 20, after: 20, line: 240 } },
+      },
+      {
+        // The paragraph Word requires after a table. Kept small so it reads as
+        // the table's bottom margin rather than as an empty line.
+        id: 'ManualAfterTable', name: 'Manual After Table', basedOn: 'Normal', next: 'ManualBody',
+        run: { size: 8 },
+        paragraph: { spacing: { before: 0, after: 60, line: 120 } },
+      },
+      {
+        id: 'ManualCode', name: 'Manual Code', basedOn: 'Normal', next: 'ManualBody',
+        run: { font: 'Consolas', size: 17, color: '1D2429' },
+        paragraph: { indent: { left: convertMillimetersToTwip(3) } },
       },
       {
         id: 'ManualCaption', name: 'Manual Caption', basedOn: 'Normal', next: 'ManualBody',
@@ -461,12 +583,12 @@ export async function renderDocx(model: ManualModel, options: ManualDocxOptions 
   let olSeq = 0;
   const olInstance = () => ++olSeq;
 
-  const children: Paragraph[] = [];
+  const children: (Paragraph | Table)[] = [];
   if (withCover) {
     children.push(...coverParagraphs(model, l, lang, date, olInstance));
   } else {
     children.push(new Paragraph({ style: 'ManualTitle', text: model.title }));
-    if (model.intro) children.push(...blocksToParagraphs(model.intro, olInstance));
+    if (model.intro) children.push(...blocksToChildren(model.intro, olInstance));
   }
 
   // The index opens a page of its own whenever a cover precedes it.

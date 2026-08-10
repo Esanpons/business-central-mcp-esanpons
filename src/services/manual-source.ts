@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, isAbsolute, resolve, relative } from 'node:path';
+import { FENCE_OPEN, isFenceClose, isTableDivider } from './markdown-inline.js';
 import { pngSize, type ManualImage, type ManualModel, type ManualStepModel } from './manual-render.js';
 
 /**
@@ -12,10 +13,10 @@ import { pngSize, type ManualImage, type ManualModel, type ManualStepModel } fro
  * together, and an assistant that needs to produce a valid source file can
  * simply be shown what the tool itself writes.
  *
- * Anything the document model cannot represent (tables, code fences, sub-
- * headings, a second figure in one step) is reported as a diagnostic with its
- * line number rather than silently mangled -- the caller can validate first,
- * fix, and only then build.
+ * Anything the document model cannot represent (a second figure in one step, a
+ * table missing its delimiter row, a fence that is never closed) is reported as
+ * a diagnostic with its line number rather than silently mangled -- the caller
+ * can validate first, fix, and only then build.
  *
  * Format:
  *
@@ -37,6 +38,12 @@ import { pngSize, type ManualImage, type ManualModel, type ManualStepModel } fro
  *     *Figure caption*            <- optional, italic line right after the image
  *
  *     Prose BELOW the figure.
+ *
+ * Prose carries the Markdown subset of `markdown-inline.ts`: paragraphs, `-` and
+ * `1.` lists, `>` notes, GFM tables, ``` fenced code, and the inline marks. A
+ * fence owns every line up to its close, INCLUDING blank ones and lines that
+ * would otherwise read as structure -- a `## ` or an `![](…)` inside a listing is
+ * content, so the scan below tracks the fence state instead of matching blindly.
  */
 
 export type Severity = 'error' | 'warning';
@@ -68,11 +75,9 @@ export interface ParsedManualSource {
 
 const H1 = /^#\s+(.*)$/;
 const H2 = /^##\s+(?:\d+[.)]\s*)?(.*)$/;
-const DEEP_HEADING = /^#{3,}\s+/;
 const IMAGE_LINE = /^!\[([^\]]*)\]\(([^)]+)\)\s*$/;
 const CAPTION_LINE = /^\*([^*].*[^*])\*\s*$/;
 const TABLE_LINE = /^\s*\|.*\|\s*$/;
-const FENCE = /^\s*```/;
 
 /** Percent-decoding, undoing `encodeMarkdownPath` so a path with spaces round-trips. */
 function decodePath(p: string): string {
@@ -140,26 +145,37 @@ function tidy(block: SourceLine[]): string {
   return block.slice(a, b).map((l) => l.text).join('\n');
 }
 
-/** Flags constructs the document model cannot represent, so nothing is lost quietly. */
+/**
+ * Flags constructs the document model cannot represent, so nothing is lost quietly.
+ *
+ * Tables and fenced code are rendered for real now, so what is checked here is
+ * that they are WELL FORMED: a table without its delimiter row and a fence that
+ * is never closed both still parse, but into something the author did not mean.
+ */
 function checkProse(block: SourceLine[], diagnostics: Diagnostic[]): void {
-  let inFence = false;
-  let tableReported = false;
-  block.forEach(({ line, text: raw }) => {
-    if (FENCE.test(raw)) {
-      if (!inFence) {
-        diagnostics.push({ line, severity: 'warning', message: 'fenced code block — the manual model has inline code only, the fence markers will be printed as text' });
-      }
-      inFence = !inFence;
+  let fence: { line: number; marker: string } | undefined;
+  block.forEach(({ line, text: raw }, i) => {
+    const open = FENCE_OPEN.exec(raw);
+    if (fence) {
+      if (isFenceClose(raw, fence.marker)) fence = undefined;
       return;
     }
-    if (inFence) return;
-    if (DEEP_HEADING.test(raw)) {
-      diagnostics.push({ line, severity: 'warning', message: 'sub-heading — a manual has one heading level; make it a "## " step or plain prose, or it renders as a paragraph starting with #' });
-    } else if (TABLE_LINE.test(raw) && !tableReported) {
-      diagnostics.push({ line, severity: 'warning', message: 'Markdown table — not supported by the manual model, it will render as literal pipe characters' });
-      tableReported = true;
+    if (open) {
+      fence = { line, marker: open[1]![0]! };
+      return;
+    }
+    // Only the FIRST row of a pipe run is checked: the rows after the delimiter
+    // are the table's body and reporting each of them is noise.
+    if (TABLE_LINE.test(raw) && !TABLE_LINE.test(block[i - 1]?.text ?? '')) {
+      const next = block[i + 1]?.text ?? '';
+      if (!isTableDivider(next)) {
+        diagnostics.push({ line, severity: 'warning', message: 'table without a delimiter row — add "|---|---|" under the header, or the pipes print as literal text' });
+      }
     }
   });
+  if (fence) {
+    diagnostics.push({ line: fence.line, severity: 'warning', message: 'code fence is never closed — everything below it is treated as code' });
+  }
 }
 
 /**
@@ -255,9 +271,39 @@ export function parseManualSource({ file, outDir }: ParseManualSourceInput): Par
     target = 'body';
   };
 
+  /** Send one line to whichever prose bucket is open right now. */
+  const collect = (line: number, text: string) => {
+    const entry: SourceLine = { line, text };
+    if (heading === undefined) introLines.push(entry);
+    else if (target === 'body') bodyLines.push(entry);
+    else afterLines.push(entry);
+  };
+
+  // A fence swallows everything up to its close. Without this a listing that
+  // shows how to write a manual (`## `, `![](…)`) would be read as real structure
+  // and silently cut the document in two.
+  let fenceMarker: string | undefined;
+
   for (let i = start; i < lines.length; i++) {
     const raw = lines[i]!;
     const line = i + 1;
+
+    const fence = FENCE_OPEN.exec(raw);
+    if (fenceMarker) {
+      // The SAME close rule the renderer applies (`isFenceClose`). Anything
+      // looser closes the block here but not there, so the reader starts seeing
+      // structure inside a listing while the renderer keeps swallowing prose
+      // into it -- and neither side says a word.
+      if (isFenceClose(raw, fenceMarker)) fenceMarker = undefined;
+      collect(line, raw);
+      continue;
+    }
+    if (fence) {
+      fenceMarker = fence[1]![0]!;
+      awaitingCaption = false;
+      collect(line, raw);
+      continue;
+    }
 
     const h2 = H2.exec(raw);
     if (h2) {
@@ -307,10 +353,7 @@ export function parseManualSource({ file, outDir }: ParseManualSourceInput): Par
       awaitingCaption = false;
     }
 
-    const collected: SourceLine = { line, text: raw };
-    if (heading === undefined) introLines.push(collected);
-    else if (target === 'body') bodyLines.push(collected);
-    else afterLines.push(collected);
+    collect(line, raw);
   }
   flushStep();
 

@@ -104,7 +104,26 @@ const LONG = Array.from({ length: 9 }, (_, i) =>
   `Paragraf ${i + 1}. ${LOREM} ${LOREM} El text ha de poder repartir-se entre fulls sense que `
   + 'cap bloc quedi partit pel mig ni cap full sobreeixi del paper.').join('\n\n');
 
-// 10 steps: prose-only, image-heavy, a body that outgrows a sheet, and text below a figure.
+// A table and a listing that are BOTH taller than a sheet. Neither can be shrunk
+// like a figure, so the paginator has to cut them by rows / by lines; these two
+// steps are what proves nothing is clipped when it does.
+const BIG_TABLE_ROWS = 46;
+/** How many steps embed BIG_TABLE -- the row count below is asserted across all of them. */
+const BIG_TABLE_USES = 2;
+const BIG_TABLE = [
+  '| Ajust | Valor | Per que |',
+  '|---|---|---:|',
+  ...Array.from({ length: BIG_TABLE_ROWS }, (_, i) =>
+    `| Parametre **${i + 1}** | \`valor-${i + 1}\` | Motiu pel qual el parametre ${i + 1} ha de tenir aquest valor i no un altre |`),
+].join('\n');
+
+const BIG_CODE_LINES = 60;
+const BIG_CODE = ['```bash', ...Array.from({ length: BIG_CODE_LINES }, (_, i) =>
+  `az deployment group create --name desplegament-${i + 1} --template-file template.json`), '```'].join('\n');
+
+// 12 steps: prose-only, image-heavy, a body that outgrows a sheet, text below a
+// figure, and the two blocks that can only be paginated by being cut.
+
 const model: ManualModel = {
   title: 'Manual de proves de paginacio A4',
   intro: 'Aquest document **no** documenta res: serveix per validar que la paginacio A4 funciona.\n\nInclou passos amb imatge, passos nomes de text i llistes.',
@@ -128,6 +147,12 @@ const model: ManualModel = {
       image: img(0),
       caption: 'Aquesta captura hauria de reduir-se una mica en comptes de saltar de pagina',
     },
+    { heading: 'Una taula mes llarga que un full', body: `### Sub-apartat dins del pas\n\n${LOREM}\n\n${BIG_TABLE}\n\nText despres de la taula.` },
+    { heading: 'Un llistat mes llarg que un full', body: `${LOREM}\n\n${BIG_CODE}` },
+    // The FIRST block of a body rides inside the step-head unit, so a step that
+    // opens straight onto a long table is the case where cutting that unit used
+    // to clone the heading and reprint the step title on every sheet it spans.
+    { heading: 'Un pas que obre amb la taula', body: BIG_TABLE },
     { heading: 'Un pas nomes de text', body: `${LOREM} ${LOREM}` },
     { heading: 'Obre la fitxa', body: 'Prem `Enter` sobre la fila.', image: img(0) },
     { heading: 'Omple els camps', body: LOREM, image: img(1) },
@@ -167,7 +192,19 @@ try {
         page: r.querySelector('.t-page')?.textContent ?? '',
       })),
       stepsPlaced: document.querySelectorAll('[data-anchor]').length,
+      // A continuation is the REST of a unit, never a new one: cutting a unit
+      // must not reprint the step heading, and the index resolves a step by its
+      // anchor, so there must be exactly one of each.
+      headings: Array.from(document.querySelectorAll('.sheet h2')).map((h) => h.textContent ?? ''),
       figures: document.querySelectorAll('.step-fig').length,
+      // Counted across ALL sheets: a table or a listing that was cut must have
+      // the same number of rows / lines afterwards as it was authored with.
+      // Anything less means the paginator clipped content instead of moving it.
+      tableRows: document.querySelectorAll('.md-table tbody tr').length,
+      tableParts: document.querySelectorAll('.md-table').length,
+      headlessTableParts: Array.from(document.querySelectorAll('.md-table'))
+        .filter((t) => !t.querySelector('thead tr th')).length,
+      codeLines: document.querySelectorAll('.md-code .cl').length,
       overflowing,
     };
   });
@@ -191,6 +228,16 @@ try {
   if (report.flowLeft) problems.push('#flow was not consumed by the paginator');
   if (report.stepsPlaced !== model.steps.length) problems.push(`${report.stepsPlaced}/${model.steps.length} steps placed`);
   if (report.toc.some((t) => !t.page)) problems.push('index rows without a page number');
+  const repeated = [...new Set(report.headings.filter((h, i) => report.headings.indexOf(h) !== i))];
+  if (repeated.length) problems.push(`step heading(s) printed more than once: ${JSON.stringify(repeated)}`);
+  if (report.headings.length !== model.steps.length) {
+    problems.push(`${report.headings.length} headings printed for ${model.steps.length} steps`);
+  }
+  const expectedRows = BIG_TABLE_ROWS * BIG_TABLE_USES;
+  if (report.tableRows !== expectedRows) problems.push(`${report.tableRows}/${expectedRows} table rows survived pagination`);
+  if (report.codeLines !== BIG_CODE_LINES) problems.push(`${report.codeLines}/${BIG_CODE_LINES} code lines survived pagination`);
+  if (report.tableParts <= BIG_TABLE_USES) problems.push('a long table was never split -- this run does not exercise the cut');
+  if (report.headlessTableParts) problems.push(`${report.headlessTableParts} table part(s) continue without their header row`);
   if (pageCount && pageCount !== report.sheets) problems.push(`printed ${pageCount} pages for ${report.sheets} sheets (blank pages?)`);
 
   // ---- Word export, driven by the very layout just verified -----------------

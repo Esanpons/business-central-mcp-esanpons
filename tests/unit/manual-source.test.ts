@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseManualSource, formatDiagnostics } from '../../src/services/manual-source.js';
 import { renderMarkdown, type ManualModel } from '../../src/services/manual-render.js';
+import { parseBlocks } from '../../src/services/markdown-inline.js';
 
 let dir: string;
 let png: string;
@@ -148,24 +149,95 @@ color: azul
 ## Paso
 
 | a | b |
-|---|---|
+| 1 | 2 |
 
 ### Sub
 
 \`\`\`bash
 x
-\`\`\`
 `);
     // One pass must be enough to fix the file: an author should never have to
     // rebuild just to discover the next problem.
-    expect(diagnostics.map((d) => d.line)).toEqual([2, 9, 12, 14]);
+    expect(diagnostics.map((d) => d.line)).toEqual([2, 9, 14]);
     expect(diagnostics.every((d) => d.severity === 'warning')).toBe(true);
     expect(diagnostics.map((d) => d.message.split(' —')[0])).toEqual([
       'unknown front matter key "color", ignored',
-      'Markdown table',
-      'sub-heading',
-      'fenced code block',
+      'table without a delimiter row',
+      'code fence is never closed',
     ]);
+  });
+
+  it('accepts a sub-heading inside a step: it is a sub-section, not a broken step', () => {
+    const { model, diagnostics } = parse('# T\n\n## Paso\n\n### Sub\n\nTexto.\n');
+    expect(formatDiagnostics(diagnostics)).toEqual([]);
+    expect(model?.steps).toHaveLength(1);
+    expect(model?.steps[0]?.body).toBe('### Sub\n\nTexto.');
+  });
+
+  it('accepts a table and a fenced code block without a word of complaint', () => {
+    const { model, diagnostics } = parse(`# T
+
+## Paso
+
+| Campo | Valor |
+|---|---|
+| TLS | 1.2 |
+
+\`\`\`bash
+az group create --name rg
+\`\`\`
+`);
+    expect(formatDiagnostics(diagnostics)).toEqual([]);
+    // The model keeps the prose verbatim; the renderers parse it.
+    expect(model?.steps[0]?.body).toContain('| TLS | 1.2 |');
+    expect(model?.steps[0]?.body).toContain('az group create --name rg');
+  });
+
+  it('treats a step heading, an image and a caption INSIDE a fence as code', () => {
+    // A manual that documents this very format has all three in a listing. Read
+    // as structure they would cut the document into pieces the author never wrote.
+    const { model, diagnostics } = parse(`# T
+
+## Un solo paso
+
+\`\`\`markdown
+## No soy un paso
+
+![tampoco](img/ausente.png)
+*ni un pie*
+\`\`\`
+
+Texto final.
+`);
+    expect(formatDiagnostics(diagnostics)).toEqual([]);
+    expect(model?.steps).toHaveLength(1);
+    expect(model?.steps[0]?.image).toBeUndefined();
+    expect(model?.steps[0]?.body).toContain('## No soy un paso');
+    expect(model?.steps[0]?.body?.endsWith('Texto final.')).toBe(true);
+  });
+
+  it('closes a fence by the SAME rule the renderer uses, so the two never disagree', () => {
+    // A line carrying an info string opens a fence but never closes one. Reading
+    // it as a close here while the renderer reads on is the worst kind of bug:
+    // the reader starts seeing structure inside a listing, the renderer keeps
+    // swallowing prose into it, and nothing is reported. So this document has an
+    // UNCLOSED fence, and that is what must be said.
+    const { model, diagnostics } = parse(`# T
+
+## Un paso
+
+\`\`\`markdown
+## No soy un paso
+\`\`\`markdown
+
+Texto que el renderizador seguiria tragandose.
+`);
+    expect(model?.steps).toHaveLength(1);
+    expect(formatDiagnostics(diagnostics)).toEqual([
+      'line 5: warning: code fence is never closed — everything below it is treated as code',
+    ]);
+    // Both parsers agree the block runs on, so nothing is silently reinterpreted.
+    expect(parseBlocks(model!.steps[0]!.body!).map((b) => b.kind)).toEqual(['code']);
   });
 
   it('warns instead of failing when a step carries a second figure, and keeps the first', () => {

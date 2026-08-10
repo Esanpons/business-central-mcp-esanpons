@@ -51,6 +51,22 @@ describe('renderHtmlDocument -- document shape', () => {
     expect(html).toContain('class="unit step-fig" data-unit data-uid="step-1-fig" data-group="step-1"');
   });
 
+  it('emits a table and a listing as their own units, each splittable by the paginator', () => {
+    const m = model(1);
+    m.steps[0]!.body = 'Text.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```\nls -la\n```';
+    const { html } = renderHtmlDocument(m, { date: DATE });
+
+    // One unit per block: a table or a listing longer than a sheet has to be
+    // measurable on its own before the paginator can cut it.
+    expect(html).toContain('data-uid="step-1-b2"');
+    expect(html).toContain('data-uid="step-1-b3"');
+    // The rows and the lines are real child ELEMENTS -- that is what gets moved
+    // to the next sheet.
+    expect(html).toContain('<tbody><tr><td>1</td><td>2</td></tr></tbody>');
+    expect(html).toContain('<span class="cl">ls -la</span>');
+    expect(html).toContain('.md-table');            // the stylesheet travels with it
+  });
+
   it('gives every unit a stable id, which is what the Word export maps its page breaks to', () => {
     const { html } = renderHtmlDocument(model(4), { date: DATE });
     const uids = [...html.matchAll(/data-uid="([^"]+)"/g)].map((m) => m[1]);

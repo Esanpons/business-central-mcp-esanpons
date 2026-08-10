@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (2026-08-10) — `bc_build_manual` understands tables and code blocks
+
+- **GFM tables are real tables.** A header row, a `|---|---|` delimiter row (which also sets the
+  column alignment via `:---` / `:---:` / `---:`) and the data rows. In `html` they render as a
+  styled `<table>`; in `docx` as a genuine Word table (`w:tbl`) whose first row is flagged *repeat
+  as header row*. Cells carry the usual inline formatting, a pipe that is content is written `\|`
+  or wrapped in `` `code` ``, and a short row is padded to the header width. Previously a table
+  printed as literal pipe characters.
+- **``` fenced code blocks are verbatim blocks.** Nothing inside is formatted and indentation and
+  blank lines are preserved, so ASCII diagrams and multi-line commands survive. `~~~` is accepted
+  too, for content that itself contains backticks. In `docx` a listing is one shaded `ManualCode`
+  paragraph per line — never one paragraph with breaks inside, which could not break across pages.
+  Previously the fence markers printed as text.
+- **Either one can now be longer than a page.** The paginator cuts a table by rows and a listing by
+  lines across as many sheets as they need, cloning the `<thead>` so every part of a table keeps
+  its column titles. It cuts to FILL the current sheet before moving the block whole, leaving at
+  least 3 rows/lines behind so a remainder never reads as a stray. `scripts/verify-manual.ts` now
+  carries a 46-row table and a 60-line listing and counts the rows/lines across every sheet, so a
+  regression that clips content fails the check instead of passing quietly.
+- **`###` is a sub-heading inside a step.** `## ` is still the step boundary; `###` and deeper now
+  render as a sub-section title (`.md-sub` in HTML, the `ManualSubheading` Word style, outline
+  level 1 so it reaches Word's navigation pane without polluting the manual's index). Previously
+  they printed as a paragraph beginning with `#`, which is why long steps had to be faked with
+  bold paragraphs.
+- **A code fence hides structure from the source parser.** A `## `, an `![](…)` or an italic
+  caption line inside a listing is content now, not a step, a figure or a caption — which is what
+  lets a manual document this very format without cutting itself into pieces.
+- **The diagnostics moved with the model.** The "Markdown table" and "fenced code block" warnings
+  are gone, and so is the `###` one (all three are supported); two took their place: a table
+  without its delimiter row, and a code fence that is never closed. The dropped-second-figure
+  warning and every error case are unchanged.
+- Spec, guide and tool description updated together: `docs/guides/manual-source-format.md`,
+  `docs/tools/bc_build_manual.md`, `docs/guides/documenting.md` and the `bc_build_manual`
+  description an MCP client sees.
+
+
 ### Added (2026-08-10) — `bc_build_manual` exports to Word, with the HTML's page breaks
 
 - **`formats: ["docx"]` writes an editable Word document.** Third renderer over the same
@@ -44,6 +80,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolve to the first step), its `bullet` shorthand injects a second `w:pStyle` that overrides the
   manual's body style, and rounding a scaled image width up pushes the figure past the printable
   area at 9525 EMU/px.
+### Fixed (2026-08-10) — review of the tables / code / sub-heading pass
+
+- **A cut step no longer reprints its heading.** The step-head unit carries the heading plus the
+  FIRST prose block, so a step whose body opens straight onto a long table or listing was cloned
+  heading and all — the step title printed again on every sheet the block spanned, and its
+  `data-anchor` was duplicated with it. A continuation is the rest of a unit, never a new one, so
+  the clone now drops both. The `verify:manual` fixture gained a step that opens on the big table
+  and an assertion that each heading is printed exactly once; without the fix it reports
+  `15 headings printed for 14 steps`.
+- **The two parsers now close a code fence by the same rule.** `manual-source.ts` treated any line
+  starting with the marker as a close, while the renderer (correctly) requires a bare run with no
+  info string. A listing that shows Markdown (` ```markdown … ```markdown `) therefore ended early
+  for the reader and ran on for the renderer: the reader began seeing `## ` inside the listing as
+  real structure, the renderer swallowed the following prose into the code block, and **neither
+  reported anything** — exactly the silent mangling this module exists to prevent. Both now call
+  `isFenceClose`, and such a document is reported as an unclosed fence.
+- The page-parity claim is now stated with its limit: a table or listing longer than a sheet is cut
+  by the paginator where the browser measured, while Word re-flows it itself, so that step can come
+  out a page longer or shorter and the index's cached numbers drift after it (footers stay right; F9
+  re-resolves the index). `verify:manual` catches it via LibreOffice when installed.
+- Dropped a redundant `isDivider` alias in `markdown-inline.ts`.
+
+### Added (2026-08-10) — build from an existing Markdown file
+
 - **`bc_build_manual` can build from an existing Markdown file** (`source`), so a manual someone
   already wrote becomes the printable A4 page or the Word document without being retyped. Images
   resolve relative to the `.md`; outputs land next to it. The accepted format is **exactly what the

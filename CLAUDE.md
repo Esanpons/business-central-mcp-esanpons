@@ -491,6 +491,20 @@ Prose (`intro`, step `body`) is parsed ONCE by `markdown-inline.ts` into a tiny 
 body reading identically in all three outputs. Escaping happens in the HTML renderer only, so the
 AST holds plain text and prose can never inject markup anywhere.
 
+The subset is paragraphs, `-`/`1.` lists, `>` notes, `###` sub-headings, **GFM tables**,
+**``` fenced code**, and the inline marks. `## ` never reaches this parser -- it is the step
+boundary, consumed by `manual-source.ts` / the authoring model -- so `###` is unambiguously a
+sub-section INSIDE a step (`ManualSubheading`, outline level 1: it shows in Word's navigation pane
+but not in the manual's own index, which is built from per-step bookmarks). Two load-bearing
+details behind tables and code:
+
+- `parseBlocks` scans LINE BY LINE, not by splitting on blank lines first. A code block owns its
+  blank lines, and splitting first tears one into pieces no later pass can reassemble.
+- A table and a code block are the only blocks that can outgrow a sheet and cannot be shrunk like a
+  figure, so both render as a CONTAINER OF CHILD ELEMENTS (`<tbody><tr>`, `<pre><code><span
+  class="cl">` one per line). That is what lets the paginator cut them; text nodes could not be
+  moved. Change that shape and long tables/listings start being clipped by `overflow:hidden`.
+
 Output under `BC_MANUAL_DIR` (default `./manuals`). The authoring recipe an agent should follow
 lives in [`docs/guides/documenting.md`](docs/guides/documenting.md) — there is no `bc-manual`
 skill (an earlier note here claimed a user-scope `~/.claude/skills/bc-manual/SKILL.md`; it does
@@ -506,8 +520,12 @@ tool description (so any MCP client sees the spec before writing a line), and en
 validator. Load-bearing details:
 
 - `parseManualSource` (`manual-source.ts`) returns `{ model?, options, diagnostics }`. A hard error
-  (no `# `, no `## `, a missing/remote image) yields no model; a warning (table, code fence, `###`,
-  a second figure in one step) degrades and is reported. `validate: true` checks without building.
+  (no `# `, no `## `, a missing/remote image) yields no model; a warning (`###`, a second figure in
+  one step, a table missing its `|---|---|` delimiter row, an unclosed fence) degrades and is
+  reported. `validate: true` checks without building.
+- The source scan tracks the FENCE STATE, so a `## `, an `![](…)` or an italic caption line inside a
+  listing is content, not structure. Without it a manual that documents this format cuts itself into
+  steps the author never wrote.
 - Every collected prose line carries its own file line number (`SourceLine`), not a per-block offset
   -- blocks are checked when their step is flushed, so a single offset drifts by one at every
   boundary and an almost-right line number is worse than none.
@@ -529,6 +547,12 @@ unit against the real `clientHeight` of a `.sheet-body` and distributes them int
 - **Every step opens a sheet of its own** (`data-break="before"` on its first unit, mirrored by an
   unconditional `pageBreakBefore` in the Word renderer). A numbered heading halfway down a page
   reads as a subsection of what precedes it, not as a new step.
+- **A table or a code block too tall for a sheet is CUT, not moved.** `splitUnit` moves the
+  overflowing tail into a clone of the unit -- cloning is what carries the `<thead>` along, so the
+  continuation keeps its column titles -- and the clone gets a `-cN` uid so the measured break map
+  never has two units claiming the same key. It is tried BEFORE moving the block whole (leaving at
+  least `MIN_SLICE` = 3 rows/lines behind, or a gap reads tidier than a stray), which is why a long
+  table starts on the sheet its heading is on instead of leaving most of it blank.
 - **A figure that misses its sheet by a little is scaled down instead of moved.** The paginator
   computes the overflow and shrinks the `<img>` to close it, but only down to `MIN_FIG_SCALE`
   (0.75) -- past that the capture stops being readable in print and moving it whole is the better
@@ -563,6 +587,13 @@ unit against the real `clientHeight` of a `.sheet-body` and distributes them int
 - Prose goes through the shared Markdown AST described above -- a deliberately tiny subset
   (paragraphs, lists, `>` notes, bold/italic/code/links).
 
+**Word page parity has ONE limit.** Every step opens its own page in both outputs, but a table or a
+code block longer than a sheet is cut by the paginator at a row/line the browser measured, while
+Word re-flows it on its own -- so that step can come out a page longer or shorter and the index's
+cached numbers drift after it. The footers are live fields and stay correct, and F9 re-resolves the
+index. `verify:manual` catches a divergence by re-flowing the .docx with LibreOffice (skipped, and
+reported as skipped, when it is not installed).
+
 **Word export — measured breaks, replayed declaratively.** The two outputs paginate in
 fundamentally different ways: the HTML paginates by MEASUREMENT (the browser measures each unit
 against a real sheet), while Word re-flows the document itself and honours only RULES. So a .docx
@@ -591,12 +622,26 @@ into explicit `pageBreakBefore` flags. Load-bearing details:
 - Image sizes are floored, never rounded: Word stores EMU at 9525 per pixel, and rounding a scaled
   width up puts the figure a fraction of a millimetre past the printable area, which is enough for
   Word to reflow it onto its own page.
+- A Markdown table becomes a REAL Word table (`w:tbl`), so `blocksToChildren` returns
+  `(Paragraph | Table)[]` -- a table is not a paragraph. Its first row carries `tableHeader`
+  (Word's "repeat as header row"), matching the HTML's cloned `<thead>`. Every table is followed by
+  a `ManualAfterTable` paragraph: two adjacent Word tables MERGE into one, and a table as the last
+  element of the body is not a valid document.
+- A code block is one shaded paragraph PER LINE (`ManualCode`), never one paragraph with breaks
+  inside: that would be indivisible and a long listing could not break across pages. An empty line
+  still gets a run, or Word drops the shading and the block comes out with a white gap through it.
+- Word re-flows a table and a listing by itself, so neither carries a measured break. Page counts
+  can therefore drift from the HTML by a page when a table lands exactly on a boundary -- the same
+  tolerance the rest of a step's content already has (only STEPS get explicit breaks).
 - Geometry (`G`) and palette (`C`) in `manual-docx.ts` mirror the `:root` variables of
   `manual-html-theme.ts` by hand. Change one, change the other.
 
 Layout regressions: `npm run verify:manual` (`scripts/verify-manual.ts`) builds a synthetic
 multi-page manual from PNGs on disk, paginates it in a real browser and asserts no sheet overflows,
 every step is placed, the index resolves, and `page.pdf()` yields exactly one page per sheet. It
+also carries a 46-row table and a 60-line listing and COUNTS the rows/lines across every sheet
+afterwards: the numbers must match what was authored, which is what proves the cut moves content
+instead of clipping it. It
 then renders the .docx from the same measured layout. The final claim -- that the Word pages match
 the HTML -- needs something that re-flows a Word file, so it converts with LibreOffice and compares
 page counts when `soffice` is installed, and reports the check as SKIPPED when it is not. It writes

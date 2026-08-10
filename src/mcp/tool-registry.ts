@@ -358,7 +358,7 @@ Each step is heading + optional prose + optional figure. Prose splits in two: "b
 
 Output formats (formats, defaults to ["md"]): "md" is plain Markdown with the images linked relatively -- right for repos, wikis and further editing. "html" is a self-contained printable web page laid out as real A4 sheets with a cover, an index with page numbers, running headers and page footers; it looks on screen exactly like it prints, so the reader just opens it and presses Ctrl+P to print it or save it as a paged PDF. "docx" is an editable Word document that carries the SAME page breaks as the HTML: the page is paginated in the headless browser and the measured breaks are replayed into Word, so both print identically -- plus real Word paragraph styles (restyle the whole manual from the Styles pane), a live index and live page numbers. There is no PDF output: the HTML is the print path.
 
-Layout you do not control and should author for: EVERY step starts on a new page, so size steps like pages -- a handful of substantial steps reads far better than twenty one-line ones, each burning a sheet. A figure that does not quite fit is scaled down slightly rather than pushed to the next page.
+Layout you do not control and should author for: EVERY step starts on a new page, so size steps like pages -- a handful of substantial steps reads far better than twenty one-line ones, each burning a sheet. A figure that does not quite fit is scaled down slightly rather than pushed to the next page. A table or a code block longer than a page is CUT across pages instead of being clipped or shoved whole onto the next one -- the table repeats its header row on each -- so neither has to be kept artificially short.
 
 Pick by what the reader does with it. Handed to an end user to READ or PRINT -> "html". The reader must EDIT it, restyle it to their own template, or you were asked for "a Word" -> "docx". Lives in a repo or wiki -> "md". Pass several to get several. Tune with assets (HTML only: inline single file vs separate css/js/png), lang (ca/es/en chrome), cover and toc.
 
@@ -386,11 +386,20 @@ Prose printed ABOVE the figure.
 Prose printed BELOW the figure.
 
 ## 2. Next step
-...
 
-Prose accepts the same small Markdown subset as body/after: paragraphs, - and 1. lists, > notes, **bold**, *italic*, \`code\`, [links](https://...). The model has NO tables, NO code fences, NO sub-headings (###) and NO second figure in a step.
+### A sub-section inside a step   <- ### (or deeper) is a sub-heading, NOT a step
 
-VALIDATE FIRST when the .md was not produced by this tool: pass "validate": true with "source" to parse and check WITHOUT building. You get sourceDiagnostics as "line N: severity: message" -- every problem in one pass, so you can fix the file and build in a second call. Errors (no title, no steps, a missing image) mean nothing is built; warnings (a table, a ###, a dropped second figure) mean it builds but that part is degraded. A build also returns sourceDiagnostics, so warnings are never silent.
+| Setting | Value | Why |          <- GFM table: a header row, a |---|---| delimiter
+|---|---|---:|                        row (:--- / :---: / ---: sets the alignment),
+| TLS | 1.2 | Legal requirement |     then the data rows
+
+\`\`\`bash                               <- fenced code: verbatim, indentation and blank
+az group create --name rg               lines preserved, nothing formatted inside.
+\`\`\`                                   \`\`\` or ~~~ (use ~~~ to show backticks)
+
+Prose accepts this Markdown subset, the same in body, after and intro: paragraphs (a blank line starts a new one; wrapped lines join), - and 1. lists, > notes, GFM tables, \`\`\` code fences, **bold**, *italic*, \`code\` and [links](https://...). A pipe inside a cell must be written \\| or put inside \`code\`. Only ## starts a step; ### and deeper are sub-sections INSIDE the current step. What the model does NOT have: a second figure in one step (it is dropped -- split the step in two) and nested lists (they flatten).
+
+VALIDATE FIRST when the .md was not produced by this tool: pass "validate": true with "source" to parse and check WITHOUT building. You get sourceDiagnostics as "line N: severity: message" -- every problem in one pass, so you can fix the file and build in a second call. Errors (no title, no steps, a missing image) mean nothing is built; warnings (a dropped second figure, a table missing its |---|---| delimiter row, an unclosed code fence) mean it builds but that part is not what you meant. A build also returns sourceDiagnostics, so warnings are never silent.
 
 Files are written under BC_MANUAL_DIR (or outDir), named from the title (or name). The response returns the written file paths and the captured image paths. Runs out-of-band (its own headless browser for the captures) and does not disturb the WebSocket session.
 

@@ -8,7 +8,9 @@
  *
  * Units carrying the same `data-group` are kept together when possible (a step
  * heading is never orphaned from its screenshot). A group that does not fit on
- * a fresh sheet is split unit by unit rather than dropped.
+ * a fresh sheet is split unit by unit rather than dropped, and a single unit
+ * that is still too tall alone -- a long table, a long code block -- is split by
+ * its own rows/lines onto as many sheets as it needs.
  *
  * Kept as a plain string (not a serialized TS function) on purpose: esbuild/tsx
  * rewrites nested named functions with a `__name` helper that does not exist in
@@ -99,6 +101,85 @@ export const MANUAL_JS = `(function () {
       return fits();
     }
 
+    // A table and a code block are the two units that can be taller than a sheet
+    // on their own, and unlike a figure they cannot be shrunk -- so they are cut.
+    // Both render as a container of per-row / per-line child ELEMENTS precisely so
+    // this is possible; the container is what gets sliced.
+    var splitSeq = 0;
+    function splitBox(unit) {
+      if (!unit || !unit.querySelector) return null;
+      return unit.querySelector('table tbody') || unit.querySelector('pre code');
+    }
+    // Moves the overflowing tail of the unit into a CLONE of it. Cloning is what
+    // carries a table's <thead> along, so the continuation keeps its column
+    // titles. Returns null when the unit cannot be cut leaving at least
+    // minKeep rows/lines behind, in which case the caller falls back to moving
+    // it whole -- two rows stranded at the foot of a page read worse than a gap.
+    function splitUnit(unit, minKeep) {
+      var box = splitBox(unit);
+      if (!box || box.children.length <= minKeep) return null;
+      var moved = [];
+      while (box.children.length > minKeep && !fits()) {
+        moved.unshift(box.removeChild(box.lastElementChild));
+      }
+      if (!moved.length || !fits()) {
+        for (var b = 0; b < moved.length; b++) box.appendChild(moved[b]);
+        return null;
+      }
+      var clone = unit.cloneNode(true);
+      var cbox = splitBox(clone);
+      while (cbox.firstElementChild) cbox.removeChild(cbox.firstElementChild);
+      for (var m = 0; m < moved.length; m++) cbox.appendChild(moved[m]);
+      // A distinct uid: the measured break map is keyed by it, and a duplicate
+      // would make the Word renderer read the continuation's page as the whole
+      // unit's.
+      clone.setAttribute('data-uid', (unit.getAttribute('data-uid') || 'unit') + '-c' + (++splitSeq));
+      clone.removeAttribute('data-break');
+      // A continuation is the REST of a unit, never a new one. The step-head unit
+      // carries the heading plus the first prose block, so a step whose body
+      // opens with a long table or listing gets cloned heading and all -- and the
+      // step title prints again on every sheet the block spans. The anchor goes
+      // with it: the index resolves a step by that attribute and there must be
+      // exactly one.
+      var h = clone.querySelector('h2');
+      if (h) h.parentNode.removeChild(h);
+      clone.removeAttribute('data-anchor');
+      return clone;
+    }
+
+    // Minimum rows/lines left behind when a block is cut to fill the rest of a
+    // sheet. Below it the remainder reads as a stray, and a gap is tidier.
+    var MIN_SLICE = 3;
+
+    // One unit, on the current sheet or on as many fresh ones as it needs.
+    function placeUnit(unit) {
+      body.appendChild(unit);
+      if (fits()) return;
+      if (body.children.length > 1) {
+        if (shrinkToFit(unit)) return;
+        restore(unit);
+        // A table or a listing FILLS the rest of the sheet and continues on the
+        // next one, exactly as a word processor would. Moving it whole would
+        // leave most of a page blank for no reason.
+        var cut = splitUnit(unit, MIN_SLICE);
+        if (cut) { addSheet(); placeUnit(cut); return; }
+        body.removeChild(unit);
+        addSheet();
+        body.appendChild(unit);
+        if (fits()) return;
+      }
+      // Alone on a fresh sheet and still too tall: cut as much as will fit.
+      var tail = splitUnit(unit, 1);
+      if (tail) { addSheet(); placeUnit(tail); return; }
+      // A very tall capture plus its caption: shrinking is then the only way to
+      // keep it on the paper at all, so the MIN_FIG_SCALE floor does not apply.
+      var lone = figureOf(unit);
+      if (lone) {
+        var excess = body.scrollHeight - body.clientHeight;
+        lone.style.height = (lone.getBoundingClientRect().height - excess - 1) + 'px';
+      }
+    }
+
     function place(grp) {
       put(grp);
       if (fits()) return;
@@ -116,26 +197,7 @@ export const MANUAL_JS = `(function () {
         pull(grp);
       }
       // Too tall even for an empty sheet: place unit by unit.
-      for (var u = 0; u < grp.length; u++) {
-        body.appendChild(grp[u]);
-        if (!fits() && body.children.length > 1) {
-          if (shrinkToFit(grp[u])) continue;
-          restore(grp[u]);
-          body.removeChild(grp[u]);
-          addSheet();
-          body.appendChild(grp[u]);
-          // Alone on a fresh sheet a figure can still overflow (a very tall
-          // capture plus its caption); shrinking is then the only way to keep it
-          // on the paper at all, so the floor does not apply.
-          if (!fits()) {
-            var lone = figureOf(grp[u]);
-            if (lone) {
-              var excess = body.scrollHeight - body.clientHeight;
-              lone.style.height = (lone.getBoundingClientRect().height - excess - 1) + 'px';
-            }
-          }
-        }
-      }
+      for (var u = 0; u < grp.length; u++) placeUnit(grp[u]);
     }
 
     addSheet();

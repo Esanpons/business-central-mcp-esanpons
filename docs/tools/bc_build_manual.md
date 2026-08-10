@@ -12,7 +12,7 @@ One authoring model, three outputs:
 
 - **`md`** -- plain Markdown, images linked by relative path. Right for repos, wikis, and further editing.
 - **`html`** -- a printable web page laid out as real 210x297mm sheets: cover, index with page numbers, running header, page footer with `N / total`. What you see on screen is what comes out of **Ctrl+P**, so the reader gets a paged PDF without any extra tooling.
-- **`docx`** -- an editable Word document with the **same page breaks as the HTML**, real Word paragraph styles, a live index and live page numbers. For a reader who has to edit the manual, restyle it into a corporate template, or simply asked for "a Word".
+- **`docx`** -- an editable Word document with the **same page breaks as the HTML** (with one caveat below), real Word paragraph styles, a live index and live page numbers. For a reader who has to edit the manual, restyle it into a corporate template, or simply asked for "a Word".
 
 No PDF is produced. The HTML *is* the print path.
 
@@ -22,9 +22,10 @@ The two outputs paginate in fundamentally different ways. The HTML paginates by 
 
 So it is not built from rules alone. When `docx` is requested, the HTML is rendered and **paginated in the headless browser**, the finished layout is asked which sheet each block landed on, and that map is replayed into the Word document as explicit page breaks. The result matches the PDF page for page, while remaining a normal editable Word file.
 
-Two consequences worth knowing:
+Three consequences worth knowing:
 
 - **It needs Chrome/Edge**, the same as the captures do. If the browser is unavailable the manual is still written -- Word simply chooses its own breaks -- and a `warning` says exactly that. Never assume the pages match without checking `warnings`.
+- **A long table or code block is the one place the two can diverge.** Every step still starts on its own page in both outputs, but *inside* a step Word re-flows a table or a listing itself, and it may need one page more or fewer than the browser did. When that happens the index's cached page numbers drift for the steps after it — the running footers stay right (they are live fields) and Ctrl+A then F9 fixes the index. `npm run verify:manual` catches it by re-flowing the .docx with LibreOffice, when LibreOffice is installed.
 - **The index numbers are cached, not baked.** Each index row is a real `PAGEREF` field pointing at a per-step bookmark, shipped with the measured page number as its cached value. It reads correctly the moment the file opens, and it re-resolves itself if the reader edits the document and presses F9.
 
 ### Building from an existing Markdown file
@@ -39,7 +40,7 @@ Its images are resolved relative to that file, so you pass the `.md` and leave t
 
 **The accepted format is this tool's own `md` output** — the generator is the specification, and a round-trip test pins the two together so it cannot drift. Full spec: [the source format guide](../guides/manual-source-format.md).
 
-When the `.md` was not produced by this tool, **validate first**: `{ "source": "...", "validate": true }` parses and checks it without building, returning `sourceDiagnostics` as `line N: severity: message` — every problem in one pass, so one round of fixes is enough. Errors (no title, no steps, a missing image) mean nothing is built; warnings (a table, a `###`, a dropped second figure) mean it builds with that part degraded. A normal build returns `sourceDiagnostics` too, so warnings are never silent.
+When the `.md` was not produced by this tool, **validate first**: `{ "source": "...", "validate": true }` parses and checks it without building, returning `sourceDiagnostics` as `line N: severity: message` — every problem in one pass, so one round of fixes is enough. Errors (no title, no steps, a missing image) mean nothing is built; warnings (a dropped second figure, a table missing its delimiter row, an unclosed code fence) mean it builds but that part is not what you meant. A normal build returns `sourceDiagnostics` too, so warnings are never silent.
 
 Requesting `md` when the output would overwrite the source is refused with a clear error — the input document is never destroyed.
 
@@ -103,10 +104,36 @@ An `Annotation` object (when `highlight` is a list of objects) is `{ target: str
 | `- item` / `* item` | bullet list |
 | `1. item` | numbered list |
 | `> text` | highlighted note box |
+| `### text` | sub-heading INSIDE the step (`##` is the step itself) |
+| header + `\|---\|---\|` + rows | GFM table (see below) |
+| ``` … ``` or `~~~ … ~~~` | fenced code block (see below) |
 | `**text**` | bold |
 | `*text*` / `_text_` | italic |
 | `` `text` `` | inline code |
 | `[label](https://...)` | link (http/https only) |
+
+**Tables** need the `|---|---|` delimiter row -- without it there is no table, only pipes. The
+delimiter also sets the alignment (`:---` left, `:---:` centre, `---:` right). A pipe that is
+content is written `\|` or put inside `` `code` ``; a short row is padded to the header width.
+In `html` a table longer than a sheet is cut across sheets and each part repeats the header row;
+in `docx` it is a real Word table whose first row is flagged *repeat as header row*.
+
+**Code blocks** are verbatim: nothing inside is formatted, and indentation and blank lines are
+preserved (so ASCII diagrams survive). Use `~~~` when the content itself contains backticks. The
+info string (` ```bash `) is kept but there is no syntax colouring. In `html` a long listing is cut
+line by line across sheets; in `docx` it is one shaded paragraph per line, which is what lets Word
+break it anywhere.
+
+Inside a fence **nothing is structure**: a `## `, an `![](…)` or an italic caption line in a
+listing is content and does not cut the document -- which is what lets a manual document this very
+format.
+
+**Sub-headings**: only `## ` starts a step. `###` and deeper are sub-sections inside the current
+step -- use them to break up a long one. They do not appear in the manual's index (which lists
+steps) but do appear in Word's navigation pane, under their step.
+
+Not in the model: a second figure in one step (dropped -- split the step) and nested lists
+(flattened).
 
 ## Output
 On success the operation returns a `BuildManualOutput`:

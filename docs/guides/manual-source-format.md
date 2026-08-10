@@ -42,6 +42,14 @@ Prosa que va **a sota** de la captura.
 ## 2. Obre la fitxa
 
 Un pas pot no tenir captura.
+
+| Ajust | Valor | Per que |
+|---|---|---:|
+| TLS minim | 1.2 | Requisit legal |
+
+~~~bash
+az group create --name rg-deca --location spaincentral
+~~~
 ```
 
 | Element | Regla |
@@ -60,16 +68,61 @@ passat a la crida guanya igualment, així que pots reconstruir-lo en un altre id
 
 ## Markdown admès dins la prosa
 
+El mateix subconjunt a `body`, a `after` i a la introducció.
+
 | Sintaxi | Resultat |
 |---|---|
-| línia en blanc | paràgraf nou |
+| línia en blanc | paràgraf nou (les línies seguides s'ajunten en un de sol) |
 | `- item` / `* item` | llista de pics |
 | `1. item` | llista numerada |
 | `> text` | caixa de nota destacada |
+| `### text` | sub-apartat dins del pas (`##` és el pas) |
+| capçalera + `\|---\|---\|` + files | **taula** (vegeu sota) |
+| ``` … ``` o `~~~ … ~~~` | **bloc de codi** (vegeu sota) |
 | `**text**` | negreta |
 | `*text*` / `_text_` | cursiva |
 | `` `text` `` | codi en línia |
 | `[text](https://…)` | enllaç |
+
+### Taules
+
+Format GFM: una fila de capçalera, la fila delimitadora i les dades.
+
+```markdown
+| Ajust | Valor | Per que |
+|:---|:---:|---:|
+| TLS minim | 1.2 | Requisit legal |
+```
+
+- La **fila delimitadora és obligatòria**. Sense ella no hi ha taula: les barres surten
+  com a text i el validador t'avisa.
+- L'alineació de cada columna surt d'aquesta fila: `:---` esquerra, `:---:` centre, `---:` dreta.
+- Dins d'una cel·la hi va el mateix format en línia que a la prosa (negreta, codi, enllaços).
+- Una barra que és **contingut** s'escriu `\|`, o es posa dins de `` `codi` ``.
+- Una fila més curta que la capçalera s'omple amb cel·les buides.
+- Una taula **més llarga que un full es parteix**, i cada tros repeteix la capçalera.
+  Al Word és una taula de debò, amb la primera fila marcada com a «repetir a cada pàgina».
+
+### Sub-apartats
+
+`##` és el **pas**; `###` (o més profund) és un **sub-apartat dins del pas**, no un pas nou.
+Serveix per trencar un pas llarg: «Permisos», «Si alguna cosa falla». No surt a l'índex del
+manual —l'índex llista passos— però sí al panell de navegació del Word.
+
+### Blocs de codi
+
+```markdown
+~~~bash
+az deployment group create   --resource-group rg-deca   --template-file template.json
+~~~
+```
+
+- **Literal**: res del que hi ha dins es formata. La indentació i les línies en blanc
+  es conserven, així que els diagrames ASCII surten bé.
+- Amb ``` o amb `~~~`. Fes servir `~~~` quan el contingut porti cometes invertides.
+- La paraula després de l'obertura (`bash`, `json`, …) es guarda, però **no** hi ha
+  coloració de sintaxi.
+- Un bloc més llarg que un full també es parteix per línies.
 
 ## El que el model NO té
 
@@ -77,11 +130,15 @@ Aquests casos no fan fallar la construcció, però **es degraden** i el validado
 
 | Al `.md` | Què passa |
 |---|---|
-| Taula Markdown | Surt com a text amb barres verticals |
-| Bloc de codi amb ``` | Les marques de tanca s'imprimeixen com a text |
-| `###` o més profund | Es renderitza com un paràgraf que comença amb `#` |
 | Segona imatge en un pas | Es descarta; parteix el pas en dos per conservar-la |
 | Imatge abans del primer `## ` | Es descarta: la introducció no porta figura |
+| Taula sense fila delimitadora | Surt com a text amb barres verticals |
+| Bloc de codi que no es tanca | Tot el que ve a sota es tracta com a codi |
+| Llista dins d'una llista | S'aplana a un sol nivell |
+
+Dins d'un bloc de codi **res no és estructura**: un `## `, un `![](…)` o un `*peu*` en un
+llistat són contingut i no parteixen el document. Això és el que permet que un manual
+documenti aquest mateix format.
 
 I aquests **sí** que aturen la construcció:
 
@@ -104,7 +161,7 @@ No escriu res. Retorna `sourceDiagnostics` amb **tots** els problemes d'una sola
 
 ```
 line 2: warning: unknown front matter key "color", ignored
-line 9: warning: Markdown table — not supported by the manual model, …
+line 9: warning: table without a delimiter row — add "|---|---|" under the header, …
 line 12: warning: sub-heading — a manual has one heading level; …
 line 19: error: image "captura.png" does not exist (resolved to D:/manuals/captura.png)
 ```

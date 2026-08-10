@@ -163,6 +163,81 @@ describe('renderDocx -- document shape', () => {
   });
 });
 
+describe('renderDocx -- tables and code', () => {
+  const TABLE = '| Campo | Valor |\n|---|---:|\n| TLS | **1.2** |\n| Acceso | Blob |';
+  const CODE = '```bash\naz group create \\\n  --name rg\n\n  --location eu\n```';
+
+  function withProse(body: string): ManualModel {
+    return { title: 'T', steps: [{ heading: 'Pas', body }] };
+  }
+
+  it('writes a Markdown table as a real Word table, not as literal pipes', async () => {
+    const document = part((await renderDocx(withProse(TABLE), { date: DATE })).buffer, 'word/document.xml');
+
+    expect(document).toContain('<w:tbl>');
+    expect(document).not.toContain('| Campo |');
+    // Four data cells plus two headers, and the emphasis inside a cell survives.
+    expect((document.match(/<w:tc>/g) ?? [])).toHaveLength(6);
+    expect(document).toContain('ManualTableHead');
+    expect(document).toContain('ManualTableCell');
+  });
+
+  it('repeats the header row when the table runs past a page', async () => {
+    const document = part((await renderDocx(withProse(TABLE), { date: DATE })).buffer, 'word/document.xml');
+    // tblHeader is Word's "repeat as header row at the top of each page".
+    expect((document.match(/<w:tblHeader/g) ?? [])).toHaveLength(1);
+  });
+
+  it('carries the column alignment across', async () => {
+    const document = part((await renderDocx(withProse(TABLE), { date: DATE })).buffer, 'word/document.xml');
+    expect(document).toContain('<w:jc w:val="right"/>');
+  });
+
+  it('follows every table with a paragraph, or two tables would merge into one', async () => {
+    const document = part((await renderDocx(withProse(`${TABLE}\n\n${TABLE}`), { date: DATE })).buffer, 'word/document.xml');
+
+    expect((document.match(/<w:tbl>/g) ?? [])).toHaveLength(2);
+    // Nothing between </w:tbl> and the next <w:tbl> but a paragraph.
+    expect(/<\/w:tbl>\s*<w:tbl>/.test(document)).toBe(false);
+    expect(document).toContain('ManualAfterTable');
+  });
+
+  it('writes a code block as one paragraph per line, indentation intact', async () => {
+    const document = part((await renderDocx(withProse(CODE), { date: DATE })).buffer, 'word/document.xml');
+    const code = [...document.matchAll(/<w:p>(?:(?!<\/w:p>).)*?ManualCode.*?<\/w:p>/gs)]
+      .map((m) => [...m[0].matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map((t) => t[1]).join(''));
+
+    // The blank line in the middle is part of the listing and must survive; the
+    // leading spaces are the content of an ASCII diagram, so they must too.
+    expect(code).toEqual(['az group create \\', '  --name rg', ' ', '  --location eu']);
+    // Leading whitespace only survives with xml:space="preserve".
+    expect(document).toContain('xml:space="preserve"');
+  });
+
+  it('does not format inside a listing: it is code, not prose', async () => {
+    const document = part((await renderDocx(withProse('```\n**x** `y`\n```'), { date: DATE })).buffer, 'word/document.xml');
+    expect(document).toContain('**x** `y`');
+  });
+
+  it('writes a sub-heading as its own style, kept with the text below it', async () => {
+    const { buffer } = await renderDocx(withProse('### Permisos\n\nTexto.'), { date: DATE });
+    const document = part(buffer, 'word/document.xml');
+    const sub = /<w:p>(?:(?!<\/w:p>).)*?ManualSubheading.*?<\/w:p>/s.exec(document);
+
+    expect(sub?.[0]).toContain('Permisos');
+    expect(sub?.[0]).toContain('keepNext');
+    // A sub-section must not open a page of its own -- only steps do that.
+    expect(sub?.[0]).not.toContain('pageBreakBefore');
+  });
+
+  it('declares the styles a reader restyles the tables and listings from', async () => {
+    const styles = part((await renderDocx(withProse(TABLE + '\n\n' + CODE), { date: DATE })).buffer, 'word/styles.xml');
+    for (const id of ['ManualTableHead', 'ManualTableCell', 'ManualAfterTable', 'ManualCode', 'ManualSubheading']) {
+      expect(styles).toContain(`w:styleId="${id}"`);
+    }
+  });
+});
+
 describe('renderDocx -- page breaks', () => {
   /** Cover on 1, index on 1, then one page per step -- what the HTML now produces. */
   const breaks: PageBreakMap = {

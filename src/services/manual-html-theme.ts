@@ -253,6 +253,15 @@ body {
   justify-content: center;
 }
 
+/* Sub-seccio dins d'un pas (###). El pas es el ## i porta el seu propi estil. */
+.step-body .md-sub {
+  font-family: var(--font-head);
+  font-size: 11.5pt;
+  font-weight: 600;
+  color: var(--teal-dark);
+  margin: 1.5mm 0 2.5mm;
+  letter-spacing: -.003em;
+}
 .step-body p { margin-bottom: 3mm; color: #2b3238; }
 .step-body p:last-child { margin-bottom: 0; }
 .step-body ul, .step-body ol { margin: 0 0 3mm 6mm; }
@@ -278,6 +287,61 @@ body {
   padding: 0 4px;
 }
 .step-body a { color: var(--teal-dark); text-decoration: none; border-bottom: 1px solid #bfe6ea; }
+
+/* -------------------------------------------------------------------------
+   Taules i blocs de codi
+   Son els dos blocs que poden ser mes alts que un full. El paginador els
+   parteix movent <tr> o linies a la pagina seguent, per aixo cada fila i cada
+   linia han de ser un element propi (mai text solt).
+   ------------------------------------------------------------------------- */
+.md-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 3.5mm;
+  font-size: 9pt;
+  line-height: 1.4;
+}
+.md-table th,
+.md-table td {
+  border: 1px solid var(--line);
+  padding: 1.5mm 2.2mm;
+  text-align: left;
+  vertical-align: top;
+  color: #2b3238;
+}
+.md-table thead th {
+  background: var(--wash);
+  color: var(--teal-deep);
+  font-weight: 600;
+  border-bottom: 1.5px solid var(--teal);
+}
+.md-table tbody tr:nth-child(even) td { background: #f7f9fa; }
+.md-table .a-center { text-align: center; }
+.md-table .a-right  { text-align: right; }
+.md-table code { font-size: 8.4pt; }
+
+.md-code {
+  margin: 0 0 3.5mm;
+  padding: 2.4mm 3mm;
+  background: var(--bg-soft);
+  border-left: 3px solid var(--teal-dark);
+  border-radius: 0 4px 4px 0;
+  font-family: 'Cascadia Mono', Consolas, 'Courier New', monospace;
+  font-size: 8.6pt;
+  line-height: 1.45;
+  color: #1d2429;
+}
+/* Neutralitza l'estil del codi en linia: aqui el marc el posa el <pre>. */
+.md-code code {
+  font: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  border-radius: 0;
+}
+/* pre-wrap i no pre: una linia mes llarga que el full s'ha de doblegar, mai
+   quedar tallada per l'overflow:hidden del full. */
+.md-code .cl { display: block; white-space: pre-wrap; }
 .step-body blockquote {
   margin: 0 0 3mm;
   padding: 3mm 4mm;

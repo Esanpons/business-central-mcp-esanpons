@@ -49,7 +49,9 @@ Choose by what the reader *does* with the file, not by which looks nicest:
   who has to drop it into a corporate template, or simply when the user asked for "un Word". It
   carries the **same page breaks as the HTML** (they are measured in the browser and replayed into
   Word), real Word paragraph styles — open the Styles pane and restyle every step at once — a live
-  index and live page numbers.
+  index and live page numbers. One caveat: inside a step, a table or a code listing longer than a
+  page is re-flowed by Word itself, so that step can end up one page longer or shorter and the
+  index's cached numbers drift after it (F9 fixes them; the footers are always right).
 - **Pick `md`** when the target is a repository, a wiki, or further editing by an agent or a human.
 - **Pick several** when it has to be readable *and* editable *and* versioned. One capture pass
   serves them all.
@@ -86,10 +88,17 @@ prose can never inject markup):
 | `- item` / `* item` | bullet list |
 | `1. item` | numbered list |
 | `> text` | highlighted note box — use it for warnings and prerequisites, it stands out on paper |
+| `### text` | sub-heading inside the step — `##` is the step itself |
+| header + `\|---\|---\|` + rows | table — the delimiter row is mandatory and sets the alignment |
+| ``` … ``` or `~~~ … ~~~` | code block — verbatim, indentation and blank lines kept |
 | `**text**` | bold |
 | `*text*` / `_text_` | italic |
 | `` `text` `` | inline code |
 | `[label](https://…)` | link (http/https only) |
+
+A table or a listing longer than a page is **cut across pages** rather than clipped (the table
+repeats its header row), so a configuration summary does not have to be split by hand. Full rules:
+[the source format guide](manual-source-format.md).
 
 Write headings and prose in the **user's** language. The BC UI inside the screenshots comes out in
 the BC user's own language automatically — you do not control that from here.
@@ -175,8 +184,8 @@ When the `.md` was NOT produced by this tool, **validate it first**:
 ```
 
 Nothing is written; you get every problem in one pass with its line number, so one round of fixes is
-enough. A normal build also returns `sourceDiagnostics`, so a degraded table or a dropped second
-figure is never silent.
+enough. A normal build also returns `sourceDiagnostics`, so a table missing its delimiter row or a
+dropped second figure is never silent.
 
 ## Related
 
