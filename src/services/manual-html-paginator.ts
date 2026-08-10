@@ -112,14 +112,13 @@ export const MANUAL_JS = `(function () {
     }
     // Moves the overflowing tail of the unit into a CLONE of it. Cloning is what
     // carries a table's <thead> along, so the continuation keeps its column
-    // titles. Returns null when the unit cannot be cut leaving at least
-    // minKeep rows/lines behind, in which case the caller falls back to moving
-    // it whole -- two rows stranded at the foot of a page read worse than a gap.
-    function splitUnit(unit, minKeep) {
+    // titles. Returns null when there is nothing left to cut -- a single row or
+    // line taller than the paper.
+    function splitUnit(unit) {
       var box = splitBox(unit);
-      if (!box || box.children.length <= minKeep) return null;
+      if (!box || box.children.length <= 1) return null;
       var moved = [];
-      while (box.children.length > minKeep && !fits()) {
+      while (box.children.length > 1 && !fits()) {
         moved.unshift(box.removeChild(box.lastElementChild));
       }
       if (!moved.length || !fits()) {
@@ -147,10 +146,6 @@ export const MANUAL_JS = `(function () {
       return clone;
     }
 
-    // Minimum rows/lines left behind when a block is cut to fill the rest of a
-    // sheet. Below it the remainder reads as a stray, and a gap is tidier.
-    var MIN_SLICE = 3;
-
     // One unit, on the current sheet or on as many fresh ones as it needs.
     function placeUnit(unit) {
       body.appendChild(unit);
@@ -158,18 +153,18 @@ export const MANUAL_JS = `(function () {
       if (body.children.length > 1) {
         if (shrinkToFit(unit)) return;
         restore(unit);
-        // A table or a listing FILLS the rest of the sheet and continues on the
-        // next one, exactly as a word processor would. Moving it whole would
-        // leave most of a page blank for no reason.
-        var cut = splitUnit(unit, MIN_SLICE);
-        if (cut) { addSheet(); placeUnit(cut); return; }
+        // Whole to the next sheet FIRST. A table split across two pages loses the
+        // thing that makes it a table -- you read half the rows against a header
+        // that is no longer in front of you -- and the same goes for a listing.
+        // A gap at the foot of the previous page is the cheaper price.
         body.removeChild(unit);
         addSheet();
         body.appendChild(unit);
         if (fits()) return;
       }
-      // Alone on a fresh sheet and still too tall: cut as much as will fit.
-      var tail = splitUnit(unit, 1);
+      // Taller than an empty sheet, so there is no whole-move to fall back on:
+      // cut as much as will fit and continue on the next sheet.
+      var tail = splitUnit(unit);
       if (tail) { addSheet(); placeUnit(tail); return; }
       // A very tall capture plus its caption: shrinking is then the only way to
       // keep it on the paper at all, so the MIN_FIG_SCALE floor does not apply.

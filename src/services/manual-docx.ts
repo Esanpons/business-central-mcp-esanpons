@@ -145,13 +145,23 @@ const CELL_BORDER = { style: BorderStyle.SINGLE, size: 4, color: C.line } as con
  * rows by itself, which is why a table needs no measured break of its own.
  */
 function tableFor(block: Extract<Block, { kind: 'table' }>): Table {
-  const cell = (spans: InlineSpan[], style: string, align: CellAlign | undefined, header: boolean) =>
+  const cell = (
+    spans: InlineSpan[], style: string, align: CellAlign | undefined, header: boolean, keepNext: boolean,
+  ) =>
     new TableCell({
-      children: [new Paragraph({ style, alignment: alignOf(align), children: spansToRuns(spans) })],
+      children: [new Paragraph({ style, alignment: alignOf(align), keepNext, children: spansToRuns(spans) })],
       ...(header ? { shading: { type: ShadingType.CLEAR, fill: C.wash } } : {}),
       margins: { top: 40, bottom: 40, left: 80, right: 80 },
       verticalAlign: VerticalAlign.TOP,
     });
+
+  // Keep the table on ONE page whenever it fits on one: `keepNext` on every row
+  // but the last chains them together, so Word moves the whole table to the next
+  // page instead of tearing it in half. It is a best effort by definition -- a
+  // table taller than a page has to break somewhere, and Word then ignores the
+  // chain and splits it, which is the only sensible outcome. `cantSplit` is the
+  // separate promise that a single ROW never straddles the boundary.
+  const last = block.rows.length - 1;
 
   return new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
@@ -163,10 +173,12 @@ function tableFor(block: Extract<Block, { kind: 'table' }>): Table {
     rows: [
       new TableRow({
         tableHeader: true,
-        children: block.head.map((h, i) => cell(h, 'ManualTableHead', block.align[i], true)),
+        cantSplit: true,
+        children: block.head.map((h, i) => cell(h, 'ManualTableHead', block.align[i], true, last >= 0)),
       }),
-      ...block.rows.map((r) => new TableRow({
-        children: r.map((c, i) => cell(c, 'ManualTableCell', block.align[i], false)),
+      ...block.rows.map((r, ri) => new TableRow({
+        cantSplit: true,
+        children: r.map((c, i) => cell(c, 'ManualTableCell', block.align[i], false, ri < last)),
       })),
     ],
   });

@@ -89,6 +89,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the clone now drops both. The `verify:manual` fixture gained a step that opens on the big table
   and an assertion that each heading is printed exactly once; without the fix it reports
   `15 headings printed for 14 steps`.
+- **A table (or listing) that fits on a page is no longer split across two.** The paginator cut a
+  block to fill the rest of a sheet before considering a whole move, so a table landing near the
+  foot of a page was torn in half — the reader then meets half the rows with the header no longer in
+  front of them. It now tries a fresh sheet FIRST and only cuts what is taller than an empty sheet.
+  Word gets the same rule declaratively, since it re-flows on its own: `keepNext` on every row but
+  the last chains the table together, `cantSplit` per row stops a row straddling the boundary. The
+  `verify:manual` fixture gained a table sized to land in exactly that spot; with the old rule it
+  reports `a table that fits on a page was cut into 2 parts instead of moving whole`.
 - **The two parsers now close a code fence by the same rule.** `manual-source.ts` treated any line
   starting with the marker as a close, while the renderer (correctly) requires a bare run with no
   info string. A listing that shows Markdown (` ```markdown … ```markdown `) therefore ended early

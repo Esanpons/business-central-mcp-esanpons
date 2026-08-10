@@ -587,6 +587,14 @@ unit against the real `clientHeight` of a `.sheet-body` and distributes them int
 - Prose goes through the shared Markdown AST described above -- a deliberately tiny subset
   (paragraphs, lists, `>` notes, bold/italic/code/links).
 
+**A table or a listing is moved whole before it is cut.** `placeUnit` tries a fresh sheet FIRST and
+only cuts a unit that is taller than an empty sheet -- half a table read against a header that is no
+longer in front of you is not a table, and a gap at the foot of the previous page is the cheaper
+price. Word is told the same rule declaratively, since it re-flows on its own: `keepNext` on every
+table row but the last chains them so Word moves the whole table, and `cantSplit` per row stops a
+single row straddling the boundary. Both are best-effort by construction -- a table taller than a
+page has to break somewhere and Word then ignores the chain, which is the only sensible outcome.
+
 **Word page parity has ONE limit.** Every step opens its own page in both outputs, but a table or a
 code block longer than a sheet is cut by the paginator at a row/line the browser measured, while
 Word re-flows it on its own -- so that step can come out a page longer or shorter and the index's

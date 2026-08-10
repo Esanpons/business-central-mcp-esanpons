@@ -130,6 +130,9 @@ return every field regardless of collapse state.
   its paragraph boundaries instead of overflowing, and a figure that does not fit under its text
   moves to the next page with its `after` prose following it. Captures are capped at 180mm so any
   screenshot fits one page.
+- **Tables and listings.** A table that would fit on a page is never split across two: it moves whole
+  to the next page, and the same goes for a code listing. Only one taller than a full page is cut, and
+  the continuation carries the column headers with it.
 - **Figures that almost fit.** Rather than pushing a screenshot to the next page and leaving a gap,
   the layout scales it down slightly (never below 75%) when that is enough to keep it with its text.
   Below that it moves, because a capture reduced further stops being readable in print.

@@ -117,6 +117,17 @@ const BIG_TABLE = [
     `| Parametre **${i + 1}** | \`valor-${i + 1}\` | Motiu pel qual el parametre ${i + 1} ha de tenir aquest valor i no un altre |`),
 ].join('\n');
 
+// A table that FITS on a page but cannot fit in what is left of one. It must be
+// moved whole to the next sheet, never cut: that is the rule a reader notices,
+// because half a table under a header they can no longer see is not a table.
+const MID_TABLE_LEAD = Array.from({ length: 10 }, (_, i) => `${i + 1}. ${LOREM}`).join('\n\n');
+const MID_TABLE_ROWS = 12;
+const MID_TABLE = [
+  '| MITJANA | Valor | Per que |',
+  '|---|---|---|',
+  ...Array.from({ length: MID_TABLE_ROWS }, (_, i) =>
+    `| Opcio ${i + 1} | \`valor-${i + 1}\` | Motiu pel qual l opcio ${i + 1} te aquest valor |`),
+].join('\n');
 const BIG_CODE_LINES = 60;
 const BIG_CODE = ['```bash', ...Array.from({ length: BIG_CODE_LINES }, (_, i) =>
   `az deployment group create --name desplegament-${i + 1} --template-file template.json`), '```'].join('\n');
@@ -153,6 +164,13 @@ const model: ManualModel = {
     // opens straight onto a long table is the case where cutting that unit used
     // to clone the heading and reprint the step title on every sheet it spans.
     { heading: 'Un pas que obre amb la taula', body: BIG_TABLE },
+    {
+      heading: 'Una taula que ha de saltar sencera',
+      // Ten paragraphs is what leaves the table too little room to fit, but not
+      // so little that the case is trivial: with the old cut-first rule it split
+      // in two here, which is exactly what midTableParts below refuses.
+      body: `${MID_TABLE_LEAD}\n\n${MID_TABLE}`,
+    },
     { heading: 'Un pas nomes de text', body: `${LOREM} ${LOREM}` },
     { heading: 'Obre la fitxa', body: 'Prem `Enter` sobre la fila.', image: img(0) },
     { heading: 'Omple els camps', body: LOREM, image: img(1) },
@@ -202,6 +220,9 @@ try {
       // Anything less means the paginator clipped content instead of moving it.
       tableRows: document.querySelectorAll('.md-table tbody tr').length,
       tableParts: document.querySelectorAll('.md-table').length,
+      // A table that fits on a page must never be cut: exactly one part.
+      midTableParts: Array.from(document.querySelectorAll('.md-table'))
+        .filter((t) => (t.textContent ?? '').includes('MITJANA')).length,
       headlessTableParts: Array.from(document.querySelectorAll('.md-table'))
         .filter((t) => !t.querySelector('thead tr th')).length,
       codeLines: document.querySelectorAll('.md-code .cl').length,
@@ -233,10 +254,13 @@ try {
   if (report.headings.length !== model.steps.length) {
     problems.push(`${report.headings.length} headings printed for ${model.steps.length} steps`);
   }
-  const expectedRows = BIG_TABLE_ROWS * BIG_TABLE_USES;
+  const expectedRows = BIG_TABLE_ROWS * BIG_TABLE_USES + MID_TABLE_ROWS;
   if (report.tableRows !== expectedRows) problems.push(`${report.tableRows}/${expectedRows} table rows survived pagination`);
   if (report.codeLines !== BIG_CODE_LINES) problems.push(`${report.codeLines}/${BIG_CODE_LINES} code lines survived pagination`);
   if (report.tableParts <= BIG_TABLE_USES) problems.push('a long table was never split -- this run does not exercise the cut');
+  if (report.midTableParts !== 1) {
+    problems.push(`a table that fits on a page was cut into ${report.midTableParts} parts instead of moving whole`);
+  }
   if (report.headlessTableParts) problems.push(`${report.headlessTableParts} table part(s) continue without their header row`);
   if (pageCount && pageCount !== report.sheets) problems.push(`printed ${pageCount} pages for ${report.sheets} sheets (blank pages?)`);
 
