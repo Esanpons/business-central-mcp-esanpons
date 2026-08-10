@@ -44,6 +44,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolve to the first step), its `bullet` shorthand injects a second `w:pStyle` that overrides the
   manual's body style, and rounding a scaled image width up pushes the figure past the printable
   area at 9525 EMU/px.
+- **`bc_build_manual` can build from an existing Markdown file** (`source`), so a manual someone
+  already wrote becomes the printable A4 page or the Word document without being retyped. Images
+  resolve relative to the `.md`; outputs land next to it. The accepted format is **exactly what the
+  tool's own `md` output writes** — the generator is the specification, pinned by a byte-identical
+  round-trip test. The alternative (parse whatever Markdown shows up) is unwinnable: "however the
+  author wrote it this time" is not a contract.
+- **`validate: true` checks a source document without building it**, returning `sourceDiagnostics`
+  as `line N: severity: message`, sorted by line, with EVERY problem in one pass — an author must
+  never have to rebuild to discover the next one. Errors (no title, no steps, a missing or remote
+  image, unterminated front matter) build nothing; warnings (a table, a code fence, a `###`, a second
+  figure in a step) build with that part degraded and are returned on a normal build too, so nothing
+  is lost silently.
+- Optional front matter (`lang` / `cover` / `toc` / `name` / `assets`) lets a source document carry
+  its own build settings; an explicit argument still wins.
+- Requesting the `md` output when it would overwrite the source document is refused with a clear
+  error. The input is never destroyed.
+- The format is published in the **tool description**, so any MCP client sees the spec before writing
+  a line, and in [`docs/guides/manual-source-format.md`](docs/guides/manual-source-format.md).
 - **Every step now starts on a new page**, in the HTML and in Word. A numbered heading halfway down
   a page reads as a subsection of what precedes it rather than as a new step.
 - **A figure that misses its page by a little is scaled down instead of moved.** The paginator

@@ -496,6 +496,30 @@ lives in [`docs/guides/documenting.md`](docs/guides/documenting.md) — there is
 skill (an earlier note here claimed a user-scope `~/.claude/skills/bc-manual/SKILL.md`; it does
 not exist).
 
+**Building from an existing `.md` (`source`).** `bc_build_manual` also reads a manual back in:
+`{ source: "path/manual.md" }` parses it into a `ManualModel` and renders the requested formats. The
+accepted format is **exactly what `renderMarkdown` emits** -- the generator IS the specification, and
+`tests/unit/manual-source.test.ts` asserts a byte-identical round trip so the two cannot drift. This
+is deliberate: parsing "whatever an assistant wrote this time" is unwinnable, so the format is fixed,
+documented in [`docs/guides/manual-source-format.md`](docs/guides/manual-source-format.md) AND in the
+tool description (so any MCP client sees the spec before writing a line), and enforced by a
+validator. Load-bearing details:
+
+- `parseManualSource` (`manual-source.ts`) returns `{ model?, options, diagnostics }`. A hard error
+  (no `# `, no `## `, a missing/remote image) yields no model; a warning (table, code fence, `###`,
+  a second figure in one step) degrades and is reported. `validate: true` checks without building.
+- Every collected prose line carries its own file line number (`SourceLine`), not a per-block offset
+  -- blocks are checked when their step is flushed, so a single offset drifts by one at every
+  boundary and an almost-right line number is worse than none.
+- Diagnostics are sorted by line before returning: an author must be able to fix everything in ONE
+  pass, never rebuild to discover the next problem.
+- Optional front matter (`lang`/`cover`/`toc`/`name`/`assets`, flat `key: value`, not YAML) lets the
+  document carry its own build settings; an explicit argument still wins.
+- Output defaults to the SOURCE's directory (that is what keeps its relative image links valid), and
+  requesting `md` when it would overwrite the source is refused rather than silently skipped.
+- `BuildManualSchema` makes `title`/`steps` optional and enforces "source XOR title+steps" with a
+  `.refine()` -- NEVER a root-level `oneOf`/`anyOf`, which makes Claude Code drop the whole tool.
+
 **Printable A4 HTML — how it holds together.** The renderer does NOT emit a flowing document. It
 emits a flat list of measurable units in a hidden `#flow`, an empty `#doc`, and a `<template>` for
 one sheet; a bundled paginator (`manual-html-paginator.ts`, a plain JS **string**) measures each

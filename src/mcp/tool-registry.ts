@@ -362,6 +362,36 @@ Layout you do not control and should author for: EVERY step starts on a new page
 
 Pick by what the reader does with it. Handed to an end user to READ or PRINT -> "html". The reader must EDIT it, restyle it to their own template, or you were asked for "a Word" -> "docx". Lives in a repo or wiki -> "md". Pass several to get several. Tune with assets (HTML only: inline single file vs separate css/js/png), lang (ca/es/en chrome), cover and toc.
 
+BUILDING FROM AN EXISTING MARKDOWN FILE. Instead of authoring steps here, pass "source": the path of a .md manual that already exists. Its images are resolved relative to that file, so you pass the .md and leave the PNGs where they are; outputs land next to it unless outDir says otherwise. Use this to turn a manual someone already wrote into the printable A4 page or the Word document without retyping it, and to rebuild it later after edits.
+
+The accepted document format IS this tool's own "md" output -- build one and read it, that is the specification. In full:
+
+---
+lang: ca        <- optional front matter: the document's own build settings
+cover: true        (lang / cover / toc / name / assets). An argument you pass
+toc: true          still wins over these.
+---
+
+# Manual title              <- exactly one; the first "# " line
+
+Intro prose, everything up to the first step.
+
+## 1. Step heading          <- one per step. The "1. " is optional (numbering is positional)
+
+Prose printed ABOVE the figure.
+
+![alt](img/step-1.png)      <- at most ONE figure per step, path relative to the .md
+*Figure caption*            <- optional, an italic-only line right after the image
+
+Prose printed BELOW the figure.
+
+## 2. Next step
+...
+
+Prose accepts the same small Markdown subset as body/after: paragraphs, - and 1. lists, > notes, **bold**, *italic*, \`code\`, [links](https://...). The model has NO tables, NO code fences, NO sub-headings (###) and NO second figure in a step.
+
+VALIDATE FIRST when the .md was not produced by this tool: pass "validate": true with "source" to parse and check WITHOUT building. You get sourceDiagnostics as "line N: severity: message" -- every problem in one pass, so you can fix the file and build in a second call. Errors (no title, no steps, a missing image) mean nothing is built; warnings (a table, a ###, a dropped second figure) mean it builds but that part is degraded. A build also returns sourceDiagnostics, so warnings are never silent.
+
 Files are written under BC_MANUAL_DIR (or outDir), named from the title (or name). The response returns the written file paths and the captured image paths. Runs out-of-band (its own headless browser for the captures) and does not disturb the WebSocket session.
 
 Typical use: open a list with bc_open_page, grab the record bookmark, then call bc_build_manual with a few steps that screenshot the card and highlight the fields the reader must fill in. Requires Chrome/Edge installed (same as bc_screenshot).

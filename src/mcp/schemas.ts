@@ -213,9 +213,11 @@ const ManualStepSchema = z.object({
 });
 
 export const BuildManualSchema = z.object({
-  title: z.string().describe('Manual title (also used to name the output files unless name is given).'),
+  source: z.string().optional().describe('Path to an EXISTING Markdown manual to build from, instead of authoring steps here. Images are resolved relative to that file, so pass the .md and leave the PNGs where they are. The accepted format is exactly what this tool\'s own "md" output writes (see the tool description for the spec) — build one to see it. Title, intro and steps come from the document; title/intro/steps given here are ignored. Outputs land next to the source unless outDir says otherwise.'),
+  validate: z.boolean().optional().describe('With source: parse and CHECK the document without building anything. Returns sourceDiagnostics as "line N: severity: message" so you can fix the file and retry. Use this first when the .md was not produced by this tool.'),
+  title: z.string().optional().describe('Manual title (also used to name the output files unless name is given). Required unless source is given.'),
   intro: z.string().optional().describe('Optional introduction paragraph.'),
-  steps: z.array(ManualStepSchema).min(1).describe('Ordered steps. Each may capture a screenshot and/or carry prose.'),
+  steps: z.array(ManualStepSchema).min(1).optional().describe('Ordered steps. Each may capture a screenshot and/or carry prose. Required unless source is given.'),
   formats: z.array(z.enum(['md', 'html', 'docx'])).optional().describe('Output formats. "md" = plain Markdown (default). "html" = a printable A4 web page: paged on screen, Ctrl+P prints/saves it as a paged PDF. "docx" = an editable Word document with the SAME page breaks as the HTML (they are measured in the browser and replayed into Word), real Word styles and a live index -- use it when the reader must edit or restyle the manual. Pass several to get several.'),
   outDir: z.string().optional().describe('Output directory (absolute, or relative to BC_MANUAL_DIR). Defaults to BC_MANUAL_DIR.'),
   name: z.string().optional().describe('Base file name (slugified). Defaults to the title.'),
@@ -223,7 +225,12 @@ export const BuildManualSchema = z.object({
   lang: z.string().optional().describe('HTML and DOCX. Language of the generated chrome (cover kicker, index title, print button): ca (default), es or en. The step text itself is whatever you write.'),
   cover: z.boolean().optional().describe('HTML and DOCX. Emit a cover sheet with the title, intro and date. Default true.'),
   toc: z.boolean().optional().describe('HTML and DOCX. Emit an index sheet with the real page number of each step. Default: only when the manual has 4 or more steps.'),
-});
+})
+  // A .refine(), never a root-level oneOf/anyOf: a top-level combinator in an MCP
+  // inputSchema makes Claude Code drop the whole tool from its list.
+  .refine((v) => !!v.source || (!!v.title && !!v.steps?.length), {
+    message: 'Pass either source (build from an existing .md) or title + steps (author the manual here).',
+  });
 
 export const WizardNavigateSchema = z.object({
   pageContextId: z.string().min(1).describe('Page context ID returned by bc_open_page for a NavigatePage / wizard.'),

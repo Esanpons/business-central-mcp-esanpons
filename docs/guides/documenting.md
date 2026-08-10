@@ -14,6 +14,7 @@ It answers "I need X, what do I call?" first, then the details.
 | …several at once | `bc_build_manual` with `formats: ["md", "html", "docx"]` | One capture pass, several files. |
 | A **PDF** of a manual | `formats: ["html"]`, then open it and press **Ctrl+P** | There is no PDF output and no PDF tool. The HTML *is* the print path. |
 | Text **under** a screenshot | The step's `after` field | `body` goes above the figure, `after` below it. |
+| A manual that **already exists** as `.md` | `bc_build_manual` with `source: "ruta/manual.md"` | Turns it into A4 HTML / Word without retyping. Validate it first with `validate: true`. See the [source format](manual-source-format.md). |
 | The **data** behind a page (values, rows, fields) | `bc_open_page` / `bc_read_data` | Never screenshot a page to read it. |
 | A **report's** rendered output (PDF/Excel/Word) | `bc_download_report` | Unrelated to manuals: that is BC rendering its own report. |
 | To find the page id you need | `bc_find_object` (cached index) or `bc_search_pages` (Tell Me) | |
@@ -150,6 +151,32 @@ Always report the returned absolute paths back to the user — they are the deli
 | The A4 layout itself looks broken | Run `npm run verify:manual` — it paginates a synthetic manual in a real browser and asserts no sheet overflows, every step is placed, the index resolves and printing yields exactly one page per sheet. It leaves a PNG per sheet under `manuals/_verify/`. |
 | The Word file breaks pages differently from the HTML | The break measurement failed — check `warnings` for it. `npm run verify:manual` also builds a .docx and, when LibreOffice is installed, re-flows it and compares its page count against the HTML. |
 | The Word index shows no page numbers | The measurement was unavailable, so the `PAGEREF` fields shipped without a cached value. Select all in Word and press F9 to resolve them. |
+
+## Building from a Markdown file you already have
+
+If the manual is already written as Markdown with its screenshots, you do not author it again — pass
+the path:
+
+```json
+{ "source": "D:/manuals/gestio-clients.md", "formats": ["html", "docx"] }
+```
+
+Images resolve relative to that file, so leave the PNGs where they are. Outputs land next to the
+source unless `outDir` says otherwise.
+
+The accepted format is **exactly what this tool's own `md` output writes** — the generator is the
+specification, which is what stops it drifting. The full spec is in
+[the source format guide](manual-source-format.md).
+
+When the `.md` was NOT produced by this tool, **validate it first**:
+
+```json
+{ "source": "D:/manuals/gestio-clients.md", "validate": true }
+```
+
+Nothing is written; you get every problem in one pass with its line number, so one round of fixes is
+enough. A normal build also returns `sourceDiagnostics`, so a degraded table or a dropped second
+figure is never silent.
 
 ## Related
 

@@ -27,6 +27,22 @@ Two consequences worth knowing:
 - **It needs Chrome/Edge**, the same as the captures do. If the browser is unavailable the manual is still written -- Word simply chooses its own breaks -- and a `warning` says exactly that. Never assume the pages match without checking `warnings`.
 - **The index numbers are cached, not baked.** Each index row is a real `PAGEREF` field pointing at a per-step bookmark, shipped with the measured page number as its cached value. It reads correctly the moment the file opens, and it re-resolves itself if the reader edits the document and presses F9.
 
+### Building from an existing Markdown file
+
+Instead of authoring `steps` here, pass `source`: the path of a `.md` manual that already exists.
+
+```json
+{ "source": "D:/manuals/gestio-clients.md", "formats": ["html", "docx"] }
+```
+
+Its images are resolved relative to that file, so you pass the `.md` and leave the PNGs where they are. Outputs land next to the source unless `outDir` says otherwise. `title`, `intro` and `steps` come from the document.
+
+**The accepted format is this tool's own `md` output** — the generator is the specification, and a round-trip test pins the two together so it cannot drift. Full spec: [the source format guide](../guides/manual-source-format.md).
+
+When the `.md` was not produced by this tool, **validate first**: `{ "source": "...", "validate": true }` parses and checks it without building, returning `sourceDiagnostics` as `line N: severity: message` — every problem in one pass, so one round of fixes is enough. Errors (no title, no steps, a missing image) mean nothing is built; warnings (a table, a `###`, a dropped second figure) mean it builds with that part degraded. A normal build returns `sourceDiagnostics` too, so warnings are never silent.
+
+Requesting `md` when the output would overwrite the source is refused with a clear error — the input document is never destroyed.
+
 ## When to use / when NOT to use
 Use it to produce shareable end-user documentation, training material, or onboarding guides for a BC process -- typically: open a list with `bc_open_page`, grab a record `bookmark`, then call `bc_build_manual` with a few steps that screenshot the card page and highlight the fields the reader must fill in. The user-scope skill `~/.claude/skills/bc-manual/SKILL.md` lets you simply ask "document how to create a customer" and have Claude drive the pages and call this tool.
 
@@ -37,9 +53,11 @@ Do NOT use it to read or extract field data (use `bc_open_page` / `bc_read_data`
 ## Parameters
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `title` | string | Yes | Manual title (also used to name the output files unless `name` is given). |
+| `source` | string | No | Path of an existing `.md` manual to build from. When given, `title`/`intro`/`steps` are read from the document and ignored here. See [the source format](../guides/manual-source-format.md). |
+| `validate` | boolean | No | With `source`: parse and check the document **without building**. Returns `sourceDiagnostics` only. |
+| `title` | string | Required unless `source` | Manual title (also used to name the output files unless `name` is given). |
 | `intro` | string | No | Introduction paragraph. In HTML it goes on the cover. Markdown formatting allowed. |
-| `steps` | array of ManualStep (min 1) | Yes | Ordered steps. Each may capture a screenshot and/or carry prose. |
+| `steps` | array of ManualStep (min 1) | Required unless `source` | Ordered steps. Each may capture a screenshot and/or carry prose. |
 | `formats` | array of `'md' \| 'html' \| 'docx'` | No | Output formats. Defaults to `["md"]`. Pass several to get several. |
 | `outDir` | string | No | Output directory (absolute, or relative to `BC_MANUAL_DIR`). Defaults to `BC_MANUAL_DIR`. |
 | `name` | string | No | Base file name (slugified). Defaults to the `title`. |
@@ -100,6 +118,8 @@ On success the operation returns a `BuildManualOutput`:
 | `docx` | string (optional) | Absolute path of the Word document (present only if `docx` was in `formats`). |
 | `css` | string (optional) | Absolute path of the stylesheet -- only when HTML was built with `assets: "files"`. |
 | `js` | string (optional) | Absolute path of the paginator script -- only when HTML was built with `assets: "files"`. |
+| `sourceDiagnostics` | string[] (optional) | Only with `source`. Problems found in the document, as `line N: severity: message`, in reading order. Present on a successful build too — read it. |
+| `validated` | boolean (optional) | True when `validate` was requested: the document was checked and nothing was written. |
 | `images` | string[] | Absolute paths of every image in the document: PNGs captured during the build plus any existing file referenced through a step's `image`. |
 | `steps` | number | Number of step models rendered into the document. |
 | `warnings` | string[] (optional) | Per-step problems that would otherwise be invisible in a finished document: a `redact` caption that was never located (the figure still shows the value), a `highlight` caption that matched nothing (the callout is missing), a capture taken before the SPA settled (`spaReady:false`), a referenced `image` that does not exist (the figure was dropped), or a capture that returned without writing its PNG. **A manual can be built successfully and still be wrong** — check this array and re-shoot the steps it names. |

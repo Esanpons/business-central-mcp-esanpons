@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { isAbsolute, resolve, relative } from 'node:path';
+import { basename, dirname, extname, isAbsolute, resolve, relative } from 'node:path';
 import type { Logger } from '../core/logger.js';
 import type { ScreenshotService, ScreenshotSession, CaptureResult } from './screenshot-service.js';
 import { normalizeHighlight, type HighlightInput } from '../operations/screenshot.js';
@@ -10,6 +10,7 @@ import {
 import { renderHtmlDocument, type ManualAssets } from './manual-html.js';
 import { renderDocx } from './manual-docx.js';
 import { measurePageBreaks, type PageBreakMap } from './manual-paginate.js';
+import { parseManualSource, formatDiagnostics } from './manual-source.js';
 import type { Metrics } from './metrics.js';
 
 export interface ManualScreenshotSpec {
@@ -44,9 +45,20 @@ export interface ManualStepInput {
 export type ManualFormat = 'md' | 'html' | 'docx';
 
 export interface BuildManualInput {
-  title: string;
+  /**
+   * Build from an existing Markdown file instead of inline steps.
+   *
+   * The accepted format is exactly what this tool's own `md` output writes, so
+   * the generator is the specification (see `manual-source.ts`). Images are
+   * resolved relative to the file. When set, `title`/`intro`/`steps` are read
+   * from the document and any given here are ignored.
+   */
+  source?: string;
+  /** Parse and check `source` WITHOUT building anything. Reports diagnostics only. */
+  validate?: boolean;
+  title?: string;
   intro?: string;
-  steps: ManualStepInput[];
+  steps?: ManualStepInput[];
   formats?: ManualFormat[];
   outDir?: string;
   name?: string;
@@ -70,6 +82,14 @@ export interface BuildManualOutput {
   /** Every image the document references (captured this run or referenced by path). */
   images: string[];
   steps: number;
+  /**
+   * Problems found in a `source` document, as `line N: severity: message`.
+   * Errors mean nothing was built; warnings mean it was built but something in
+   * the source does not fit the manual model and was degraded.
+   */
+  sourceDiagnostics?: string[];
+  /** True when `validate` was requested: the source was checked, nothing written. */
+  validated?: boolean;
   /**
    * Per-step problems found while building. A manual can be written successfully
    * from captures that missed their callouts, failed a redaction or caught a
@@ -133,13 +153,75 @@ export class ManualService {
   }
 
   private async buildInner(input: BuildManualInput): Promise<BuildManualOutput> {
+    return input.source ? this.buildFromSource(input) : this.buildFromSteps(input);
+  }
+
+  /**
+   * Builds from an existing Markdown document instead of inline steps.
+   *
+   * No BC, no browser for captures -- only the images the document already
+   * references. The output lands next to the source by default, which is what
+   * keeps its relative image links working.
+   */
+  private async buildFromSource(input: BuildManualInput): Promise<BuildManualOutput> {
+    const file = isAbsolute(input.source!) ? input.source! : resolve(process.cwd(), input.source!);
+    const baseDir = isAbsolute(this.manualDir) ? this.manualDir : resolve(process.cwd(), this.manualDir);
+    const dir = input.outDir
+      ? (isAbsolute(input.outDir) ? input.outDir : resolve(baseDir, input.outDir))
+      : dirname(file);
+
+    const parsed = parseManualSource({ file, outDir: dir });
+    const diagnostics = formatDiagnostics(parsed.diagnostics);
+
+    if (!parsed.model) {
+      throw new Error(`The manual source has errors and nothing was built:\n - ${diagnostics.join('\n - ')}`);
+    }
+    if (input.validate) {
+      this.logger.info(`[manual] validated ${file}: ${parsed.model.steps.length} steps, ${diagnostics.length} diagnostic(s)`);
+      return {
+        images: parsed.model.steps.flatMap((s) => (s.image ? [s.image.absPath] : [])),
+        steps: parsed.model.steps.length,
+        validated: true,
+        ...(diagnostics.length ? { sourceDiagnostics: diagnostics } : {}),
+      };
+    }
+
+    // Front matter carries the document's own build settings; an explicit
+    // argument still wins, so one file can be rebuilt with a different cover or
+    // language without editing it.
+    const merged: BuildManualInput = {
+      ...input,
+      lang: input.lang ?? parsed.options.lang,
+      cover: input.cover ?? parsed.options.cover,
+      toc: input.toc ?? parsed.options.toc,
+      name: input.name ?? parsed.options.name ?? basename(file, extname(file)),
+      assets: input.assets ?? (parsed.options.assets as ManualAssets | undefined),
+    };
+    const slug = slugify(merged.name!);
     const formats: ManualFormat[] = input.formats && input.formats.length ? input.formats : ['md'];
-    const slug = slugify(input.name || input.title);
+
+    // Rebuilding a document's own Markdown on top of itself would destroy the
+    // input. Refuse rather than silently skip: the caller asked for a file.
+    if (formats.includes('md') && resolve(dir, `${slug}.md`) === file) {
+      throw new Error(`Writing the "md" output would overwrite the source document (${file}). `
+        + 'Drop "md" from formats, or pass a different name/outDir.');
+    }
+
+    const images = parsed.model.steps.flatMap((s) => (s.image ? [s.image.absPath] : []));
+    const out = await this.renderAll(parsed.model, merged, dir, slug, formats, images, []);
+    if (diagnostics.length) out.sourceDiagnostics = diagnostics;
+    return out;
+  }
+
+  private async buildFromSteps(input: BuildManualInput): Promise<BuildManualOutput> {
+    const formats: ManualFormat[] = input.formats && input.formats.length ? input.formats : ['md'];
+    const slug = slugify(input.name || input.title || 'manual');
     const baseDir = isAbsolute(this.manualDir) ? this.manualDir : resolve(process.cwd(), this.manualDir);
     const dir = input.outDir ? (isAbsolute(input.outDir) ? input.outDir : resolve(baseDir, input.outDir)) : baseDir;
     const imgDir = resolve(dir, `${slug}-img`);
     mkdirSync(imgDir, { recursive: true });
 
+    const inputSteps = input.steps ?? [];
     const stepModels: ManualStepModel[] = [];
     const images: string[] = [];
     const warnings: string[] = [];
@@ -147,8 +229,8 @@ export class ManualService {
     // from existing images never launches Chrome at all.
     let session: ScreenshotSession | undefined;
     try {
-      for (let i = 0; i < input.steps.length; i++) {
-        const st = input.steps[i];
+      for (let i = 0; i < inputSteps.length; i++) {
+        const st = inputSteps[i];
         if (!st) continue;
         let absImg: string | undefined;
         if (st.screenshot) {
@@ -203,8 +285,22 @@ export class ManualService {
       if (session) await session.close();
     }
 
-    const model: ManualModel = { title: input.title, intro: input.intro, steps: stepModels };
-    const out: BuildManualOutput = { images, steps: stepModels.length };
+    const model: ManualModel = { title: input.title ?? 'Manual', intro: input.intro, steps: stepModels };
+    return this.renderAll(model, input, dir, slug, formats, images, warnings);
+  }
+
+  /** Writes the requested formats. Shared by both authoring paths. */
+  private async renderAll(
+    model: ManualModel,
+    input: BuildManualInput,
+    dir: string,
+    slug: string,
+    formats: ManualFormat[],
+    images: string[],
+    warnings: string[],
+  ): Promise<BuildManualOutput> {
+    mkdirSync(dir, { recursive: true });
+    const out: BuildManualOutput = { images, steps: model.steps.length };
 
     if (formats.includes('md')) {
       const p = resolve(dir, `${slug}.md`);
@@ -254,7 +350,7 @@ export class ManualService {
       for (const w of warnings) this.logger.warn(`[manual] ${w}`);
     }
 
-    this.logger.info(`[manual] built "${input.title}" (${out.steps} steps) -> ${[out.md, out.html, out.docx].filter(Boolean).join(', ')}`);
+    this.logger.info(`[manual] built "${model.title}" (${out.steps} steps) -> ${[out.md, out.html, out.docx].filter(Boolean).join(', ')}`);
     return out;
   }
 
