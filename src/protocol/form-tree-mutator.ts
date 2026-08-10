@@ -1,13 +1,14 @@
 // src/protocol/form-tree-mutator.ts
-import { childrenOf, isRepeaterNode, type FormNode, type NodeProperties, type RepeaterColumnNode, type RepeaterNode } from './form-node.js';
+import { childrenOf, isRepeaterNode, type ActionNode, type FormNode, type NodeProperties, type RepeaterColumnNode, type RepeaterNode } from './form-node.js';
 
 /** Returns a new tree with the node at `controlPath` having its properties
  * merged with `changes`. Off-path nodes are reused by reference (structural
  * sharing). If `controlPath` is not found, returns the input root unchanged.
  *
- * Recurses into `children` for every container, AND into `columns` for
- * `RepeaterNode` — BC publishes PropertyChanged on column paths
- * (e.g. `…/co[N]`) to update column captions / visibility / etc.
+ * Recurses into `children` for every container, AND into `columns` and
+ * `headerActions` for `RepeaterNode` — BC publishes PropertyChanged on column
+ * paths (`…/co[N]`) to update column captions / visibility, and on header-action
+ * paths (`…/ha[N]`) to enable/disable the row-scoped actions.
  *
  * Protocol invariant: a PropertyChanged never substitutes a node's type, only
  * its properties. The structural-share rebuild therefore preserves every
@@ -30,13 +31,20 @@ export function applyPropertyChange(
     }
   }
 
-  // RepeaterNode also carries `columns` outside the children array.
+  // RepeaterNode also carries `columns` and `headerActions` outside `children`.
   if (isRepeaterNode(root)) {
     const cols = root.columns;
     for (let j = 0; j < cols.length; j++) {
       const updatedCol = applyPropertyChange(cols[j]!, controlPath, changes);
       if (updatedCol !== cols[j]) {
         return replaceColumn(root, j, updatedCol as RepeaterColumnNode);
+      }
+    }
+    const has = root.headerActions;
+    for (let k = 0; k < has.length; k++) {
+      const updatedAction = applyPropertyChange(has[k]!, controlPath, changes);
+      if (updatedAction !== has[k]) {
+        return replaceHeaderAction(root, k, updatedAction as ActionNode);
       }
     }
   }
@@ -69,10 +77,17 @@ function replaceColumn(repeater: RepeaterNode, index: number, newColumn: Repeate
   return { ...repeater, columns: newColumns };
 }
 
+function replaceHeaderAction(repeater: RepeaterNode, index: number, newAction: ActionNode): RepeaterNode {
+  const newActions = repeater.headerActions.slice();
+  newActions[index] = newAction;
+  return { ...repeater, headerActions: newActions };
+}
+
 /** O(1) controlPath → node lookup index. Build once per root; rebuild when
  * the root is replaced (any tree mutation returns a new root).
  *
- * Includes RepeaterColumnNode entries (which `walkTree` deliberately omits).
+ * Includes RepeaterColumnNode entries (which `walkTree` deliberately omits) and
+ * repeater `headerActions` (`ha[N]`).
  *
  * Last-write-wins on duplicate controlPaths. ControlPaths are unique by
  * construction in BC's protocol, so the duplicate case is a defensive
@@ -84,6 +99,7 @@ export function buildPathIndex(root: FormNode): ReadonlyMap<string, FormNode> {
     for (const c of childrenOf(n)) visit(c);
     if (isRepeaterNode(n)) {
       for (const col of n.columns) visit(col);
+      for (const action of n.headerActions) visit(action);
     }
   }
   visit(root);

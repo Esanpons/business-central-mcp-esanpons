@@ -23,11 +23,27 @@ export function toSectionSummary(s: Section): Section {
   };
 }
 
-/** Keep only card fields whose nearest group caption matches (case-insensitive). */
-export function filterFieldsByGroup(s: Section, group: string): Section {
-  if (!s.fields) return s;
+export interface GroupFilterOutcome {
+  readonly section: Section;
+  /** How many fields the group matched. 0 means the caller's `group` hit nothing. */
+  readonly matched: number;
+  /** Distinct group captions the section actually exposes, so a miss is fixable in one turn. */
+  readonly availableGroups: string[];
+}
+
+/**
+ * Keep only card fields whose nearest group caption matches (case-insensitive).
+ *
+ * Returns the diagnostics alongside the narrowed section: an unknown group used to
+ * yield `fields: []` with no signal at all, which reads exactly like "this group is
+ * empty" instead of "there is no such group — here are the ones there are".
+ */
+export function filterFieldsByGroup(s: Section, group: string): GroupFilterOutcome {
+  const availableGroups = [...new Set((s.fields ?? []).map(f => f.group).filter((g): g is string => !!g))];
+  if (!s.fields) return { section: s, matched: 0, availableGroups };
   const want = group.trim().toLowerCase();
-  return { ...s, fields: s.fields.filter(f => (f.group ?? '').trim().toLowerCase() === want) };
+  const fields = s.fields.filter(f => (f.group ?? '').trim().toLowerCase() === want);
+  return { section: { ...s, fields }, matched: fields.length, availableGroups };
 }
 
 /**

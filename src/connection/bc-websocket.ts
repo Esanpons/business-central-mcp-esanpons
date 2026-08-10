@@ -10,9 +10,25 @@ export interface BCWebSocketConfig {
   url: string;
   headers: Record<string, string>;
   timeoutMs: number;
+  /**
+   * `false` accepts a self-signed / untrusted BC certificate for THIS socket
+   * only (BC_TLS_INSECURE), instead of the process-wide
+   * NODE_TLS_REJECT_UNAUTHORIZED=0. Omitted = Node's default (validate).
+   */
+  rejectUnauthorized?: boolean;
 }
 
 type MessageHandler = (data: unknown) => void;
+
+/** Grace period between the polite close frame and a hard socket teardown. */
+const FORCE_CLOSE_GRACE_MS = 500;
+
+/**
+ * `ProtocolError.code` for an RPC whose response never arrived. The session layer
+ * treats it as fatal (see BCSession.invokeUnqueued): a request BC may still be
+ * processing means the client's form/modal state can no longer be trusted.
+ */
+export const RPC_TIMEOUT_CODE = 'RPC_TIMEOUT';
 
 export class BCWebSocket {
   private ws: WebSocket | null = null;
@@ -21,7 +37,6 @@ export class BCWebSocket {
     { resolve: (value: unknown) => void; reject: (reason: Error) => void }
   >();
   private readonly messageHandlers: MessageHandler[] = [];
-  private sendQueue: Promise<void> = Promise.resolve();
   private sequenceCounter = 0;
   private lastServerSequence = 0;
   readonly spaInstanceId: string;
@@ -43,7 +58,10 @@ export class BCWebSocket {
       let settled = false;
       const { signal, cleanup } = composeWithTimeout(config.timeoutMs);
 
-      const ws = new WebSocket(config.url, { headers: config.headers });
+      const ws = new WebSocket(config.url, {
+        headers: config.headers,
+        ...(config.rejectUnauthorized === false ? { rejectUnauthorized: false } : {}),
+      });
 
       const settle = (result: Result<void, ConnectionError>) => {
         if (settled) return;
@@ -53,6 +71,12 @@ export class BCWebSocket {
       };
 
       ws.on('open', () => {
+        // The connect promise may already have settled (timeout/abort raced the
+        // handshake, and `signal`'s handler called ws.close() before the server's
+        // 101 arrived). Adopting the socket now would install a live `this.ws`
+        // that nobody is waiting on -- a zombie connection that makes isConnected
+        // report true for a session the caller believes failed.
+        if (settled) { ws.close(); return; }
         this.ws = ws;
         this.setupHandlers(ws);
         this.logger.info(`WebSocket connected to ${config.url.split('?')[0]}`);
@@ -96,10 +120,7 @@ export class BCWebSocket {
 
     ws.on('close', (code, reason) => {
       this.logger.warn(`WebSocket closed: ${code} ${reason.toString()}`);
-      for (const [id, { reject }] of this.pendingRequests) {
-        reject(new ConnectionError(`WebSocket closed while waiting for response ${id}`));
-      }
-      this.pendingRequests.clear();
+      this.rejectAllPending('WebSocket closed while waiting for response');
     });
 
     ws.on('error', (e) => {
@@ -160,70 +181,111 @@ export class BCWebSocket {
     };
   }
 
+  /**
+   * Send one JSON-RPC request and await its response.
+   *
+   * There is deliberately NO queue here. BC's protocol is stateful and needs a
+   * single serialization point -- that point is `BCSession.enqueue`, which owns
+   * the encode + send + decode + form-tracking cycle as one atomic unit. A second
+   * queue at this layer only serialized the SEND, which never protected anything
+   * the session queue didn't already protect, and made the true ordering harder
+   * to reason about. Every caller of sendRpc runs inside a session-enqueued task.
+   */
   async sendRpc(
     method: string,
     params: unknown[],
     timeoutMs: number,
   ): Promise<Result<unknown, ProtocolError>> {
-    return this.enqueueSend(async () => {
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        return err(new ProtocolError('WebSocket is not connected'));
-      }
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return err(new ProtocolError('WebSocket is not connected'));
+    }
 
-      const id = uuid();
-      const payload = JSON.stringify({ jsonrpc: '2.0', id, method, params });
+    const id = uuid();
+    const payload = JSON.stringify({ jsonrpc: '2.0', id, method, params });
 
-      return new Promise<Result<unknown, ProtocolError>>((resolve) => {
-        const { signal, cleanup } = composeWithTimeout(timeoutMs);
+    return new Promise<Result<unknown, ProtocolError>>((resolve) => {
+      const { signal, cleanup } = composeWithTimeout(timeoutMs);
 
-        this.pendingRequests.set(id, {
-          resolve: (value) => {
-            cleanup();
-            const decompressed = decompressIfNeeded(value);
-            resolve(decompressed);
-          },
-          reject: (reason) => {
-            cleanup();
-            resolve(err(new ProtocolError(reason.message)));
-          },
-        });
-
-        signal.addEventListener(
-          'abort',
-          () => {
-            this.pendingRequests.delete(id);
-            resolve(
-              err(
-                new ProtocolError(
-                  signal.reason instanceof TimeoutError
-                    ? `RPC timed out after ${timeoutMs}ms`
-                    : 'RPC aborted',
-                ),
-              ),
-            );
-          },
-          { once: true },
-        );
-
-        this.ws!.send(payload);
-        this.logger.debug('protocol', `Sent RPC: ${method} (id: ${id})`);
+      this.pendingRequests.set(id, {
+        resolve: (value) => {
+          cleanup();
+          const decompressed = decompressIfNeeded(value);
+          resolve(decompressed);
+        },
+        reject: (reason) => {
+          cleanup();
+          resolve(err(new ProtocolError(reason.message)));
+        },
       });
-    });
-  }
 
-  private enqueueSend<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.sendQueue.then(fn, fn);
-    this.sendQueue = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
+      signal.addEventListener(
+        'abort',
+        () => {
+          this.pendingRequests.delete(id);
+          resolve(
+            err(
+              signal.reason instanceof TimeoutError
+                // Coded so the session layer can recognise a timeout without
+                // string-matching, and treat it as session-fatal: BC never
+                // answered, so the client's idea of the server state (open forms,
+                // modal stack) is no longer trustworthy.
+                ? new ProtocolError(`RPC timed out after ${timeoutMs}ms`, { method, timeoutMs }, RPC_TIMEOUT_CODE)
+                : new ProtocolError('RPC aborted', { method }),
+            ),
+          );
+        },
+        { once: true },
+      );
+
+      try {
+        ws.send(payload);
+      } catch (e) {
+        this.pendingRequests.delete(id);
+        cleanup();
+        resolve(err(new ProtocolError(`WebSocket send failed: ${e instanceof Error ? e.message : String(e)}`)));
+        return;
+      }
+      this.logger.debug('protocol', `Sent RPC: ${method} (id: ${id})`);
+    });
   }
 
   close(): void {
     if (this.ws) {
       this.ws.close();
       this.ws = null;
+    }
+  }
+
+  /**
+   * Hard teardown for kill paths (invoke timeout, fatal session error).
+   *
+   * `close()` alone sends a close frame and then waits for the peer's answer. On
+   * a half-open TCP connection -- exactly the situation a kill path is reacting
+   * to -- that answer never comes, so the `close` event (the ONLY place pending
+   * requests are rejected) can be minutes away while `isConnected` keeps
+   * reporting true. This detaches the socket immediately, fails every pending
+   * request, asks politely, and terminates if the peer does not answer quickly.
+   */
+  forceClose(): void {
+    const ws = this.ws;
+    this.ws = null;
+    this.rejectAllPending('WebSocket was force-closed while waiting for a response');
+    if (!ws) return;
+    try { ws.close(); } catch { /* already gone */ }
+    const timer = setTimeout(() => {
+      try { ws.terminate(); } catch { /* already gone */ }
+    }, FORCE_CLOSE_GRACE_MS);
+    // Never hold the event loop open just to hard-kill a socket.
+    if (typeof timer.unref === 'function') timer.unref();
+  }
+
+  private rejectAllPending(reason: string): void {
+    if (this.pendingRequests.size === 0) return;
+    const pending = [...this.pendingRequests.entries()];
+    this.pendingRequests.clear();
+    for (const [id, { reject }] of pending) {
+      reject(new ConnectionError(`${reason} (${id})`));
     }
   }
 

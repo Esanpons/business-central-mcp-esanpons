@@ -75,6 +75,26 @@ async function firstCellValue(pageId: string, column: RegExp): Promise<string | 
   }
 }
 
+/** Like firstCellValue, but returns up to `max` values — a fixture needs alternatives. */
+async function cellValues(pageId: string, column: RegExp, max: number): Promise<string[]> {
+  const r = await h.ops.openPage.execute({ pageId });
+  if (!isOk(r)) return [];
+  const pcId = A(r.value).pageContextId;
+  try {
+    const rows: Array<{ cells: Record<string, unknown> }> = A(r.value).sections?.[0]?.rows ?? [];
+    const out: string[] = [];
+    for (const row of rows) {
+      const key = Object.keys(row.cells).find((k) => column.test(k.trim()));
+      const value = key ? row.cells[key] : undefined;
+      if (value !== null && value !== undefined && String(value) !== '') out.push(String(value));
+      if (out.length >= max) break;
+    }
+    return out;
+  } finally {
+    await h.ops.closePage.execute({ pageContextId: pcId }).catch(() => undefined);
+  }
+}
+
 let orderPcId = '';
 try {
   // ---- G2: open a Sales Order in Create mode ------------------------------
@@ -109,7 +129,7 @@ try {
       // Pick a real customer and item from the live data (locale-independent: read
       // the first row's first non-empty cell of the primary-key column).
       const custNo = await firstCellValue('22', /^(n[ºo]\.?|no\.|code|c[oó]digo)$/i);
-      const itemNo = await firstCellValue('31', /^(n[ºo]\.?|no\.|code|c[oó]digo)$/i);
+      const itemCandidates = await cellValues('31', /^(n[ºo]\.?|no\.|code|c[oó]digo)$/i, 15);
       const header = await h.ops.readData.execute({ pageContextId: orderPcId });
       const fields: Array<{ name: string; controlPath: string; editable?: unknown }> = isOk(header) ? A(header.value).section?.fields ?? [] : [];
       const custField = fields.find((f) => /(sell-to customer no|cliente|customer no)/i.test(f.name) && /n[ºo]|no\.|c[oó]d/i.test(f.name))
@@ -122,18 +142,53 @@ try {
         if (!changed) {
           console.log(`      (field "${custField.name}" @ ${custField.controlPath} -> ${isOk(w) ? JSON.stringify(A(w.value).results) : A(w).error.message})`);
         }
-        // Now a line: BC's first blank line accepts Type=Item + No.
+        // Now a line: BC's first blank line accepts Type=Item + No. — but ONLY for an
+        // item it will actually sell. On a database whose first items are not sales
+        // items (devel1 is one: every candidate answers "Sale must be equal to 'Yes'
+        // in Item"), a single fixed pick can never succeed, and the old code reported
+        // that dataset fact as if the line-write path were broken. Try several and
+        // report BC's own reason when none is acceptable.
         let lineNote = 'no item to add';
-        if (changed && itemNo) {
+        if (changed && itemCandidates.length > 0) {
           const lineSecs = h.repo.get(orderPcId);
           const lineId = lineSecs ? Array.from(lineSecs.sections.keys()).find((k) => k === 'lines') : undefined;
           if (lineId) {
-            const lw = await h.ops.writeData.execute({
-              pageContextId: orderPcId, section: lineId, rowIndex: 0,
-              fields: { 'No.': itemNo, 'Nº': itemNo },
-            }).catch(() => null);
-            lineWritten = !!(lw && isOk(lw) && A(lw.value).results?.some((r: { changed?: boolean }) => r.changed));
-            lineNote = lineWritten ? `line set to item ${itemNo}` : `line write did not stick (item ${itemNo})`;
+            // Use the column caption the environment ACTUALLY publishes. Guessing a
+            // pair ("No." + "Nº") wrote one key that does not exist on this locale,
+            // and its "control not found" then masked the real key's outcome.
+            const lineRead = await h.ops.readData.execute({ pageContextId: orderPcId, section: lineId });
+            const lineRows: Array<{ cells: Record<string, unknown> }> = isOk(lineRead) ? A(lineRead.value).section?.rows ?? [] : [];
+            const noColumn = Object.keys(lineRows[0]?.cells ?? {}).find((k) => /^(no\.|n[ºo]\.?)$/i.test(k.trim()));
+            if (!noColumn) {
+              lineNote = `no item-number column found among: ${Object.keys(lineRows[0]?.cells ?? {}).slice(0, 6).join(', ')}`;
+            } else {
+              let lastReason = '';
+              for (const candidate of itemCandidates) {
+                const lw = await h.ops.writeData.execute({
+                  pageContextId: orderPcId, section: lineId, rowIndex: 0,
+                  fields: { [noColumn]: candidate },
+                }).catch(() => null);
+                const results: Array<{ changed?: boolean; reason?: string; validationMessage?: string }> =
+                  lw && isOk(lw) ? A(lw.value).results ?? [] : [];
+                // `changed:true` is the cheap confirmation; `unverified` means BC
+                // re-keyed the row (committing a placeholder line does that), so the
+                // only honest check is to re-read and look for the value.
+                let landed = results.some((r) => r.changed);
+                if (!landed && results.some((r) => r.reason === 'unverified')) {
+                  const reread = await h.ops.readData.execute({ pageContextId: orderPcId, section: lineId });
+                  const rr: Array<{ cells: Record<string, unknown> }> = isOk(reread) ? A(reread.value).section?.rows ?? [] : [];
+                  landed = rr.some((r) => String(r.cells[noColumn] ?? '') === candidate);
+                }
+                if (landed) {
+                  lineWritten = true;
+                  lineNote = `line set to item ${candidate} (column "${noColumn}")`;
+                  break;
+                }
+                const rejected = results.find((r) => r.reason === 'validation error');
+                lastReason = rejected?.validationMessage ?? results[0]?.reason ?? 'no echo from BC';
+              }
+              if (!lineWritten) lineNote = `no sellable item among ${itemCandidates.length} candidates -- BC says: ${lastReason.slice(0, 90)}`;
+            }
           }
         }
         rec('G2 fill created record', changed ? 'PASS' : 'FAIL',
@@ -230,10 +285,17 @@ try {
       } else {
         const before = await h.ops.readData.execute({ pageContextId: orderPcId, section: linesSectionId });
         const rowsBefore: Array<{ bookmark: string; cells: Record<string, unknown> }> = isOk(before) ? A(before.value).section?.rows ?? [] : [];
-        // Only a row with content can be deleted; BC's trailing blank placeholders can't.
-        const target = rowsBefore.find((r) => Object.values(r.cells).some((v) => v !== null && v !== ''));
+        // Only a COMMITTED row can be deleted. "has some non-empty cell" was too weak:
+        // BC's trailing blank placeholders carry defaults (Type="Item", Quantity=0), so
+        // the check kept picking one, BC ignored the delete, and a fixture problem was
+        // reported as a delete bug. A placeholder has a DraftRecord* bookmark.
+        const target = rowsBefore.find((r) =>
+          !r.bookmark.startsWith('DraftRecord')
+          && Object.values(r.cells).some((v) => v !== null && v !== '' && v !== 0));
         if (!target) {
-          rec('B4 row removal', 'SKIP', `no populated line to delete (rows=${rowsBefore.length})`);
+          rec('B4 row removal', 'SKIP',
+            `no committed line to delete (rows=${rowsBefore.length}, all uncommitted placeholders`
+            + `${lineWritten ? '' : ' -- the line write above did not stick, so nothing real exists to delete'})`);
         } else {
           const del = await h.ops.executeAction.execute({
             pageContextId: orderPcId, section: linesSectionId, action: 'Delete', bookmark: target.bookmark,
@@ -250,8 +312,13 @@ try {
             const after = await h.ops.readData.execute({ pageContextId: orderPcId, section: linesSectionId });
             const rowsAfter: Array<{ bookmark: string }> = isOk(after) ? A(after.value).section?.rows ?? [] : [];
             const stillThere = rowsAfter.some((r) => r.bookmark === target.bookmark);
+            // `deleted` is the server-verified verdict the operation now reports; the
+            // projection check is kept as an independent second opinion.
+            const reported = A(del.value).deleted as boolean | undefined;
+            const note = A(del.value).note as string | undefined;
             rec('B4 row removal', stillThere ? 'FAIL' : 'PASS',
               `line deleted: rows ${rowsBefore.length} -> ${rowsAfter.length}; stale row present=${stillThere}; `
+              + `reported deleted=${reported ?? 'n/a'}${note ? `; note: ${note.slice(0, 80)}` : ''}; `
               + `raw removal payloads seen=${rawRowChanges.length}`);
           }
         }

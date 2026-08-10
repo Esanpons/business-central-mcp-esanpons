@@ -37,6 +37,8 @@ Returns an `ExecuteActionOutput` object:
 | `openedPages` | `Array<{ pageContextId: string; caption: string }>` | New pages opened by the action — derived from `FormCreated` events for forms other than the source page, including the page context created for a cue drill-down. |
 | `dialogsOpened` | `Array<{ formId: string; message?: string; fields?: ControlField[] }>` | Dialogs/modal pages opened (from `detectDialogs`). |
 | `requiresDialogResponse` | `boolean` | True when `dialogsOpened` is non-empty; the caller must follow up with `bc_respond_dialog`. |
+| `deleted` | `boolean` (optional) | For a **bookmark-targeted Delete**: whether the row is really gone, checked against the repeater re-read from the server after the action — not inferred from `success`. Absent when the action was not such a delete, or when a dialog is still pending (the delete is unresolved until you answer it). |
+| `note` | `string` (optional) | Why an action completed without doing what its name says. In particular, BC can complete a Delete and keep the row (an uncommitted placeholder row, or a page not opened for editing): `success` is `true`, `deleted` is `false`, and this explains it. |
 
 `ControlField` (in `dialog.fields` / `dialogsOpened[].fields`) carries `controlPath`, `caption`, `type`, `editable` (`boolean | "unknown"`), `visible`, optional `value`, `stringValue`, `columnBinderName`, `isLookup`, and `showMandatory`.
 

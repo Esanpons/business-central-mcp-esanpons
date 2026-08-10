@@ -3,8 +3,11 @@ import { ProtocolError } from '../core/errors.js';
 import type { DataService } from '../services/data-service.js';
 import type { PageService } from '../services/page-service.js';
 import type { PageContextRepository } from '../protocol/page-context-repo.js';
+import type { PageContext } from '../protocol/page-context.js';
 import { buildSection, type Section } from '../protocol/section-dto.js';
 import { filterFieldsByGroup, filterColumns, sliceRows } from '../protocol/section-filters.js';
+import { resolveSection } from '../protocol/section-resolver.js';
+import { buildBinderToCaptionMap, repeaterColumnsToDto } from '../protocol/row-mapping.js';
 import type { OpenFormFilter } from '../protocol/filter-query.js';
 import { filterRows, type RowFilter } from '../protocol/row-filter.js';
 
@@ -70,25 +73,49 @@ export class ReadDataOperation {
   async execute(input: ReadDataInput): Promise<Result<ReadDataOutput, ProtocolError>> {
     const sectionId = input.section ?? 'header';
 
-    // Fast-fail for unknown pageContextId before any service calls.
-    if (!this.repo.get(input.pageContextId)) {
-      return err(new ProtocolError(`Page context not found: ${input.pageContextId}`));
+    // Fast-fail for unknown pageContextId before any service calls. notFoundError
+    // carries availablePageContexts so the caller can self-correct in one turn.
+    const initialCtx = this.repo.get(input.pageContextId);
+    if (!initialCtx) return err(this.repo.notFoundError(input.pageContextId));
+
+    const hasFilters = !!input.filters && input.filters.length > 0;
+    // The server-side route re-OPENS the page with an OpenForm `filter=` query, so it
+    // is only correct for a LIST-SHAPED root: on a card/document context (opened by
+    // bookmark or drill-down) it silently threw the record away and landed on the
+    // first record of the filter. Requiring a repeater on the resolved section is
+    // what distinguishes the two — the sectionId alone does not.
+    const targetsDefaultSection = !input.section || input.section === 'header';
+    const rootIsList = targetsDefaultSection && this.sectionHasRepeater(initialCtx, input.section);
+    const useServerSide = hasFilters && !!this.pageService && rootIsList;
+
+    if (hasFilters && targetsDefaultSection && !rootIsList) {
+      const listSections = Array.from(initialCtx.sections.values())
+        .filter(s => s.valid && s.repeaterControlPath)
+        .map(s => s.sectionId);
+      return err(new ProtocolError(
+        `Filters cannot be applied to section '${sectionId}' of ${input.pageContextId}: it is not a list ` +
+        `(page type ${initialCtx.pageType}, no repeater). Filtering here would re-open the page and move it off the current record.`,
+        {
+          pageType: initialCtx.pageType,
+          listSections,
+          hint: listSections.length > 0
+            ? `Filter one of its list sections instead (section: "${listSections[0]}"), or open the list page with bc_open_page { pageId, filters }.`
+            : 'Open the list page with bc_open_page { pageId, filters } and filter there.',
+        },
+      ));
     }
 
-    const isMainList = !input.section || input.section === 'header';
     // G8: filters on a lines/subpage section can't go through the OpenForm query (it
     // targets the page, not the subpage form) and the filter pane is a no-op on
     // BC27/BC28. Those are filtered client-side below, over fully-materialized rows.
-    const clientFilters = input.filters && input.filters.length > 0 && !(isMainList && this.pageService)
-      ? input.filters
-      : undefined;
+    const clientFilters = hasFilters && !useServerSide ? input.filters : undefined;
 
-    if (input.filters && input.filters.length > 0 && !clientFilters && this.pageService) {
+    if (useServerSide && this.pageService) {
       // Working server-side path: re-open the page's form with an OpenForm `filter=`
       // query. This REPLACES any prior filter (reopen from scratch); appendFilters does
       // not apply here. Filter columns are AL field names, not localized captions.
       const previous = this.repo.get(input.pageContextId)?.activeFilters ?? [];
-      const effective = input.appendFilters ? [...previous, ...input.filters] : input.filters;
+      const effective = input.appendFilters ? [...previous, ...input.filters!] : input.filters!;
       const reopened = await this.pageService.reopenWithFilters(input.pageContextId, effective);
       if (isErr(reopened)) return reopened;
     }
@@ -106,7 +133,11 @@ export class ReadDataOperation {
           if (!isOk(scrollResult) || scrollResult.value.length <= rowsLen) break;
           rowsLen = scrollResult.value.length;
         }
-        clientScanTruncated = rowsLen >= MAX_CLIENT_FILTER_ROWS && (totalRowCount ?? 0) > rowsLen;
+        // An unknown totalRowCount (BC publishes it lazily) is NOT "zero more rows":
+        // collapsing undefined to 0 reported a complete scan every time the 2000-row
+        // cap was hit on a repeater whose count BC had not announced.
+        clientScanTruncated = rowsLen >= MAX_CLIENT_FILTER_ROWS
+          && (totalRowCount === null || totalRowCount === undefined || totalRowCount > rowsLen);
       }
     }
 
@@ -135,7 +166,7 @@ export class ReadDataOperation {
     // calls is stale and would cause buildSection to project pre-filter /
     // pre-scroll state.
     const ctx = this.repo.get(input.pageContextId);
-    if (!ctx) return err(new ProtocolError(`Page context not found: ${input.pageContextId}`));
+    if (!ctx) return err(this.repo.notFoundError(input.pageContextId));
 
     const section = buildSection(ctx, sectionId);
     if (!section) {
@@ -158,7 +189,11 @@ export class ReadDataOperation {
         ));
       }
       try {
-        const outcome = filterRows(materialized.rows, clientFilters);
+        // Resolve column names against the repeater's COLUMNS (complete even with
+        // zero rows loaded) and accept the binder name as an alias, so a caller can
+        // use either the display caption or the AL/binder name on any section.
+        const { columns, aliases } = this.columnVocabulary(ctx, input.section);
+        const outcome = filterRows(materialized.rows, clientFilters, { columns, aliases });
         materialized = { ...materialized, rows: outcome.rows };
         rowFilter = {
           mode: 'client',
@@ -176,21 +211,39 @@ export class ReadDataOperation {
     }
 
     if (input.tab && materialized.fields) {
+      // A `tab` that matches nothing used to fall through and return the FULL field
+      // set — the exact opposite of what the caller asked for, with no signal. Fail
+      // with the tab list instead (contrast: a bad `section` already errors this way).
       const tabsResult = this.dataService.getTabs(input.pageContextId, input.section);
-      if (isOk(tabsResult) && tabsResult.value) {
-        const matchingTab = tabsResult.value.find(t => t.caption.toLowerCase() === input.tab!.toLowerCase());
-        if (matchingTab) {
-          const tabFieldCaptions = new Set(matchingTab.fields.map(f => f.caption.toLowerCase()));
-          materialized = {
-            ...materialized,
-            fields: materialized.fields.filter(f => tabFieldCaptions.has(f.name.toLowerCase())),
-          };
-        }
+      const availableTabs = (isOk(tabsResult) && tabsResult.value ? tabsResult.value : []).map(t => t.caption);
+      const matchingTab = (isOk(tabsResult) && tabsResult.value ? tabsResult.value : [])
+        .find(t => t.caption.toLowerCase() === input.tab!.toLowerCase());
+      if (!matchingTab) {
+        return err(new ProtocolError(
+          `Tab '${input.tab}' not found on section '${sectionId}'.` +
+          (availableTabs.length > 0 ? ` Available tabs: ${availableTabs.join(', ')}.` : ' This section exposes no tabs.'),
+          { availableTabs, section: sectionId },
+        ));
       }
+      const tabFieldCaptions = new Set(matchingTab.fields.map(f => f.caption.toLowerCase()));
+      materialized = {
+        ...materialized,
+        fields: materialized.fields.filter(f => tabFieldCaptions.has(f.name.toLowerCase())),
+      };
     }
 
     if (input.group) {
-      materialized = filterFieldsByGroup(materialized, input.group);
+      const grouped = filterFieldsByGroup(materialized, input.group);
+      if (grouped.matched === 0) {
+        return err(new ProtocolError(
+          `Group '${input.group}' matched no field on section '${sectionId}'.` +
+          (grouped.availableGroups.length > 0
+            ? ` Available groups: ${grouped.availableGroups.join(', ')}.`
+            : ' This section exposes no field groups.'),
+          { availableGroups: grouped.availableGroups, section: sectionId },
+        ));
+      }
+      materialized = grouped.section;
     }
 
     if (input.columns && input.columns.length > 0) {
@@ -206,5 +259,23 @@ export class ReadDataOperation {
       activeFilters: [...ctx.activeFilters],
       ...(rowFilter ? { rowFilter } : {}),
     });
+  }
+
+  /** True when the named (or default) section resolves to a form with a repeater. */
+  private sectionHasRepeater(ctx: PageContext, sectionId?: string): boolean {
+    const resolved = resolveSection(ctx, sectionId, 'header');
+    return !('error' in resolved) && !!resolved.repeater;
+  }
+
+  /**
+   * The names a row filter may use for this section's columns: the display captions
+   * the rows are keyed by, plus binder-name aliases. Derived from the repeater's
+   * columns, so it is complete even when no rows are loaded.
+   */
+  private columnVocabulary(ctx: PageContext, sectionId?: string): { columns: string[]; aliases: Map<string, string> } {
+    const resolved = resolveSection(ctx, sectionId, 'header');
+    if ('error' in resolved || !resolved.repeater) return { columns: [], aliases: new Map() };
+    const binderToCaption = buildBinderToCaptionMap(repeaterColumnsToDto(resolved.repeater));
+    return { columns: [...binderToCaption.values()], aliases: binderToCaption };
   }
 }

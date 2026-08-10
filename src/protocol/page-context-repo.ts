@@ -6,8 +6,10 @@ import type { OpenFormFilter } from './filter-query.js';
 import type { FormState } from './form-state.js';
 import { FormProjection } from './form-state.js';
 import { SectionResolver } from './section-resolver.js';
+import type { SectionDescriptor } from './section-resolver.js';
 import { tryBuildFormTree } from './form-tree-builder.js';
-import { isLogicalFormNode } from './form-node.js';
+import { isFormHostNode, isLogicalFormNode } from './form-node.js';
+import { walkTree } from './form-tree-walk.js';
 import {
   fields as treeFields, repeaters as treeRepeaters,
 } from './form-views.js';
@@ -44,7 +46,16 @@ export class PageContextRepository {
   create(
     pageContextId: string,
     rootFormId: string,
-    options?: { isModal?: boolean; wizardState?: PageContext['wizardState']; activeFilters?: readonly OpenFormFilter[] },
+    options?: {
+      isModal?: boolean;
+      wizardState?: PageContext['wizardState'];
+      activeFilters?: readonly OpenFormFilter[];
+      /** Open parameters, persisted so a re-open can reproduce them exactly. */
+      pageId?: string;
+      tenantId?: string;
+      openMode?: PageContext['openMode'];
+      bookmark?: string;
+    },
   ): PageContext {
     const rootForm = this.formProjection.createInitial(rootFormId);
     const headerSection = this.sectionResolver.createHeaderSection(rootFormId);
@@ -61,11 +72,34 @@ export class PageContextRepository {
       isModal: options?.isModal ?? false,
       wizardState: options?.wizardState ?? null,
       activeFilters: options?.activeFilters ?? [],
+      ...(options?.pageId ? { pageId: options.pageId } : {}),
+      ...(options?.tenantId ? { tenantId: options.tenantId } : {}),
+      ...(options?.openMode ? { openMode: options.openMode } : {}),
+      ...(options?.bookmark ? { bookmark: options.bookmark } : {}),
     };
 
     this.pages.set(pageContextId, ctx);
     this.formIdIndex.set(rootFormId, pageContextId);
     return ctx;
+  }
+
+  /**
+   * Move an existing context to a different pageContextId, keeping its forms and
+   * sections. Used by the transactional re-open (`PageService.reopenWithFilters`),
+   * which materializes the filtered page under a temporary id FIRST and only
+   * adopts the caller's id once the new page is known to be good.
+   */
+  rekey(fromPageContextId: string, toPageContextId: string): PageContext | undefined {
+    const page = this.pages.get(fromPageContextId);
+    if (!page) return undefined;
+    if (fromPageContextId === toPageContextId) return page;
+    this.pages.delete(fromPageContextId);
+    const moved: PageContext = { ...page, pageContextId: toPageContextId };
+    this.pages.set(toPageContextId, moved);
+    for (const fId of moved.ownedFormIds) {
+      if (this.formIdIndex.get(fId) === fromPageContextId) this.formIdIndex.set(fId, toPageContextId);
+    }
+    return moved;
   }
 
   /**
@@ -123,17 +157,32 @@ export class PageContextRepository {
     if (!formId) return;
 
     // New child form: route by parentFormId (not indexed yet)
+    // New child form: route to whoever owns the PARENT form, not to the context the
+    // batch happens to be applied to. Same reasoning as the ownerless case below —
+    // after a drill-down the identical batch is applied to source and target, and
+    // force-routing put the target's factbox/subform into the source page too (and,
+    // being last-write-wins, stole its formId index entry).
     if (event.type === 'FormCreated' && event.parentFormId) {
-      const parentPcId = targetPcId ?? this.formIdIndex.get(event.parentFormId);
+      const parentPcId = this.formIdIndex.get(event.parentFormId)
+        ?? (this.ownsForm(targetPcId, event.parentFormId) ? targetPcId : undefined);
       if (parentPcId) {
         this.addChildForm(parentPcId, event);
       }
       return;
     }
 
-    // FormCreated for root form (no parentFormId): update existing form
+    // FormCreated for root form (no parentFormId): update existing form.
+    //
+    // targetPcId must NOT force-route here. An ownerless FormCreated in an event
+    // batch is very often a BRAND NEW page (drill-down target, "New" card, cue
+    // page) that BC delivered while the batch was being applied to the SOURCE
+    // context. Routing it into the source's updateRootForm overwrote the source
+    // page's pageType/caption with the new page's and left a stray FormState in
+    // its `forms` map that later stole cross-form-routed DataLoaded events.
+    // Only accept the event for a context that actually owns this formId.
     if (event.type === 'FormCreated' && !event.parentFormId) {
-      const pcId = targetPcId ?? this.formIdIndex.get(formId);
+      const indexedPcId = this.formIdIndex.get(formId);
+      const pcId = this.ownsForm(targetPcId, formId) ? targetPcId : indexedPcId;
       if (pcId) {
         this.updateRootForm(pcId, event);
       }
@@ -154,7 +203,7 @@ export class PageContextRepository {
     // child dialog opened over an existing page (route via ownerFormId, fall back
     // to targetPcId when an ownerless dialog arrives during the open invocation).
     if (event.type === 'DialogOpened') {
-      const directPcId = targetPcId ?? this.formIdIndex.get(formId);
+      const directPcId = this.ownsForm(targetPcId, formId) ? targetPcId : this.formIdIndex.get(formId);
       if (directPcId) {
         const page = this.pages.get(directPcId);
         if (page && page.rootFormId === formId) {
@@ -162,9 +211,13 @@ export class PageContextRepository {
           return;
         }
       }
-      const ownerPcId = event.ownerFormId
-        ? (targetPcId ?? this.formIdIndex.get(event.ownerFormId))
-        : targetPcId;
+      // Owner routing wins over the invocation's target context: the same event
+      // batch is applied to BOTH the source and the target context after a
+      // drill-down / action, and letting targetPcId override put one dialog in two
+      // contexts. Closing either page then sent CloseForm for it and left the other
+      // context holding a dead dialog entry.
+      const ownerIndexedPcId = event.ownerFormId ? this.formIdIndex.get(event.ownerFormId) : undefined;
+      const ownerPcId = ownerIndexedPcId ?? targetPcId;
       if (ownerPcId) {
         this.addDialog(ownerPcId, event);
       }
@@ -222,6 +275,32 @@ export class PageContextRepository {
     }
   }
 
+  /** True when `pcId` names a page that already owns `formId` (as root or child). */
+  private ownsForm(pcId: string | undefined, formId: string): pcId is string {
+    if (!pcId) return false;
+    const page = this.pages.get(pcId);
+    if (!page) return false;
+    return page.rootFormId === formId || page.forms.has(formId);
+  }
+
+  /**
+   * Is this child form a genuine SUBFORM (the document's lines) rather than a part?
+   * A `FormCreated` carries no IsSubForm flag, but the parent's control tree does:
+   * BC publishes the hosting `fhc` node with IsSubForm/IsPart. Look the child up
+   * there; when the parent has no such host node, assume "not a subform" — a part
+   * that merely contains a repeater must not turn the host page into a Document.
+   */
+  private isHostedSubForm(page: PageContext, parentFormId: string | undefined, childFormId: string): boolean {
+    const parentForm = page.forms.get(parentFormId ?? page.rootFormId) ?? page.forms.get(page.rootFormId);
+    if (!parentForm) return false;
+    for (const node of walkTree(parentForm.root)) {
+      if (isFormHostNode(node) && node.hostedFormServerId === childFormId) {
+        return node.hostedFormIsSubForm === true;
+      }
+    }
+    return false;
+  }
+
   private addChildForm(pcId: string, event: BCEvent & { type: 'FormCreated' }): void {
     const page = this.pages.get(pcId);
     if (!page) return;
@@ -234,8 +313,12 @@ export class PageContextRepository {
       root: tree,
     };
 
-    // Derive section
-    const section = this.sectionResolver.deriveSection(page, event.formId, event.controlTree);
+    // Derive section from the tree we JUST built (deriveSection would otherwise
+    // parse the same controlTree a second time).
+    const section = this.sectionResolver.deriveSection(page, event.formId, event.controlTree, {
+      isSubForm: this.isHostedSubForm(page, event.parentFormId, event.formId),
+      root: tree,
+    });
 
     // Update PageContext
     const forms = new Map(page.forms);
@@ -244,22 +327,30 @@ export class PageContextRepository {
     const sections = new Map(page.sections);
     sections.set(section.sectionId, section);
 
-    // Infer Document page type if we have a lines section
-    let pageType = page.pageType;
-    for (const s of sections.values()) {
-      if (s.kind === 'lines') { pageType = 'Document'; break; }
-    }
-
     this.pages.set(pcId, {
       ...page,
       forms,
       sections,
-      pageType,
+      pageType: this.inferPageType(page, sections),
       ownedFormIds: [...page.ownedFormIds, event.formId],
     });
 
     // Index the new formId AFTER creation
     this.formIdIndex.set(event.formId, pcId);
+  }
+
+  /**
+   * A page with a real lines subform is a Document — but only when BC has not
+   * already told us what the page is. The root form's own PageType is
+   * authoritative; overriding it from part shape made every Card that embeds a
+   * ListPart report itself as a Document.
+   */
+  private inferPageType(page: PageContext, sections: ReadonlyMap<string, SectionDescriptor>): PageContext['pageType'] {
+    if (page.pageType !== 'Unknown') return page.pageType;
+    for (const s of sections.values()) {
+      if (s.kind === 'lines') return 'Document';
+    }
+    return page.pageType;
   }
 
   private updateRootForm(pcId: string, event: BCEvent & { type: 'FormCreated' }): void {
@@ -325,36 +416,63 @@ export class PageContextRepository {
     // references for the life of the process (M12). The root form is left in
     // place — the page stays addressable until it is explicitly closed.
     const dialogs = page.dialogs.filter(d => d.formId !== formId);
-    const ownedFormIds = formId !== page.rootFormId
+    const isRoot = formId === page.rootFormId;
+    const ownedFormIds = !isRoot
       ? page.ownedFormIds.filter(f => f !== formId)
       : page.ownedFormIds;
-    if (formId !== page.rootFormId && this.formIdIndex.get(formId) === pcId) {
+    // Drop the dead FormState too. Leaving it in `forms` was the other half of the
+    // leak: findChildFormByRepeaterPath scans forms in insertion order and matches
+    // on a FORM-RELATIVE controlPath, so after BC closed and re-created a lines
+    // subform, every new DataLoaded folded into the dead copy and the live one
+    // stayed empty.
+    const forms = !isRoot && page.forms.has(formId)
+      ? new Map([...page.forms].filter(([fId]) => fId !== formId))
+      : page.forms;
+    if (!isRoot && this.formIdIndex.get(formId) === pcId) {
       this.formIdIndex.delete(formId);
     }
 
-    const pruned = dialogs.length !== page.dialogs.length || ownedFormIds.length !== page.ownedFormIds.length;
+    const pruned = dialogs.length !== page.dialogs.length
+      || ownedFormIds.length !== page.ownedFormIds.length
+      || forms !== page.forms;
     if (!changed && !pruned) return;
 
-    this.pages.set(pcId, { ...page, sections, dialogs, ownedFormIds });
+    this.pages.set(pcId, { ...page, sections, dialogs, ownedFormIds, forms });
   }
 
   private addDialog(pcId: string, event: BCEvent & { type: 'DialogOpened' }): void {
     const page = this.pages.get(pcId);
     if (!page) return;
 
-    this.pages.set(pcId, {
-      ...page,
-      dialogs: [...page.dialogs, { formId: event.formId, ownerFormId: event.ownerFormId, controlTree: event.controlTree }],
-      ownedFormIds: [...page.ownedFormIds, event.formId],
-    });
+    // Idempotent: the same DialogOpened can reach this page more than once (the
+    // event batch of an action is applied to several contexts). One formId must
+    // never produce two dialog entries / two ownedFormIds.
+    const dialogs = page.dialogs.some(d => d.formId === event.formId)
+      ? page.dialogs.map(d => (d.formId === event.formId
+        ? { formId: event.formId, ownerFormId: event.ownerFormId, controlTree: event.controlTree }
+        : d))
+      : [...page.dialogs, { formId: event.formId, ownerFormId: event.ownerFormId, controlTree: event.controlTree }];
+    const ownedFormIds = page.ownedFormIds.includes(event.formId)
+      ? page.ownedFormIds
+      : [...page.ownedFormIds, event.formId];
+
+    this.pages.set(pcId, { ...page, dialogs, ownedFormIds });
 
     this.formIdIndex.set(event.formId, pcId);
   }
 
-  /** Find a child form (not rootFormId) that has a repeater at the given controlPath. */
+  /**
+   * Find a child form (not rootFormId) that has a repeater at the given controlPath.
+   * Restricted to forms a CURRENTLY VALID section points at: controlPaths are
+   * form-relative and therefore collide across forms, so an unreferenced form is
+   * both unreachable by the caller and a magnet for other forms' row events.
+   */
   private findChildFormByRepeaterPath(page: PageContext, excludeFormId: string, controlPath: string): FormState | undefined {
-    for (const [fId, form] of page.forms) {
-      if (fId === excludeFormId) continue;
+    for (const [, section] of page.sections) {
+      if (!section.valid) continue;
+      if (section.formId === excludeFormId) continue;
+      const form = page.forms.get(section.formId);
+      if (!form) continue;
       if (treeRepeaters(form.root).has(controlPath)) return form;
     }
     return undefined;
@@ -386,10 +504,13 @@ export class PageContextRepository {
       ...(tree ? { root: tree } : {}),
     };
 
-    // Derive section: use IsSubForm to distinguish lines from factboxes
+    // Derive section: use IsSubForm to distinguish lines from parts. Both
+    // derivations live in SectionResolver so every sectionId in a context comes
+    // from the same uniqueness rule. The tree built above is reused (deriveSection
+    // would otherwise parse the same controlTree again).
     const section = child.isSubForm
-      ? this.sectionResolver.deriveSection(page, child.serverId, child.controlTree)
-      : this.deriveFactboxSection(page, child);
+      ? this.sectionResolver.deriveSection(page, child.serverId, child.controlTree, { isSubForm: true, root: tree })
+      : this.sectionResolver.deriveFactboxSection(page, child);
 
     const forms = new Map(page.forms);
     forms.set(child.serverId, childForm);
@@ -397,37 +518,15 @@ export class PageContextRepository {
     const sections = new Map(page.sections);
     sections.set(section.sectionId, section);
 
-    let pageType = page.pageType;
-    if (section.kind === 'lines') pageType = 'Document';
-
     this.pages.set(pcId, {
       ...page,
       forms,
       sections,
-      pageType,
+      pageType: this.inferPageType(page, sections),
       ownedFormIds: [...page.ownedFormIds, child.serverId],
     });
 
     this.formIdIndex.set(child.serverId, pcId);
-  }
-
-  private deriveFactboxSection(page: PageContext, child: DiscoveredChildForm) {
-    const caption = child.caption || 'FactBox';
-    const base = `factbox:${caption}`;
-    let sectionId = base;
-    if (page.sections.has(sectionId)) {
-      for (let i = 2; ; i++) {
-        sectionId = `${base}#${i}`;
-        if (!page.sections.has(sectionId)) break;
-      }
-    }
-    return {
-      sectionId,
-      kind: 'factbox' as const,
-      caption,
-      formId: child.serverId,
-      valid: true,
-    };
   }
 
   remove(pageContextId: string): void {

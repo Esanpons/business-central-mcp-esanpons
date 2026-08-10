@@ -169,7 +169,7 @@ export async function createHarness(env: EnvName, options: HarnessOptions = {}):
       closePage: new ClosePageOperation(page),
       searchPages: new SearchPagesOperation(search),
       navigate: new NavigateOperation(navigation),
-      respondDialog: new RespondDialogOperation(session, repo),
+      respondDialog: new RespondDialogOperation(session, repo, logger),
       switchCompany: new SwitchCompanyOperation(session, repo, logger),
       listCompanies: new ListCompaniesOperation(page, data, () => session.companyName, logger),
       runReport: new RunReportOperation(session),

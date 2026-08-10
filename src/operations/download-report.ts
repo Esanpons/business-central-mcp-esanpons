@@ -36,12 +36,11 @@ export class DownloadReportOperation {
       format: input.format,
     };
     try {
-      const r = await this.service.download(dlInput);
-      if (!r.downloaded && r.requestPageShown) {
-        // Not an error: BC needs parameters. Tell the caller how to proceed.
-        return ok(r);
-      }
-      return ok(r);
+      // A result with downloaded:false is NOT an error: BC is waiting for parameters
+      // or the requested format is not on offer. The service explains it in `note`
+      // (plus filtersApplied / parametersApplied / availableFormats), so the caller
+      // gets an actionable success rather than an opaque failure.
+      return ok(await this.service.download(dlInput));
     } catch (e) {
       return err(new ProtocolError(e instanceof Error ? e.message : String(e), undefined, 'REPORT_DOWNLOAD_ERROR'));
     }

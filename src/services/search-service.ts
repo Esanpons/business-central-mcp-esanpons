@@ -49,55 +49,62 @@ export class SearchService {
 
     const tellMeFormId = tellMeForm.formId;
 
-    // SaveValue against the actual sc input at server:c[0]/c[0], NOT the gc
-    // container at server:c[0]. Verified via live capture (BC28): only the
-    // nested path triggers the DataLoaded result stream. The root cause of
-    // limits.md #5's empty-result symptom on certain envs.
+    // Once the form exists it MUST be closed on every exit path. The close used to
+    // sit on the happy path only, so any transient error left the form in
+    // session.openFormIds — re-sent in every later request's openFormIds, which is
+    // exactly the server-side form growth the close was added to prevent.
+    try {
+      // SaveValue against the actual sc input at server:c[0]/c[0], NOT the gc
+      // container at server:c[0]. Verified via live capture (BC28): only the
+      // nested path triggers the DataLoaded result stream. The root cause of
+      // limits.md #5's empty-result symptom on certain envs.
 
-    // Step 2: SaveValue with empty string (initialize)
-    const initSave: SaveValueInteraction = {
-      type: 'SaveValue',
-      formId: tellMeFormId,
-      controlPath: 'server:c[0]/c[0]',
-      newValue: '',
-    };
+      // Step 2: SaveValue with empty string (initialize)
+      const initSave: SaveValueInteraction = {
+        type: 'SaveValue',
+        formId: tellMeFormId,
+        controlPath: 'server:c[0]/c[0]',
+        newValue: '',
+      };
 
-    const initResult = await this.session.invoke(
-      initSave,
-      (event) => event.type === 'InvokeCompleted',
-    );
+      const initResult = await this.session.invoke(
+        initSave,
+        (event) => event.type === 'InvokeCompleted',
+      );
 
-    if (isErr(initResult)) return initResult;
+      if (isErr(initResult)) return initResult;
 
-    // Step 3: SaveValue with the actual query
-    const querySave: SaveValueInteraction = {
-      type: 'SaveValue',
-      formId: tellMeFormId,
-      controlPath: 'server:c[0]/c[0]',
-      newValue: query,
-    };
+      // Step 3: SaveValue with the actual query
+      const querySave: SaveValueInteraction = {
+        type: 'SaveValue',
+        formId: tellMeFormId,
+        controlPath: 'server:c[0]/c[0]',
+        newValue: query,
+      };
 
-    const queryResult = await this.session.invoke(
-      querySave,
-      (event) => event.type === 'DataLoaded' || event.type === 'InvokeCompleted',
-    );
+      const queryResult = await this.session.invoke(
+        querySave,
+        (event) => event.type === 'DataLoaded' || event.type === 'InvokeCompleted',
+      );
 
-    if (isErr(queryResult)) return queryResult;
+      if (isErr(queryResult)) return queryResult;
 
-    // Extract search results from DataLoaded events
-    const results = extractTellMeResults(queryResult.value);
+      // Extract search results from DataLoaded events
+      const results = extractTellMeResults(queryResult.value);
 
-    // Close the Tell Me form. Without this it leaks into session.openFormIds and
-    // is re-sent in every subsequent request's openFormIds, growing server-side
-    // form state on each search. Best-effort: a close failure must not fail the
-    // search that already succeeded.
-    await this.session.invoke(
-      { type: 'CloseForm', formId: tellMeFormId },
-      (event) => event.type === 'InvokeCompleted',
-    );
-    this.session.removeOpenForm(tellMeFormId);
-
-    this.logger.info(`Search "${query}": ${results.length} results`);
-    return ok(results);
+      this.logger.info(`Search "${query}": ${results.length} results`);
+      return ok(results);
+    } finally {
+      // Best-effort: a close failure must not fail (or mask) the search outcome.
+      try {
+        await this.session.invoke(
+          { type: 'CloseForm', formId: tellMeFormId },
+          (event) => event.type === 'InvokeCompleted',
+        );
+      } catch (e) {
+        this.logger.warn(`[search] closing the Tell Me form failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      this.session.removeOpenForm(tellMeFormId);
+    }
   }
 }

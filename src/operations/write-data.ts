@@ -55,11 +55,13 @@ export class WriteDataOperation {
 
     return ok({
       results,
-      // A write only "succeeds" if the interaction completed AND the value
-      // actually moved. `changed === false` is a no-op (rejected/reverted/not
-      // editable) and must not be reported as success (P6). `changed`
-      // undefined (line cells) is treated as success-by-interaction.
-      allSucceeded: results.every(r => r.success && r.changed !== false),
+      // A write only "succeeds" if the interaction completed AND the field ended up
+      // holding what was asked. `changed === false` is a no-op (rejected/reverted/not
+      // editable) and must not be reported as success (P6) — EXCEPT for
+      // `reason: 'already set'`, where the field already held the requested value:
+      // nothing moved because nothing needed to. `changed` undefined is
+      // success-by-interaction (line cells, and writes BC did not echo).
+      allSucceeded: results.every(r => r.success && (r.changed !== false || r.reason === 'already set')),
       changedSections,
       dialogsOpened,
       requiresDialogResponse: dialogsOpened.length > 0,

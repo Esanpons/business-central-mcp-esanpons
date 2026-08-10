@@ -4,6 +4,7 @@ export type BCEvent =
   | FormCreatedEvent
   | FormClosedEvent
   | DialogOpenedEvent
+  | MessageToShowEvent
   | DataLoadedEvent
   | PropertyChangedEvent
   | BookmarkChangedEvent
@@ -14,6 +15,12 @@ export interface FormCreatedEvent {
   readonly type: 'FormCreated';
   readonly formId: string;
   readonly parentFormId?: string;
+  /**
+   * True when BC re-publishes the control tree of an already-open form
+   * (FormToShow with IsReload). DELIBERATE: on reload the projection keeps the
+   * existing rows map — BC re-sends row data as separate DataLoaded events, and
+   * discarding the map here would blank the repeater until they arrive.
+   */
   readonly isReload?: boolean;
   readonly controlTree: unknown;
 }
@@ -28,6 +35,37 @@ export interface DialogOpenedEvent {
   readonly formId: string;
   readonly ownerFormId?: string;
   readonly controlTree: unknown;
+}
+
+/**
+ * Non-modal toast message raised by BC's AL `Message()` / license-expiry
+ * warning / other non-blocking session notifications. Previously these were
+ * silently dropped by the decoder.
+ *
+ * Wire: DN.LogicalClientEventRaisingHandler, params[0]="MessageToShow",
+ * params[1] = { Text, Type?, Actions?, DefaultAction?, AutomationId? }.
+ *
+ * Type values (MessageFormIcon): None | Warning | Info | Error | Fatal |
+ * Confirm | Permission — serialised as the enum name string.
+ *
+ * Reference: LogicalMessageSerializer.Write() and
+ * UISessionObserver.UiSessionMessageToShow() in decompiled
+ * Microsoft.Dynamics.Framework.UI.Client / .Web (upstream); ported from
+ * upstream's event decoder, which maps Error/Fatal severities to business
+ * errors in its error taxonomy.
+ */
+export interface MessageToShowEvent {
+  readonly type: 'MessageToShow';
+  /** Always empty string — MessageToShow is a session-level event, not form-scoped. */
+  readonly formId: '';
+  readonly text: string;
+  /** Serialised MessageFormIcon enum name. Defaults to "None" when absent on wire. */
+  readonly messageType: 'None' | 'Warning' | 'Info' | 'Error' | 'Fatal' | 'Confirm' | 'Permission';
+  /** Available response actions. Defaults to ["Ok"] when omitted on wire. */
+  readonly actions: readonly string[];
+  /** Default action name. Defaults to "Ok" when omitted on wire. */
+  readonly defaultAction: string;
+  readonly automationId?: string;
 }
 
 export interface DataLoadedEvent {
@@ -154,7 +192,11 @@ export const SystemAction = {
   None: 0, New: 10, Delete: 20, Refresh: 30, Edit: 40,
   EditList: 50, View: 60, ViewList: 70, OpenFullList: 80,
   AssistEdit: 100, Lookup: 110, DrillDown: 120,
-  PageSearch: 220,
+  // RunReport=210 (report execution), PageSearch=220 (Tell Me),
+  // ChangeCompany=500 (company switch) — decompiled SystemAction.cs (BC27/BC28,
+  // identical). Already used by callers as raw numbers; exported here so
+  // consumers can reference the named constants.
+  RunReport: 210, PageSearch: 220, ChangeCompany: 500,
   Ok: 300, Cancel: 310, Abort: 320,
   LookupOk: 330, LookupCancel: 340,
   // Reference: decompiled `Microsoft.Dynamics.Framework.UI.Client.SystemAction.cs`
@@ -247,6 +289,15 @@ export interface ControlField {
   readonly isLookup?: boolean;        // true if field has AssistEditAction or LookupAction
   readonly showMandatory?: boolean;   // true if field is marked as mandatory in BC
   /**
+   * Valid choices of an option/enum/boolean field, in BC's own order. Present
+   * only for controls that publish them. Without this a caller has to GUESS the
+   * accepted text of an option field and discover the rejection through
+   * `changed:false`; with it the write can be made correct the first time.
+   */
+  readonly options?: readonly string[];
+  /** The currently selected entry of `options` (BC's CurrentIndex resolved to its text). */
+  readonly selectedOption?: string;
+  /**
    * controlPaths of every gc ancestor between the form root (`server:`) and
    * this field's immediate parent gc, in root → leaf order. Empty for fields
    * that hang directly off the form root with no group container.
@@ -322,14 +373,6 @@ export interface WizardState {
   readonly currentStepIndex: number;
 }
 
-export enum ControlContainerType {
-  ContentArea = 0,
-  FactBoxArea = 1,
-  RoleCenterArea = 2,
-  RequestPageFilters = 3,
-  DetailsArea = 4,
-}
-
 export interface ChildFormInfo {
   readonly formId: string;
   readonly caption: string;
@@ -349,10 +392,30 @@ import {
   fields as treeFields, actions as treeActions,
   repeaters as treeRepeaters, filterControlPath as treeFilter,
 } from './form-views.js';
+import { ancestorGroupPaths as treeAncestorGroupPaths } from './form-tree-walk.js';
 
 /**
- * DEPRECATED: Use PageContext for new code.
- * Converts a PageContext back to a PageState for consumers that haven't been migrated yet.
+ * DEPRECATED — do NOT build new features on this. Consumed only by the
+ * integration tests, which is the sole reason it still exists.
+ *
+ * Converts a PageContext back to the legacy PageState shape. It is a DEGRADED
+ * view of the real MCP adapters (`mcp-adapters.ts` / `section-dto.ts`), and the
+ * gaps are silent — the DTOs look complete but are not:
+ *
+ *  - only the FIRST repeater of the ROOT form is surfaced; document pages with
+ *    both a header and a lines repeater lose one of them;
+ *  - `childForms[].caption` is always `''` (the caption lives on the hosting
+ *    `fhc` node, which this function does not consult);
+ *  - action DTOs omit `wizardNav` — a NavigatePage's back/next/finish roles are
+ *    not classified here;
+ *  - `visible` is the control's OWN flag only. It is NOT combined with ancestor
+ *    group visibility or wizard-step state, so `isEffectivelyVisible`
+ *    (protocol/visibility.ts) can disagree with it;
+ *  - repeater rows keep their RAW `ColumnBinder` cell keys (no caption mapping).
+ *
+ * Fields that CAN be derived honestly are derived honestly: `ancestorGroupPaths`
+ * comes from the tree walk, and `isLookup` / `showMandatory` are carried through
+ * from the FieldNode.
  */
 export function derivePageState(ctx: PageContext): PageState {
   const rootForm = ctx.forms.get(ctx.rootFormId);
@@ -370,7 +433,9 @@ export function derivePageState(ctx: PageContext): PageState {
       stringValue: f.properties.stringValue,
       value: f.properties.objectValue ?? f.properties.stringValue,
       columnBinderName: f.columnBinder?.name,
-      ancestorGroupPaths: [],
+      isLookup: f.hasLookup,
+      showMandatory: f.properties.showMandatory,
+      ancestorGroupPaths: treeAncestorGroupPaths(rootForm.root, f.controlPath),
     })) : [],
     repeater: rep,
     filterControlPath: rootForm ? treeFilter(rootForm.root) : null,

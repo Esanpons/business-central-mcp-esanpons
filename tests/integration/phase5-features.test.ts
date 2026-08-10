@@ -12,8 +12,6 @@ import { BCSession } from '../../src/session/bc-session.js';
 import { PageService } from '../../src/services/page-service.js';
 import { DataService } from '../../src/services/data-service.js';
 import { isOk, isErr, unwrap } from '../../src/core/result.js';
-import { validatePageContextId } from '../../src/mcp/page-context-validator.js';
-import { InputValidationError } from '../../src/core/errors.js';
 import type { BCEvent, InvokeActionInteraction } from '../../src/protocol/types.js';
 import { SystemAction } from '../../src/protocol/types.js';
 
@@ -172,58 +170,32 @@ describe('Phase 5 features (integration)', () => {
     }
   });
 
-  it('stale page context -- validatePageContextId throws with helpful message', async () => {
+  // The old version of this test exercised src/mcp/page-context-validator.ts, which
+  // had ZERO production callers: every operation standardized on
+  // `repo.get(...) ?? repo.notFoundError(...)`, which duplicated its message. The
+  // module is gone; this covers the mechanism that actually runs.
+  it('stale page context -- repo.notFoundError explains what is open', async () => {
     // Use a fresh repo to avoid any state from previous tests
     const freshRepo = new PageContextRepository();
 
-    // Test 1: Bogus ID on empty repo
-    expect(() => {
-      validatePageContextId(freshRepo, 'bogus:nonexistent:id');
-    }).toThrow(InputValidationError);
+    // Bogus ID on empty repo
+    expect(freshRepo.get('bogus:nonexistent:id')).toBeUndefined();
+    const emptyErr = freshRepo.notFoundError('bogus:nonexistent:id');
+    expect(emptyErr.message).toContain('Page context not found');
+    expect(emptyErr.message).toContain('none are open');
 
-    try {
-      validatePageContextId(freshRepo, 'bogus:nonexistent:id');
-    } catch (e) {
-      if (e instanceof InputValidationError) {
-        console.error(`[TEST] Empty repo error: ${e.message}`);
-        expect(e.message).toContain('does not exist');
-        expect(e.message).toContain('No pages are currently open');
-      }
-    }
-
-    // Test 2: Create a context, remove it, then validate -- simulates stale ID
+    // Create a context, remove it, then look it up -- simulates a stale ID
     const ctx = freshRepo.create('test:page:42:abc', 'form-123');
-    expect(validatePageContextId(freshRepo, 'test:page:42:abc')).toBe(ctx);
-    console.error('[TEST] Valid context returned successfully');
+    expect(freshRepo.get('test:page:42:abc')).toBe(ctx);
 
-    // Now remove it (simulating closePage)
     freshRepo.remove('test:page:42:abc');
-    console.error('[TEST] Context removed, repo size:', freshRepo.size);
+    expect(freshRepo.get('test:page:42:abc')).toBeUndefined();
 
-    expect(() => {
-      validatePageContextId(freshRepo, 'test:page:42:abc');
-    }).toThrow(InputValidationError);
-
-    try {
-      validatePageContextId(freshRepo, 'test:page:42:abc');
-    } catch (e) {
-      if (e instanceof InputValidationError) {
-        console.error(`[TEST] Stale ID error: ${e.message}`);
-        expect(e.message).toContain('does not exist');
-        expect(e.message).toContain('No pages are currently open');
-      }
-    }
-
-    // Test 3: With another page still open -- error should list it
+    // With another page still open -- the error must list it so the caller can recover
     freshRepo.create('test:page:99:xyz', 'form-456');
-    try {
-      validatePageContextId(freshRepo, 'test:page:42:abc');
-    } catch (e) {
-      if (e instanceof InputValidationError) {
-        console.error(`[TEST] Stale ID with other page open: ${e.message}`);
-        expect(e.message).toContain('does not exist');
-        expect(e.message).toContain('test:page:99:xyz');
-      }
-    }
+    const staleErr = freshRepo.notFoundError('test:page:42:abc');
+    expect(staleErr.message).toContain('Page context not found');
+    expect(staleErr.message).toContain('test:page:99:xyz');
+    expect((staleErr.context as { availablePageContexts?: unknown[] }).availablePageContexts).toHaveLength(1);
   });
 });

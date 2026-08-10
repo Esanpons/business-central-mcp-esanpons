@@ -63,6 +63,13 @@ export class AADBrowserAuthProvider implements IBCAuthProvider {
   // Keeping the browser (and thus the tab) alive makes the WS upgrade reliable.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private browser: any = null;
+  /**
+   * In-flight close() of a previously kept-alive browser. `invalidate()` is
+   * synchronous, so it can only START the close; launching a new persistent
+   * browser before that finishes races on the profile-dir lock and fails with
+   * "profile appears to be in use". `authenticateHeadless` awaits this first.
+   */
+  private closing: Promise<void> | null = null;
 
   constructor(
     private readonly config: AADProviderConfig,
@@ -86,9 +93,18 @@ export class AADBrowserAuthProvider implements IBCAuthProvider {
     // Close any browser kept from a previous authenticate() before opening a new one
     // (recovery re-auth) so we never leak headless browsers.
     if (this.browser) { await this.browser.close().catch(() => undefined); this.browser = null; }
+    // A close() started by invalidate() may still be running; launching on the same
+    // profile dir before it completes fails on the profile lock.
+    if (this.closing) { await this.closing.catch(() => undefined); this.closing = null; }
     // puppeteer Browser is typed `any` throughout this codebase (browser.ts).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let browser: any;
+    // Set only on the success path that intentionally keeps the browser open; the
+    // finally below closes the browser in EVERY other case. Without it the three
+    // mid-function `return err(...)` paths leaked a headless Chrome that kept the
+    // profile-dir lock, so the NEXT launchPersistent failed too -- turning a
+    // recoverable auth error into a permanent failure across all backoff retries.
+    let keptAlive = false;
     try {
       browser = await launchPersistent(this.config.profileDir, { headless });
       const pages = await browser.pages();
@@ -96,19 +112,26 @@ export class AADBrowserAuthProvider implements IBCAuthProvider {
       const page: any = pages[0] ?? (await browser.newPage());
       const cdp = await page.target().createCDPSession();
 
-      // Capture the SaaS WS URL the SPA opens (inside a Web Worker) — attach to
-      // every target and enable Network so worker webSocketCreated is seen.
+      // Capture the SaaS WS URL the SPA opens. Today's BC client creates it inside
+      // a Web Worker, so we attach to every target and enable Network there. But
+      // relying ONLY on auto-attached targets means a build that opens /csh from
+      // the MAIN thread is never seen, and auth fails with "WebSocket URL was not
+      // observed" despite a perfectly good login. So the page's own CDP session
+      // listens too — whichever fires first wins.
       let capturedWsUrl: string | null = null;
+      const noteWsUrl = (url: string): void => {
+        if (!capturedWsUrl && /\/csh(\?|$)/.test(url)) capturedWsUrl = url;
+      };
       const conn = cdp.connection();
+      await cdp.send('Network.enable').catch(() => undefined);
+      cdp.on('Network.webSocketCreated', (w: { url: string }) => noteWsUrl(w.url));
       await cdp.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
       cdp.on('Target.attachedToTarget', async (e: { sessionId: string }) => {
         try {
           const s = conn.session(e.sessionId);
           if (!s) return;
           await s.send('Network.enable').catch(() => undefined);
-          s.on('Network.webSocketCreated', (w: { url: string }) => {
-            if (!capturedWsUrl && /\/csh\?/.test(w.url)) capturedWsUrl = w.url;
-          });
+          s.on('Network.webSocketCreated', (w: { url: string }) => noteWsUrl(w.url));
           await s.send('Runtime.runIfWaitingForDebugger').catch(() => undefined);
         } catch { /* target gone */ }
       });
@@ -185,16 +208,16 @@ export class AADBrowserAuthProvider implements IBCAuthProvider {
         // Keep the browser (and its tab session) alive so the Node WS upgrade to
         // that tab succeeds. Closed on invalidate()/recovery.
         this.browser = browser;
-      } else {
-        await browser.close().catch(() => undefined);
+        keptAlive = true;
       }
       return ok({ cookies: this.wsCookieHeader, csrfToken: this.csrfToken, cookieJar: this.cookieJar });
     } catch (e) {
-      await browser?.close().catch(() => undefined);
       return err(new AuthenticationError(
         `AAD authentication failed: ${e instanceof Error ? e.message : String(e)}`,
         { baseUrl: this.config.baseUrl, username: this.config.username },
       ));
+    } finally {
+      if (!keptAlive) await browser?.close().catch(() => undefined);
     }
   }
 
@@ -319,6 +342,11 @@ export class AADBrowserAuthProvider implements IBCAuthProvider {
     return this.backendTenant;
   }
 
+  /** SaaS binds the tenant at session open; `&tenant=` in a query is rejected. */
+  omitsTenantInQueries(): boolean {
+    return true;
+  }
+
   getCookieJar(): RawCookie[] {
     return this.cookieJar;
   }
@@ -337,8 +365,15 @@ export class AADBrowserAuthProvider implements IBCAuthProvider {
     this.csrfToken = '';
     this.cookieJar = [];
     // Tear down the kept-alive browser (and its tab session). authenticate() will
-    // open a fresh one. Fire-and-forget so invalidate() stays synchronous.
-    if (this.browser) { const b = this.browser; this.browser = null; b.close().catch(() => undefined); }
+    // open a fresh one. invalidate() must stay synchronous, so RETAIN the close
+    // promise instead of dropping it: the next authenticate() awaits it before
+    // calling launchPersistent, otherwise both processes fight over the same
+    // profile-dir lock and the relaunch fails.
+    if (this.browser) {
+      const b = this.browser;
+      this.browser = null;
+      this.closing = Promise.resolve(b.close()).then(() => undefined, () => undefined);
+    }
     this.logger.info('[aad] auth state invalidated; next connection will re-discover (persistent profile retained)');
   }
 }

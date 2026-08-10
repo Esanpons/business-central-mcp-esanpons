@@ -55,6 +55,29 @@ describe('loadConfig', () => {
     expect(loadConfig().bc.baseUrl).toBe('http://test/BC');
   });
 
+  it('rejects a BC_BASE_URL that is not an absolute URL', () => {
+    // Without this check the value only fails much later, at the WebSocket
+    // upgrade, with a message that never names the env var.
+    process.env.BC_BASE_URL = 'devel1/BC';
+    expect(() => loadConfig()).toThrow('BC_BASE_URL must be an absolute URL');
+  });
+
+  it('rejects a non-http(s) BC_BASE_URL', () => {
+    process.env.BC_BASE_URL = 'ftp://devel1/BC';
+    expect(() => loadConfig()).toThrow('BC_BASE_URL must use http:// or https://');
+  });
+
+  it('accepts https with a non-default port', () => {
+    process.env.BC_BASE_URL = 'https://devel1:8443/BC';
+    expect(loadConfig().bc.baseUrl).toBe('https://devel1:8443/BC');
+  });
+
+  it('BC_TLS_INSECURE defaults to false and is opt-in', () => {
+    expect(loadConfig().bc.tlsInsecure).toBe(false);
+    process.env.BC_TLS_INSECURE = '1';
+    expect(loadConfig().bc.tlsInsecure).toBe(true);
+  });
+
   it('overrides optional values from env', () => {
     process.env.BC_TENANT_ID = 'custom';
     process.env.PORT = '4000';

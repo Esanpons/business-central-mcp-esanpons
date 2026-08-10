@@ -28,7 +28,7 @@ Returns a `WriteDataOutput` object (`src/operations/write-data.ts`):
 | Field | Type | Description |
 |-------|------|-------------|
 | `results` | `FieldWriteResult[]` | One entry per field written, in input order. |
-| `allSucceeded` | `boolean` | True only if every result has `success === true` AND `changed !== false`. A no-op write (`changed === false`) does NOT count as success (P6). `changed === undefined` (line-cell writes) is treated as success-by-interaction. |
+| `allSucceeded` | `boolean` | True only if every result has `success === true` AND `changed !== false`. A no-op write (`changed === false`) does NOT count as success (P6) — EXCEPT an idempotent one (`reason: "already set"`), which is success: the field holds the value you asked for. `changed === undefined` (line-cell and `unverified` writes) is treated as success-by-interaction. |
 | `changedSections` | `string[]` | Section IDs whose form received events. If the root form was touched, all sections are listed (root events cascade to lines). |
 | `dialogsOpened` | `Array<{ formId: string; message?: string; fields?: ControlField[] }>` | Dialogs BC raised in response (e.g. confirmation prompts, validation warnings). `message` is pulled from the dialog's Caption/Message; `fields` are the dialog's structured controls when present. |
 | `requiresDialogResponse` | `boolean` | True when `dialogsOpened` is non-empty — you must follow up with `bc_respond_dialog` before continuing. |
@@ -42,7 +42,8 @@ Each `FieldWriteResult` (`src/services/data-service.ts`):
 | `success` | `boolean` | True when the `SaveValue` interaction completed without a protocol error. Does NOT mean the value stuck — check `changed`. |
 | `requested` | `string?` | The value the caller asked to write. |
 | `changed` | `boolean?` | True when the field value actually moved (compared against the PRE-write value, so a BC-reformatted value still counts). False = no-op (rejected/reverted or not editable). Undefined for line-cell writes (effect not re-read). |
-| `reason` | `'not editable' \| 'validation reverted' \| 'control not found'` (optional) | Why a no-op happened. Set only when `changed === false`, or `'control not found'` on a not-found error. |
+| `validationMessage` | `string` (optional) | **BC's own explanation when it refused the value**, taken from the `ValidationResults` it echoes on the control — e.g. `"Sale must be equal to 'Yes' in Item: No.=0000001. The current value is 'No'."`. Present with `reason: "validation error"`. This is usually the single most actionable thing in the response: it names the business rule that blocked the write, so the caller can pick a different value instead of guessing. |
+| `reason` | `'not editable' \| 'validation reverted' \| 'already set' \| 'unverified' \| 'validation error' \| 'control not found'` (optional) | Why `changed` is not a plain `true`. `'validation error'` = BC rejected the value and said why (see `validationMessage`). `'already set'` = the field ALREADY held the requested value, so nothing moved and nothing is wrong — it counts as success in `allSucceeded`, and retrying it is pointless. `'unverified'` = BC echoed nothing and the projection did not pick the value up either, so the write cannot be confirmed either way (`changed` is undefined and `newValue` is omitted rather than parroting back what you asked for). `'not editable'` / `'validation reverted'` are real no-ops. |
 | `newValue` | `string?` | The server-confirmed value after the write (may differ from `requested`). |
 | `error` | `string?` | Error message when `success` is false (e.g. field/column not found). |
 | `events` | `BCEvent[]?` | Raw BC events produced by this write. |

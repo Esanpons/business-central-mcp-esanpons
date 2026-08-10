@@ -159,4 +159,16 @@ describe('detectDialogs', () => {
     expect(dialogs).toHaveLength(1);
     expect(dialogs[0]!.fields).toBeUndefined();
   });
+
+  it('only surfaces a message when Caption/Message really is a non-empty string', () => {
+    // These were cast to `string`, so a structured Caption reached the caller as
+    // "[object Object]" and an empty one as "".
+    const events: BCEvent[] = [
+      { type: 'DialogOpened', formId: 'd1', controlTree: { Caption: { Text: 'x' }, Message: 'Real message' } },
+      { type: 'DialogOpened', formId: 'd2', controlTree: { Caption: '   ', Message: 'Fallback' } },
+      { type: 'DialogOpened', formId: 'd3', controlTree: { Caption: 42 } },
+    ];
+    const dialogs = detectDialogs(events);
+    expect(dialogs.map(d => d.message)).toEqual(['Real message', 'Fallback', undefined]);
+  });
 });

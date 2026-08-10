@@ -1,5 +1,5 @@
 // src/protocol/form-tree-walk.ts
-import { childrenOf, isGroupNode, isFieldNode, type FormNode } from './form-node.js';
+import { childrenOf, isGroupNode, isFieldNode, isRepeaterNode, type FormNode } from './form-node.js';
 
 // BC auto-names anonymous group() containers as "Control<NN>" when the AL source
 // gives them no caption. Such a caption is useless for disambiguation, so we
@@ -7,11 +7,23 @@ import { childrenOf, isGroupNode, isFieldNode, type FormNode } from './form-node
 // selector instead (the Sell-to / Bill-to / Ship-to idiom).
 const AUTO_GROUP_NAME = /^control\d+$/i;
 
-/** Pre-order traversal of the tree, yielding every node including the root. */
+/**
+ * Pre-order traversal of the tree, yielding every node including the root.
+ *
+ * Also yields a RepeaterNode's `headerActions` (the `ha[N]` row-scoped actions),
+ * which live outside `children` — otherwise they would be invisible to the
+ * `actions()` view. RepeaterNode `columns` are still deliberately NOT walked
+ * (they are header metadata, not controls); use `buildPathIndex` for those.
+ */
 export function* walkTree(root: FormNode): Generator<FormNode> {
   yield root;
   for (const child of childrenOf(root)) {
     yield* walkTree(child);
+  }
+  if (isRepeaterNode(root)) {
+    for (const action of root.headerActions) {
+      yield* walkTree(action);
+    }
   }
 }
 
@@ -39,13 +51,22 @@ export function parentOf(root: FormNode, controlPath: string): { parent: FormNod
 }
 
 /** Returns the chain of ancestors from root down to (but not including) the
- * target node, in document order. Empty when the target is the root or absent. */
+ * target node, in document order. Empty when the target is the root or absent.
+ *
+ * Descends into a repeater's `headerActions` as well, so an `ha[N]` action
+ * inherits the enclosing groups' visibility like any other control. */
 export function ancestorsOf(root: FormNode, controlPath: string): readonly FormNode[] {
   function visit(node: FormNode, trail: FormNode[]): readonly FormNode[] | undefined {
     if (node.controlPath === controlPath) return trail;
     for (const child of childrenOf(node)) {
       const found = visit(child, [...trail, node]);
       if (found) return found;
+    }
+    if (isRepeaterNode(node)) {
+      for (const action of node.headerActions) {
+        const found = visit(action, [...trail, node]);
+        if (found) return found;
+      }
     }
     return undefined;
   }

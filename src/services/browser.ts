@@ -6,15 +6,40 @@ import { existsSync } from 'node:fs';
  * manual layout verifier. Lazy-imports puppeteer-core so it never affects server startup.
  */
 
-const CHROME_CANDIDATES = [
-  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-  'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-  'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-  '/usr/bin/google-chrome',
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-];
+/**
+ * Browser executables to probe, in preference order. Exported for the unit test:
+ * a missing candidate is invisible until a user's machine has no browser where we
+ * looked, and the failure ("No Chrome/Edge found") gives no hint that the browser
+ * IS installed, just somewhere else.
+ */
+export function chromeCandidates(): string[] {
+  // Per-user Chrome installs (no admin rights) land under %LOCALAPPDATA%.
+  const localAppData = process.env.LOCALAPPDATA;
+  return [
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    ...(localAppData ? [`${localAppData}\\Google\\Chrome\\Application\\chrome.exe`] : []),
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  ];
+}
+
+/**
+ * Whether the out-of-band browser should accept a self-signed BC certificate.
+ *
+ * `BC_TLS_INSECURE=1` is the scoped switch (it also drives the WebSocket upgrade and
+ * the forms /SignIn fetches); `NODE_TLS_REJECT_UNAUTHORIZED=0` is the older global
+ * one and still works, so an existing devel1 setup needs no change. Without this the
+ * browser leg was the one place that ONLY honored the global variable, so switching
+ * to the scoped flag silently broke screenshots and report downloads.
+ */
+function tlsIsInsecure(): boolean {
+  return process.env.BC_TLS_INSECURE === '1' || process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0';
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let puppeteerMod: any = null;
@@ -37,7 +62,7 @@ export function resolveChrome(): string {
     if (!existsSync(override)) throw new Error(`BC_SCREENSHOT_CHROME points to a missing file: ${override}`);
     return override;
   }
-  const found = CHROME_CANDIDATES.find((c) => existsSync(c));
+  const found = chromeCandidates().find((c) => existsSync(c));
   if (!found) {
     throw new Error('No Chrome/Edge found. Install Chrome or set BC_SCREENSHOT_CHROME to the browser executable path.');
   }
@@ -48,7 +73,7 @@ export function resolveChrome(): string {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function launchHeadless(): Promise<any> {
   const puppeteer = await loadPuppeteer();
-  const ignoreTls = process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0';
+  const ignoreTls = tlsIsInsecure();
   return puppeteer.launch({
     executablePath: resolveChrome(),
     headless: true,
@@ -67,7 +92,7 @@ export async function launchHeadless(): Promise<any> {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function launchPersistent(userDataDir: string, opts?: { headless?: boolean }): Promise<any> {
   const puppeteer = await loadPuppeteer();
-  const ignoreTls = process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0';
+  const ignoreTls = tlsIsInsecure();
   return puppeteer.launch({
     executablePath: resolveChrome(),
     headless: opts?.headless ?? true,

@@ -48,6 +48,15 @@ describe('matchesFilterValue', () => {
     // number formatting: BC displays thousands separators
     ['1.234,56', '>1000', true, 'es-style formatted number parses'],
     ['1,234.56', '>1000', true, 'en-style formatted number parses'],
+
+    // wildcard sentinels must not collide with literal text (the old ' STAR ' /
+    // ' ANY ' placeholders rewrote these patterns into `.*` and matched anything)
+    ['ROCK STAR BAND', '*ROCK STAR BAND*', true, 'literal " STAR " inside a wildcard pattern'],
+    ['SOMETHING ELSE', '*ROCK STAR BAND*', false, 'literal " STAR " pattern does not match everything'],
+    ['ANY GIVEN SUNDAY', '*ANY GIVEN*', true, 'literal " ANY " inside a wildcard pattern'],
+    ['UNRELATED', '*ANY GIVEN*', false, 'literal " ANY " pattern does not match everything'],
+    ['a.b', 'a.b', true, 'a dot in the pattern is literal'],
+    ['axb', 'a.b', false, 'a dot does not act as a regex wildcard'],
   ];
 
   for (const [cell, expr, expected, label] of cases) {
@@ -117,6 +126,46 @@ describe('filterRows', () => {
   it('throws naming the available columns when one cannot be resolved', () => {
     expect(() => filterRows(rows, [{ column: 'Importe', value: '1' }]))
       .toThrowError(/Filter column not found: "Importe".*Type, No\., Quantity/s);
+  });
+
+  it('resolves against the section columns, so an EMPTY row set filters to zero rows instead of throwing', () => {
+    const out = filterRows([], [{ column: 'Type', value: 'Item' }], { columns: ['Type', 'No.', 'Quantity'] });
+    expect(out.rows).toEqual([]);
+    expect(out.scanned).toBe(0);
+    expect(out.applied[0]!.resolvedKey).toBe('Type');
+  });
+
+  it('still rejects an unknown column when the section columns are known', () => {
+    expect(() => filterRows([], [{ column: 'Importe', value: '1' }], { columns: ['Type', 'Quantity'] }))
+      .toThrowError(/Filter column not found: "Importe".*Type, Quantity/s);
+  });
+
+  it('says so explicitly when there are no columns at all', () => {
+    expect(() => filterRows([], [{ column: 'Type', value: 'x' }]))
+      .toThrowError(/Available columns: \(none/);
+  });
+
+  it('accepts a binder-name alias on any section', () => {
+    const aliases = new Map([['1165569367_c2', 'Quantity']]);
+    const out = filterRows(rows, [{ column: '1165569367_c2', value: '>10' }], { columns: ['Quantity'], aliases });
+    expect(out.rows.map(r => r.bookmark)).toEqual(['b2']);
+  });
+
+  it('sparsely-celled rows do not shrink the advertised column list', () => {
+    const sparse = [{ bookmark: 'b1', cells: { Type: 'Item' } }];
+    const out = filterRows(sparse, [{ column: 'Quantity', value: '' }], { columns: ['Type', 'Quantity'] });
+    expect(out.rows).toHaveLength(1);   // an empty expression matches everything
+  });
+
+  it('falls back to text comparison for a locale-ambiguous dot-grouped integer', () => {
+    // "1.234" is 1234 in es-ES and 1.234 in en-US. Guessing either way silently
+    // produced wrong results; we compare as text instead (documented limitation).
+    const ambiguous = [{ bookmark: 'a', cells: { Amount: '1.234' } }];
+    const out = filterRows(ambiguous, [{ column: 'Amount', value: '1.234' }]);
+    expect(out.rows).toHaveLength(1);   // exact text match still works
+    // An unambiguous decimal keeps parsing numerically.
+    const decimal = [{ bookmark: 'b', cells: { Amount: '1.234,56' } }];
+    expect(filterRows(decimal, [{ column: 'Amount', value: '>1000' }]).rows).toHaveLength(1);
   });
 
   it('does not mutate the input rows', () => {

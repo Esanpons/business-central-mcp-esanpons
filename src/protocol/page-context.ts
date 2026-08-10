@@ -4,9 +4,30 @@ import type { SectionDescriptor } from './section-resolver.js';
 import type { DialogInfo, PageType, WizardState } from './types.js';
 import type { OpenFormFilter } from './filter-query.js';
 
+/**
+ * `mode=` values BC's OpenForm query accepts (mirrors the web client URL).
+ * Declared here rather than imported from services/page-service.ts so the
+ * protocol layer keeps no dependency on the service layer; PageService
+ * re-exports it as `OpenFormMode`.
+ */
+export type PageOpenMode = 'Create' | 'Edit' | 'View';
+
 export interface PageContext {
   readonly pageContextId: string;
   readonly rootFormId: string;
+  /**
+   * The BC page object id this context was opened from, when it has one
+   * (`bc_open_page`). Absent for contexts BC spawned itself — drill-down targets,
+   * cue pages, dialogs. Stored at open time so a re-open (filtering) never has to
+   * reverse-engineer it out of the pageContextId string.
+   */
+  readonly pageId?: string;
+  /** Tenant used for the OpenForm query at open time. Reused verbatim on re-open. */
+  readonly tenantId?: string;
+  /** `mode=` the page was opened with (Create/Edit/View). Reused on re-open. */
+  readonly openMode?: PageOpenMode;
+  /** `bookmark=` the page was opened with, when it was opened positioned on a record. */
+  readonly bookmark?: string;
   readonly pageType: PageType;
   readonly caption: string;
   readonly forms: ReadonlyMap<string, FormState>;

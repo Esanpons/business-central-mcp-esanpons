@@ -17,6 +17,18 @@ export function escapeHtml(s: string): string {
     c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '"' ? '&quot;' : '&#39;');
 }
 
+/** Bold / italic, applied to already-escaped text. */
+function emphasize(escaped: string): string {
+  let t = escaped.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  t = t.replace(/(^|[\s(])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+  t = t.replace(/(^|[\s(])_([^_\n]+)_/g, '$1<em>$2</em>');
+  return t;
+}
+
+// Split pattern (capturing, so the delimiters survive) and its anchored twin.
+const LINK_SPLIT = /(\[[^\]]+\]\(https?:\/\/[^\s)]+\))/g;
+const LINK_ONE = /^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/;
+
 /** Inline span formatting. Escapes first, so the input can never emit markup. */
 export function renderInline(src: string): string {
   // Split on code spans so their contents are escaped but not further formatted.
@@ -24,12 +36,14 @@ export function renderInline(src: string): string {
     if (part.length > 1 && part.startsWith('`') && part.endsWith('`')) {
       return `<code>${escapeHtml(part.slice(1, -1))}</code>`;
     }
-    let t = escapeHtml(part);
-    t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2">$1</a>');
-    t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    t = t.replace(/(^|[\s(])\*([^*\n]+)\*/g, '$1<em>$2</em>');
-    t = t.replace(/(^|[\s(])_([^_\n]+)_/g, '$1<em>$2</em>');
-    return t;
+    // Split on links BEFORE emphasising: a URL carrying `_` or `*` (very common
+    // in doc/query links) would otherwise get <em> tags injected into the href.
+    // Only the link LABEL is emphasised; the destination is passed through
+    // escaped-but-unformatted.
+    return escapeHtml(part).split(LINK_SPLIT).map((seg) => {
+      const m = LINK_ONE.exec(seg);
+      return m ? `<a href="${m[2]}">${emphasize(m[1]!)}</a>` : emphasize(seg);
+    }).join('');
   }).join('');
 }
 

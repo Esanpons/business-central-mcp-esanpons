@@ -9,7 +9,8 @@ import { fields as treeFields, tabs as treeTabs } from '../protocol/form-views.j
 import { findByControlPath, findFieldByGroupCaption, nearestGroupCaption } from '../protocol/form-tree-walk.js';
 import { isFieldNode, type FieldNode, type FormNode, type RepeaterNode } from '../protocol/form-node.js';
 import { fieldNodeToControlField } from '../protocol/mcp-adapters.js';
-import { mapRowCellKeys } from '../protocol/row-mapping.js';
+import { mapRowCellKeys, repeaterColumnsToDto } from '../protocol/row-mapping.js';
+import { extractValidationMessage } from '../protocol/mutation-result.js';
 
 /**
  * The last `StringValue` BC echoed for a control in this response, or undefined if
@@ -38,12 +39,30 @@ export interface FieldWriteResult {
   /**
    * True when the field value actually moved after the write (BC may reformat,
    * so the final value can differ from `requested` yet still be a real change).
-   * False means the write was a no-op: BC rejected/reverted it or the control
-   * was not editable. Undefined when not determinable (e.g. line-cell writes).
+   * False means the write was a no-op: BC rejected/reverted it, the control was
+   * not editable, or the field ALREADY held the requested value (`reason:
+   * 'already set'` — not a failure). Undefined means UNVERIFIED: neither BC's
+   * echo nor the projection said anything, so nothing is known either way
+   * (`reason: 'unverified'`), and for line-cell writes, which are not re-read.
    */
   changed?: boolean;
-  /** Why a no-op happened (only set when `changed === false`, or on a not-found error). */
-  reason?: 'not editable' | 'validation reverted' | 'control not found';
+  /**
+   * Why `changed` is not a plain `true`.
+   *  - `already set`        the field held this value before the write; nothing to do
+   *  - `not editable`       BC published Editable=false and the value did not move
+   *  - `validation reverted` BC accepted the interaction and put the old value back
+   *  - `unverified`         no echo and no projected value: effect unknown, re-read to confirm
+   *  - `control not found`  the field key resolved to nothing
+   *  - `validation error`   BC REJECTED the value and said why — see `validationMessage`
+   */
+  reason?: 'already set' | 'not editable' | 'validation reverted' | 'unverified' | 'control not found' | 'validation error';
+  /**
+   * BC's own explanation when it refused the value, taken from the
+   * `ValidationResults` it echoes on the control (e.g. "Sale must be equal to
+   * 'Yes' in Item: No.=0000001"). This is the single most useful thing a caller
+   * can be told about a failed write, and it used to be discarded entirely.
+   */
+  validationMessage?: string;
   newValue?: string;
   error?: string;
   /** On a group-targeting miss: the group captions that DO exist on the page (so the caller can retry). */
@@ -71,20 +90,43 @@ export class DataService {
     return this.redactValues ? '<redacted>' : String(value);
   }
 
+  /** A row cell as text, matched on the column caption case-insensitively. */
+  private cellText(row: RepeaterRow, column: string): string | undefined {
+    const cells = row.cells as Record<string, unknown>;
+    const key = Object.keys(cells).find(k => k.toLowerCase() === column.toLowerCase());
+    const v = key ? cells[key] : undefined;
+    return v === null || v === undefined ? '' : String(v);
+  }
+
+  /**
+   * Re-read one cell from the CURRENT projection, so a line write can be verified
+   * instead of assumed. The bookmark is tried first and the row position second:
+   * committing a placeholder line gives it a brand-new bookmark, so bookmark-only
+   * lookup would report "unverified" on exactly the writes that did the most.
+   */
+  private readRowCell(
+    pageContextId: string,
+    sectionId: string | undefined,
+    bookmark: string,
+    rowIndex: number | undefined,
+    column: string,
+  ): string | undefined {
+    const ctx = this.repo.get(pageContextId);
+    if (!ctx) return undefined;
+    const resolved = resolveSection(ctx, sectionId);
+    if ('error' in resolved) return undefined;
+    const rows = resolved.rows;
+    const row = rows.find(r => r.bookmark === bookmark) ?? (rowIndex !== undefined ? rows[rowIndex] : undefined);
+    return row ? this.cellText(row, column) : undefined;
+  }
+
   readRows(pageContextId: string, sectionId?: string): Result<RepeaterRow[], ProtocolError> {
     const ctx = this.repo.get(pageContextId);
     if (!ctx) return err(this.repo.notFoundError(pageContextId));
     const resolved = resolveSection(ctx, sectionId);
     if ('error' in resolved) return err(new ProtocolError(resolved.error, { availableSections: resolved.availableSections }));
     if (!resolved.repeater) return ok([]);
-    const cols = resolved.repeater.columns.map(c => ({
-      controlPath: c.controlPath,
-      caption: c.properties.caption ?? '',
-      type: 'rcc' as const,
-      columnBinderName: c.columnBinder?.name,
-      columnBinderPath: c.columnBinder?.path,
-    }));
-    return ok(mapRowCellKeys([...resolved.rows], cols));
+    return ok(mapRowCellKeys([...resolved.rows], repeaterColumnsToDto(resolved.repeater)));
   }
 
   getRepeaterTotalRowCount(pageContextId: string, sectionId?: string): number | null {
@@ -175,7 +217,7 @@ export class DataService {
       // BC sends DataLoaded with root formId but SetCurrentRow/SaveValue use child formId.
       // Verified: SetCurrentRow with root formId -> InvalidBookmarkException;
       //           SetCurrentRow with child formId -> SUCCESS.
-      return this.writeLineCell(pageContextId, form.formId, resolved.repeater, [...resolved.rows], fieldName, value, options);
+      return this.writeLineCell(pageContextId, form.formId, resolved.repeater, [...resolved.rows], fieldName, value, options, resolved.section.sectionId);
     }
 
     // Header/card field write
@@ -196,6 +238,24 @@ export class DataService {
       }
       const where = options?.group ? `${fieldName} (group "${options.group}")` : fieldName;
       return err(new ProtocolError(`Field not found: ${where}`, ctxInfo));
+    }
+
+    // The caption may have resolved to a cell TEMPLATE inside the repeater (the
+    // row-cell prototypes are ordinary FieldNodes in the subpage form's tree).
+    // SaveValue against a template writes to whatever row BC currently has
+    // selected — an arbitrary row, reported as a success. Demand a row.
+    if (resolved.repeater && fieldNode.controlPath.startsWith(`${resolved.repeater.controlPath}/`)) {
+      return err(new ProtocolError(
+        `"${fieldName}" is a line column of section '${resolved.section.sectionId}', not a header field. ` +
+        `A line write must name the row: pass bookmark (from bc_read_data) or rowIndex. ` +
+        `Without one, BC would write to whichever row happens to be selected.`,
+        {
+          pageContextId,
+          section: resolved.section.sectionId,
+          rowCount: resolved.rows.length,
+          hint: 'bc_write_data { pageContextId, section, bookmark | rowIndex, fields }',
+        },
+      ));
     }
 
     // Snapshot the pre-write value and editability so we can report whether the
@@ -232,25 +292,52 @@ export class DataService {
     const updatedForm = updatedCtx?.forms.get(form.formId);
     const updatedNode = updatedForm ? findByControlPath(updatedForm.root, fieldNode.controlPath) : undefined;
     const projected = updatedNode && isFieldNode(updatedNode) ? updatedNode.properties.stringValue : undefined;
-    const newValue = echoed ?? projected ?? value;
+    // NOTE: no `?? value` fallback. Defaulting to the REQUESTED value made `changed`
+    // true whenever the caller asked for something different from the previous value,
+    // with zero evidence from BC that anything happened.
+    const observed = echoed ?? projected;
 
     // P6: did the value actually move? BC may reformat (e.g. customer no -> name),
     // so we compare against the PRE-write value, not against `value`.
     const norm = (s?: string) => (s ?? '').trim();
-    const changed = norm(newValue) !== norm(prevValue);
+
+    // BC's own reason for refusing the value, when it gave one. Checked before the
+    // heuristics below because "BC said the item is not for sale" beats any guess
+    // this code can make from comparing strings.
+    const validationMessage = extractValidationMessage(events, fieldNode.controlPath);
+
+    let changed: boolean | undefined;
     let reason: FieldWriteResult['reason'] | undefined;
-    if (!changed) {
-      reason = editableBefore === false ? 'not editable' : 'validation reverted';
+    if (validationMessage && norm(observed ?? '') !== norm(value)) {
+      // A validation result AND the value did not become what was asked for.
+      changed = false;
+      reason = 'validation error';
+    } else if (norm(value) === norm(prevValue)) {
+      // Idempotent write: the field already held this value. Reporting it as
+      // "validation reverted" sent agents into retry loops over a state that was
+      // already correct.
+      changed = false;
+      reason = 'already set';
+    } else if (observed === undefined) {
+      // Neither BC's echo nor the projection confirmed anything: unknown, not "yes".
+      changed = undefined;
+      reason = 'unverified';
+    } else {
+      changed = norm(observed) !== norm(prevValue);
+      if (!changed) reason = editableBefore === false ? 'not editable' : 'validation reverted';
     }
+
+    const newValue = observed ?? (reason === 'already set' ? prevValue : undefined);
 
     return ok({
       fieldName,
       controlPath: fieldNode.controlPath,
       success: true,
       requested: value,
-      changed,
+      ...(changed !== undefined ? { changed } : {}),
       ...(reason ? { reason } : {}),
-      newValue,
+      ...(validationMessage ? { validationMessage } : {}),
+      ...(newValue !== undefined ? { newValue } : {}),
       events,
     });
   }
@@ -300,14 +387,24 @@ export class DataService {
     fieldName: string,
     value: string,
     options: { bookmark?: string; rowIndex?: number },
+    sectionId?: string,
   ): Promise<Result<FieldWriteResult, ProtocolError>> {
     let bookmark = options.bookmark;
+    let rowIndex = options.rowIndex;
     if (!bookmark && options.rowIndex !== undefined) {
       const row = rows[options.rowIndex];
       if (!row) return err(new ProtocolError(`Row index ${options.rowIndex} out of range. Loaded rows: 0-${rows.length - 1}.`));
       bookmark = row.bookmark;
     }
+    if (rowIndex === undefined && bookmark !== undefined) {
+      const i = rows.findIndex(r => r.bookmark === bookmark);
+      if (i >= 0) rowIndex = i;
+    }
     if (!bookmark) return err(new ProtocolError('No bookmark or rowIndex provided for line cell write'));
+
+    // Snapshot the cell BEFORE the write so the effect can be measured afterwards.
+    const beforeRow = rows.find(r => r.bookmark === bookmark) ?? (rowIndex !== undefined ? rows[rowIndex] : undefined);
+    const beforeValue = beforeRow ? this.cellText(beforeRow, fieldName) : undefined;
 
     // Step 1: select the row
     const selectInteraction: SetCurrentRowInteraction = {
@@ -342,9 +439,56 @@ export class DataService {
     if (isErr(saveResult)) return saveResult;
     const allEvents = [...selectResult.value, ...saveResult.value];
     this.repo.applyToPage(pageContextId, saveResult.value);
-    // Line-cell writes echo the requested value back; `changed` is left undefined
-    // (we do not re-read the cell here, so effect cannot be confirmed cheaply).
-    return ok({ fieldName, controlPath: cellPath, success: true, requested: value, newValue: value, events: allEvents });
+
+    // BC reports a refused value in ValidationResults on the cell, not as an error:
+    // the interaction completes normally and the old value stays. Reporting only
+    // "success, effect unknown" here hid the ONE thing the caller needs (why), and
+    // made a legitimate business-rule rejection look like a broken line-write path.
+    const validationMessage = extractValidationMessage(saveResult.value, cellPath);
+    if (validationMessage) {
+      return ok({
+        fieldName, controlPath: cellPath, success: true, requested: value,
+        changed: false, reason: 'validation error', validationMessage, events: allEvents,
+      });
+    }
+
+    // Verify the effect against the re-projected row instead of reporting the
+    // requested value back. `changed: undefined` was not a small gap: it made a
+    // SUCCESSFUL line write indistinguishable from a silently ignored one, so no
+    // caller (our own live battery included) could ever tell whether a line had
+    // been filled in. BC's echo already updated the projection by now.
+    //
+    // The bookmark is NOT stable across the write: committing a line turns a
+    // `DraftRecord*` placeholder into a real record with a new bookmark, so the row
+    // is looked up by bookmark first and by its position second.
+    // The row must be identified by its ORIGINAL bookmark for the comparison to
+    // mean anything. Writing into an uncommitted placeholder line COMMITS it, and BC
+    // re-keys it (`DraftRecord6250` -> `23_JQAAAACLA...`) — and the committed row's
+    // data lands in a later batch than this invoke waits for. Judging by row
+    // position in that window reads an empty cell and would report a write that
+    // plainly worked as "validation reverted" (seen live on SaaS: the very next read
+    // showed the item in place). When the row cannot be re-identified we say so
+    // instead of guessing.
+    const afterValue = this.readRowCell(pageContextId, sectionId, bookmark, undefined, fieldName);
+    const norm = (s?: string) => (s ?? '').trim();
+    if (afterValue === undefined) {
+      return ok({
+        fieldName, controlPath: cellPath, success: true, requested: value,
+        reason: 'unverified', events: allEvents,
+        hint: 'BC re-keyed or moved the row (writing into a blank placeholder line commits it), so the effect could not be confirmed in place. Re-read the section to see the row as it now stands.',
+      });
+    }
+    // BC may reformat what it stored (a code resolves to a description, a number is
+    // localized), so "did it move" is measured against the PRE-write cell, exactly
+    // like the header path — not against the requested string.
+    const changed = norm(afterValue) !== norm(beforeValue);
+    return ok({
+      fieldName, controlPath: cellPath, success: true, requested: value,
+      changed,
+      ...(changed ? {} : { reason: 'validation reverted' as const }),
+      newValue: afterValue,
+      events: allEvents,
+    });
   }
 
   /**

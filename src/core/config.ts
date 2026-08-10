@@ -21,6 +21,14 @@ export interface BCConfig {
   aadTotpSecret: string;
   /** AAD only: ms budget for the OIDC login dance. */
   aadLoginTimeoutMs: number;
+  /**
+   * `BC_TLS_INSECURE=1` -- accept a self-signed / untrusted BC certificate for the
+   * connections bc-mcp makes to the BC host ONLY (the WebSocket upgrade and the
+   * auth provider's /SignIn fetches), instead of disabling certificate validation
+   * for the whole Node process with `NODE_TLS_REJECT_UNAUTHORIZED=0`.
+   * The global env var keeps working and still wins (it is process-wide).
+   */
+  tlsInsecure: boolean;
 }
 
 export interface LoggingConfig {
@@ -78,6 +86,29 @@ function optionalEnvBool(name: string, fallback: boolean): boolean {
   return raw === 'true' || raw === '1';
 }
 
+/**
+ * BC_BASE_URL must be an absolute http(s) URL. Without this check a malformed
+ * value (missing scheme, a stray quote, a Windows path) only fails much later --
+ * at the WebSocket upgrade or inside `new URL()` in the screenshot/deep-link
+ * paths -- with an opaque message that never names the env var.
+ */
+function requireUrlEnv(name: string): string {
+  const raw = requireEnv(name).replace(/\/+$/, '');
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`${name} must be an absolute URL like https://host/BC, got: ${raw}`);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`${name} must use http:// or https://, got: ${raw}`);
+  }
+  if (!parsed.host) {
+    throw new Error(`${name} must include a host, got: ${raw}`);
+  }
+  return raw;
+}
+
 export function loadConfig(): AppConfig {
   const bindAddress = optionalEnv('BIND_ADDRESS', '127.0.0.1');
   const apiToken = process.env.API_TOKEN;
@@ -93,7 +124,7 @@ export function loadConfig(): AppConfig {
 
   return {
     bc: {
-      baseUrl: requireEnv('BC_BASE_URL').replace(/\/+$/, ''),
+      baseUrl: requireUrlEnv('BC_BASE_URL'),
       authMode,
       // Credentials are mandatory only for the forms login. In AAD mode they are
       // optional (headless Entra login); without them the AAD provider falls back
@@ -114,6 +145,10 @@ export function loadConfig(): AppConfig {
       aadProfileDir: optionalEnv('BC_AAD_PROFILE_DIR', './.state/aad-profile'),
       aadTotpSecret: optionalEnv('BC_AAD_TOTP_SECRET', ''),
       aadLoginTimeoutMs: optionalEnvInt('BC_AAD_LOGIN_TIMEOUT', 120000, { min: 1 }),
+      // Per-connection TLS opt-out for a self-signed on-prem BC. Prefer this over
+      // NODE_TLS_REJECT_UNAUTHORIZED=0, which turns certificate validation off for
+      // every TLS socket the process opens (including unrelated HTTP clients).
+      tlsInsecure: optionalEnvBool('BC_TLS_INSECURE', false),
     },
     logging: {
       level: optionalEnv('LOG_LEVEL', 'info'),

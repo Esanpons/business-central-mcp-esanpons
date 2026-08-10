@@ -44,6 +44,7 @@ Each entry in `steps` (ManualStep) is:
 | `body` | string | No | Prose explaining the step. Markdown subset -- see [Prose formatting](#prose-formatting). |
 | `screenshot` | ManualScreenshot | No | Capture a fresh annotated screenshot for this step. |
 | `image` | string | No | Or reference an existing PNG (absolute path, or relative to the manual dir). |
+| `caption` | string | No | Caption printed under this step's figure (e.g. "Customer Card, General FastTab"). Rendered as a `<figcaption>` in HTML and an italic line in Markdown. |
 
 A step's `screenshot` (ManualScreenshot) -- the same shape as `bc_screenshot`, minus `out`/`inline`/`fullPage`:
 
@@ -85,8 +86,9 @@ On success the operation returns a `BuildManualOutput`:
 | `html` | string (optional) | Absolute path of the A4 web page (present only if `html` was in `formats`). |
 | `css` | string (optional) | Absolute path of the stylesheet -- only when HTML was built with `assets: "files"`. |
 | `js` | string (optional) | Absolute path of the paginator script -- only when HTML was built with `assets: "files"`. |
-| `images` | string[] | Absolute paths of every PNG captured during the build (one per step that had a `screenshot` spec; steps that only reference an existing `image` or are prose-only do not add entries here). |
+| `images` | string[] | Absolute paths of every image in the document: PNGs captured during the build plus any existing file referenced through a step's `image`. |
 | `steps` | number | Number of step models rendered into the document. |
+| `warnings` | string[] (optional) | Per-step problems that would otherwise be invisible in a finished document: a `redact` caption that was never located (the figure still shows the value), a `highlight` caption that matched nothing (the callout is missing), a capture taken before the SPA settled (`spaReady:false`), a referenced `image` that does not exist (the figure was dropped), or a capture that returned without writing its PNG. **A manual can be built successfully and still be wrong** — check this array and re-shoot the steps it names. |
 
 On failure the operation returns an error with code `MANUAL_ERROR` and the underlying message.
 

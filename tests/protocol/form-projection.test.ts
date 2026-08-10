@@ -199,4 +199,212 @@ describe('FormProjection', () => {
     expect(treeFields(form.root)[0]!.properties.stringValue).toBe('second');
     expect(treeFields(form.root)[0]!.properties.caption).toBe('Field1'); // preserved from first apply
   });
+
+  // Finding 3 — abbreviated row-change tags must not drop the whole rowset.
+  describe('abbreviated row change keys', () => {
+    it('reads rows delivered as drich (DataRowInserted abbreviation)', () => {
+      const form = makeRepeaterForm();
+      const updated = projection.apply(form, {
+        type: 'DataLoaded', formId: 'f1', controlPath: 'server:c[1]', currentRowOnly: false,
+        rows: [
+          { t: 'drich', drich: [0, { cells: { 'No.': '10000' }, bookmark: 'bm1' }] },
+          { t: 'drich', drich: [1, { cells: { 'No.': '20000' }, bookmark: 'bm2' }] },
+        ],
+      } as BCEvent);
+      const rows = updated.rows.get('server:c[1]')!;
+      expect(rows.map(r => r.bookmark)).toEqual(['bm1', 'bm2']);
+      expect(rows[0]!.cells['No.']).toBe('10000');
+    });
+
+    it('reads rows delivered as druch (DataRowUpdated abbreviation)', () => {
+      const base = makeRepeaterForm();
+      const form: FormState = {
+        ...base,
+        rows: new Map([['server:c[1]', [{ bookmark: 'bm1', cells: { 'No.': '10000' } }]]]),
+      };
+      const updated = projection.apply(form, {
+        type: 'DataLoaded', formId: 'f1', controlPath: 'server:c[1]', currentRowOnly: true,
+        rows: [{ t: 'druch', druch: [0, { cells: { 'No.': '10001' }, bookmark: 'bm1' }] }],
+      } as BCEvent);
+      expect(updated.rows.get('server:c[1]')![0]!.cells['No.']).toBe('10001');
+    });
+
+    it('reads removals delivered as drrch (DataRowRemoved abbreviation)', () => {
+      const base = makeRepeaterForm();
+      const form: FormState = {
+        ...base,
+        rows: new Map([['server:c[1]', [
+          { bookmark: 'bm1', cells: {} },
+          { bookmark: 'bm2', cells: {} },
+        ]]]),
+      };
+      const updated = projection.apply(form, {
+        type: 'DataLoaded', formId: 'f1', controlPath: 'server:c[1]', currentRowOnly: true,
+        rows: [{ t: 'drrch', drrch: [1, { bookmark: 'bm2' }] }],
+      } as BCEvent);
+      expect(updated.rows.get('server:c[1]')!.map(r => r.bookmark)).toEqual(['bm1']);
+    });
+
+    it('accepts an abbreviated payload key even when `t` is missing', () => {
+      const form = makeRepeaterForm();
+      const updated = projection.apply(form, {
+        type: 'DataLoaded', formId: 'f1', controlPath: 'server:c[1]', currentRowOnly: false,
+        rows: [{ drich: [0, { cells: {}, bookmark: 'bmX' }] }],
+      } as BCEvent);
+      expect(updated.rows.get('server:c[1]')!.map(r => r.bookmark)).toEqual(['bmX']);
+    });
+
+    it('tolerates a malformed row payload without dropping its siblings', () => {
+      const form = makeRepeaterForm();
+      const updated = projection.apply(form, {
+        type: 'DataLoaded', formId: 'f1', controlPath: 'server:c[1]', currentRowOnly: false,
+        rows: [
+          { t: 'drich', drich: [0, null] },
+          { t: 'drich', drich: [1, { cells: {}, bookmark: 'bmOk' }] },
+        ],
+      } as BCEvent);
+      expect(updated.rows.get('server:c[1]')!.map(r => r.bookmark)).toEqual(['bmOk']);
+    });
+  });
+
+  // Finding 4 — the current-row bookmark arrives as `Data.CurrentBookmark`.
+  describe('Data.CurrentBookmark', () => {
+    it('maps Data.CurrentBookmark onto the repeater bookmark property', () => {
+      const form = makeRepeaterForm();
+      const updated = projection.apply(form, {
+        type: 'PropertyChanged', formId: 'f1', controlPath: 'server:c[1]',
+        changes: { 'Data.CurrentBookmark': '6e50f179-7956-4aef-b5cf-a425c1bd1c68' },
+      } as BCEvent);
+      const rep = treeRepeaters(updated.root).get('server:c[1]')!;
+      expect(rep.properties.bookmark).toBe('6e50f179-7956-4aef-b5cf-a425c1bd1c68');
+    });
+
+    it('still honors the plain Bookmark name', () => {
+      const form = makeRepeaterForm();
+      const updated = projection.apply(form, {
+        type: 'PropertyChanged', formId: 'f1', controlPath: 'server:c[1]',
+        changes: { Bookmark: 'plain' },
+      } as BCEvent);
+      expect(treeRepeaters(updated.root).get('server:c[1]')!.properties.bookmark).toBe('plain');
+    });
+  });
+
+  // Finding 5 — an unrecognized PropertyChanged must not invalidate view caches.
+  describe('no-op PropertyChanged', () => {
+    it('returns the SAME form and root when no tracked property changed', () => {
+      const form = makeRepeaterForm();
+      const before = treeRepeaters(form.root);
+      const updated = projection.apply(form, {
+        type: 'PropertyChanged', formId: 'f1', controlPath: 'server:c[1]',
+        changes: { ValidationResults: [], SomethingCosmetic: 1 },
+      } as BCEvent);
+      expect(updated).toBe(form);
+      expect(updated.root).toBe(form.root);
+      // Same root reference => the memoised view is still the same object.
+      expect(treeRepeaters(updated.root)).toBe(before);
+    });
+
+    it('returns the same form when the control path is unknown', () => {
+      const form = makeRepeaterForm();
+      const updated = projection.apply(form, {
+        type: 'PropertyChanged', formId: 'f1', controlPath: 'server:c[404]',
+        changes: { StringValue: 'x' },
+      } as BCEvent);
+      expect(updated).toBe(form);
+    });
+
+    it('DOES produce a new root when a tracked property changed', () => {
+      const form = makeRepeaterForm();
+      const updated = projection.apply(form, {
+        type: 'PropertyChanged', formId: 'f1', controlPath: 'server:c[1]',
+        changes: { TotalRowCount: 7 },
+      } as BCEvent);
+      expect(updated.root).not.toBe(form.root);
+    });
+  });
+
+  // Finding 13 — option index tracking through PropertyChanged.
+  describe('option fields', () => {
+    function optionForm(): FormState {
+      const root = buildFormTree({
+        t: 'lf', ServerId: 'f1', PageType: 0,
+        Children: [{
+          t: 'sec', Caption: 'Status', StringValue: 'Started', CurrentIndex: 1,
+          Items: [{ Text: 'Not Started', Value: '0' }, { Text: 'Started', Value: '1' }],
+        }],
+      });
+      return { formId: 'f1', root, rows: new Map() };
+    }
+
+    it('updates optionIndex from CurrentIndex', () => {
+      const updated = projection.apply(optionForm(), {
+        type: 'PropertyChanged', formId: 'f1', controlPath: 'server:c[0]',
+        changes: { StringValue: 'Not Started', CurrentIndex: 0 },
+      } as BCEvent);
+      const f = treeFields(updated.root)[0]!;
+      expect(f.properties.optionIndex).toBe(0);
+      expect(f.properties.stringValue).toBe('Not Started');
+    });
+
+    it('clears the stale optionIndex when the echo carries only StringValue', () => {
+      const updated = projection.apply(optionForm(), {
+        type: 'PropertyChanged', formId: 'f1', controlPath: 'server:c[0]',
+        changes: { StringValue: 'Not Started' },
+      } as BCEvent);
+      const f = treeFields(updated.root)[0]!;
+      expect(f.properties.optionIndex).toBeUndefined();
+      expect(f.properties.options).toHaveLength(2); // build-time options survive
+    });
+  });
+
+  // Finding 15 — blank bookmarks are not an identity.
+  describe('currentRowOnly merge with blank bookmarks', () => {
+    it('appends blank-bookmark upserts instead of patching the first blank row', () => {
+      const base = makeRepeaterForm();
+      const form: FormState = {
+        ...base,
+        rows: new Map([['server:c[1]', [
+          { bookmark: '', cells: { 'No.': 'A' } },
+          { bookmark: '', cells: { 'No.': 'B' } },
+        ]]]),
+      };
+      const updated = projection.apply(form, {
+        type: 'DataLoaded', formId: 'f1', controlPath: 'server:c[1]', currentRowOnly: true,
+        rows: [{ t: 'DataRowInserted', DataRowInserted: [2, { cells: { 'No.': 'C' } }] }],
+      } as BCEvent);
+      const rows = updated.rows.get('server:c[1]')!;
+      expect(rows.map(r => r.cells['No.'])).toEqual(['A', 'B', 'C']);
+    });
+
+    it('appends every blank-bookmark upsert in a batch (no collapse into one)', () => {
+      const base = makeRepeaterForm();
+      const form: FormState = { ...base, rows: new Map([['server:c[1]', []]]) };
+      const updated = projection.apply(form, {
+        type: 'DataLoaded', formId: 'f1', controlPath: 'server:c[1]', currentRowOnly: true,
+        rows: [
+          { t: 'DataRowInserted', DataRowInserted: [0, { cells: { 'No.': 'X' } }] },
+          { t: 'DataRowInserted', DataRowInserted: [1, { cells: { 'No.': 'Y' } }] },
+        ],
+      } as BCEvent);
+      expect(updated.rows.get('server:c[1]')!.map(r => r.cells['No.'])).toEqual(['X', 'Y']);
+    });
+
+    it('still patches bookmarked rows by bookmark', () => {
+      const base = makeRepeaterForm();
+      const form: FormState = {
+        ...base,
+        rows: new Map([['server:c[1]', [
+          { bookmark: '', cells: { 'No.': 'blank' } },
+          { bookmark: 'bm1', cells: { 'No.': 'old' } },
+        ]]]),
+      };
+      const updated = projection.apply(form, {
+        type: 'DataLoaded', formId: 'f1', controlPath: 'server:c[1]', currentRowOnly: true,
+        rows: [{ t: 'DataRowUpdated', DataRowUpdated: [1, { cells: { 'No.': 'new' }, bookmark: 'bm1' }] }],
+      } as BCEvent);
+      const rows = updated.rows.get('server:c[1]')!;
+      expect(rows).toHaveLength(2);
+      expect(rows.map(r => r.cells['No.'])).toEqual(['blank', 'new']);
+    });
+  });
 });

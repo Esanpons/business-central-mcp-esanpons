@@ -6,23 +6,52 @@
 // and service-level code (data-service.ts) read these.
 
 import type { RepeaterRow, RepeaterColumn } from './types.js';
+import type { RepeaterNode } from './form-node.js';
+
+/**
+ * Adapt a RepeaterNode's columns to the `RepeaterColumn` DTO shape the row
+ * mappers and MCP output use. Single definition — section-dto.ts and
+ * data-service.ts both went through their own copy of this projection.
+ */
+export function repeaterColumnsToDto(repeater: RepeaterNode): RepeaterColumn[] {
+  return repeater.columns.map(c => ({
+    controlPath: c.controlPath,
+    caption: c.properties.caption ?? '',
+    type: 'rcc' as const,
+    columnBinderName: c.columnBinder?.name,
+    columnBinderPath: c.columnBinder?.path,
+  }));
+}
 
 /**
  * Build a mapping from columnBinderName to column caption.
  * Used to remap row.cells keys from internal binder names to human-readable captions.
+ *
+ * Duplicate captions get an ordinal suffix (`Amount`, `Amount#2`). The suffix is
+ * checked against the FULL caption set first, so a repeater that genuinely ships a
+ * column literally captioned `Amount#2` doesn't get two cells fighting over the same
+ * key — the generated name keeps incrementing until it is free.
  */
 export function buildBinderToCaptionMap(columns: RepeaterColumn[]): Map<string, string> {
   const map = new Map<string, string>();
-  const usedCaptions = new Map<string, number>();
+  const taken = new Set<string>();
   for (const col of columns) {
     if (!col.columnBinderName) continue;
-    let caption = col.caption || col.columnBinderName;
-    // Disambiguate duplicate captions with ordinal suffix
-    const count = usedCaptions.get(caption) ?? 0;
-    if (count > 0) {
-      caption = `${caption}#${count + 1}`;
+    taken.add(col.caption || col.columnBinderName);
+  }
+  const used = new Set<string>();
+  for (const col of columns) {
+    if (!col.columnBinderName) continue;
+    const base = col.caption || col.columnBinderName;
+    let caption = base;
+    if (used.has(caption)) {
+      for (let i = 2; ; i++) {
+        const candidate = `${base}#${i}`;
+        // Skip a candidate that collides with a REAL caption of another column.
+        if (!used.has(candidate) && !taken.has(candidate)) { caption = candidate; break; }
+      }
     }
-    usedCaptions.set(col.caption || col.columnBinderName, count + 1);
+    used.add(caption);
     map.set(col.columnBinderName, caption);
   }
   return map;

@@ -17,10 +17,27 @@ export interface OpenFormFilter {
   value: string;
 }
 
+/**
+ * Escape a value for embedding inside a single-quoted filter token.
+ *
+ * The expression grammar is `'<token>' IS '<token>'`, so an apostrophe inside the
+ * token would otherwise CLOSE it and make the rest of the value parse as grammar —
+ * BC answers with a "token not found" error and (before the reopen was made
+ * transactional) killed the open page with it. Doubling is the quoting convention
+ * BC's own filter tokenizer uses, i.e. `L'Oreal` -> `L''Oreal`.
+ *
+ * Note this is the FILTER-level escape only. The assembled expression still has to
+ * be URL-encoded before it goes into the OpenForm query string (`&`, `%`, `+`, `#`
+ * are query metacharacters) — see `PageService.buildOpenFormQuery`.
+ */
+export function escapeFilterToken(token: string): string {
+  return token.replace(/'/g, "''");
+}
+
 /** `'Col1' IS 'val1' AND 'Col2' IS 'val2'`. Empty entries are dropped; returns '' if none. */
 export function buildOpenFormFilter(filters: readonly OpenFormFilter[]): string {
   return filters
     .filter((f) => f.column && f.value !== undefined && f.value !== null && String(f.value) !== '')
-    .map((f) => `'${f.column}' IS '${f.value}'`)
+    .map((f) => `'${escapeFilterToken(f.column)}' IS '${escapeFilterToken(String(f.value))}'`)
     .join(' AND ');
 }

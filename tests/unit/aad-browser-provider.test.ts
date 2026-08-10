@@ -31,4 +31,29 @@ describe('AADBrowserAuthProvider (contract)', () => {
     expect(p.getWebSocketUrl()).toBeNull();
     expect(p.getTenantIdOverride()).toBeNull();
   });
+
+  it('reports that SaaS queries must omit &tenant=', () => {
+    const p = new AADBrowserAuthProvider(cfg, createNullLogger());
+    expect(p.omitsTenantInQueries()).toBe(true);
+  });
+
+  it('invalidate() retains the browser-close promise so the next launch can await it', async () => {
+    const p = new AADBrowserAuthProvider(cfg, createNullLogger());
+    let closed = false;
+    let release: (() => void) | null = null;
+    // Stand in for the kept-alive puppeteer browser.
+    (p as unknown as { browser: unknown }).browser = {
+      close: () => new Promise<void>((r) => { release = () => { closed = true; r(); }; }),
+    };
+
+    p.invalidate();
+    const closing = (p as unknown as { closing: Promise<void> | null }).closing;
+    // Dropping this promise (the old fire-and-forget) let the next
+    // launchPersistent race the still-open browser for the profile-dir lock.
+    expect(closing).toBeInstanceOf(Promise);
+    expect(closed).toBe(false);
+    release!();
+    await closing;
+    expect(closed).toBe(true);
+  });
 });

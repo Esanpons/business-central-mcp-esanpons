@@ -32,8 +32,15 @@ describe('toSectionSummary', () => {
 describe('filterFieldsByGroup', () => {
   it('keeps only fields in the named group (case-insensitive)', () => {
     const r = filterFieldsByGroup(cardSection, 'bill-to');
-    expect(r.fields).toHaveLength(1);
-    expect(r.fields![0].value).toBe('BILL');
+    expect(r.matched).toBe(1);
+    expect(r.section.fields).toHaveLength(1);
+    expect(r.section.fields![0].value).toBe('BILL');
+  });
+
+  it('reports a miss with the groups that DO exist instead of an empty, mute result', () => {
+    const r = filterFieldsByGroup(cardSection, 'Pay-to');
+    expect(r.matched).toBe(0);
+    expect(r.availableGroups).toEqual(['General', 'Sell-to', 'Bill-to']);
   });
 });
 

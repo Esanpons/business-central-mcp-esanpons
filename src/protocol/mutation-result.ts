@@ -54,6 +54,35 @@ export function detectChangedSections(
 }
 
 /**
+ * BC's reason for refusing a value, taken from the `ValidationResults` array it
+ * echoes on the control in a `PropertyChanged`.
+ *
+ * This is the difference between "the write did not stick" and "the write did not
+ * stick BECAUSE item 0000001 is not a sales item". BC always sends the second; we
+ * used to keep only the first, which made a perfectly explicable rejection look
+ * like an unexplained no-op. Verified live on devel1 (Sales Order line, `No.`):
+ * `PropertyChanged { ValidationResults: [{ Id: 18, Description: "Sale debe ser
+ * igual a 'Sí' en Item: No.=0000001..." }] }`.
+ *
+ * @param controlPath When given, only that control's results are considered; the
+ *   same batch also carries validation state for unrelated cells.
+ */
+export function extractValidationMessage(events: readonly BCEvent[], controlPath?: string): string | undefined {
+  const messages: string[] = [];
+  for (const e of events) {
+    if (e.type !== 'PropertyChanged') continue;
+    if (controlPath !== undefined && e.controlPath !== controlPath) continue;
+    const results = (e.changes as Record<string, unknown> | undefined)?.ValidationResults;
+    if (!Array.isArray(results)) continue;
+    for (const r of results) {
+      const desc = (r as Record<string, unknown> | undefined)?.Description;
+      if (typeof desc === 'string' && desc.trim() !== '') messages.push(desc.trim());
+    }
+  }
+  return messages.length > 0 ? [...new Set(messages)].join(' ') : undefined;
+}
+
+/**
  * Extract dialog information from events. Tries to pull a human-readable
  * message from the dialog control tree (Caption or Message property).
  */
@@ -62,7 +91,12 @@ export function detectDialogs(events: BCEvent[]): Array<{ formId: string; messag
     .filter((e): e is DialogOpenedEvent => e.type === 'DialogOpened')
     .map(e => {
       const raw = e.controlTree as Record<string, unknown> | undefined;
-      const message = (raw?.Caption as string) || (raw?.Message as string) || undefined;
+      // Caption/Message are wire values — only use them when they really are
+      // non-empty strings (a cast would let an object/number through as `message`
+      // and surface "[object Object]" to the caller).
+      const asText = (v: unknown): string | undefined =>
+        (typeof v === 'string' && v.trim() !== '') ? v : undefined;
+      const message = asText(raw?.Caption) ?? asText(raw?.Message);
 
       // Build the dialog's FormNode tree to extract structured fields.
       // Dialog controlTree nodes may arrive as a bare object (no `t` field) or

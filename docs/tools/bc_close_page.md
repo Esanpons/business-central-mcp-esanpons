@@ -22,7 +22,7 @@ Returns a `ClosePageOutput` object (`src/operations/close-page.ts`):
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `success` | `boolean` | Always `true` when the operation resolves successfully (the underlying `closePage` result is mapped to `success: true`). |
+| `success` | `boolean` | Whether the page is actually CLOSED. `false` when a save-changes dialog intercepted the close: the interaction completed, but the page is still open and its context is still alive waiting for an answer (see `requiresDialogResponse` and `hint`). |
 | `dialogsOpened` | `Array<{ formId: string; message?: string; fields?: ControlField[] }>` | Dialogs raised while closing (e.g. an unsaved-changes "save changes?" prompt). Each entry has the dialog's `formId`, an optional human-readable `message` (pulled from the dialog control tree's `Caption` or `Message`), and optional structured `fields`. Empty when no dialog opened. |
 | `requiresDialogResponse` | `boolean` | `true` when `dialogsOpened.length > 0` — the caller must handle the dialog (via `bc_respond_dialog`) before the close is considered complete. `false` for a clean close. |
 
@@ -75,7 +75,7 @@ Close both a drill-down page and its originating list page (two separate calls):
 ## Notes & limitations
 - The operation closes **all** forms owned by the page context (`ctx.ownedFormIds`), not just the root form, and calls `session.removeOpenForm(formId)` for each before removing the context from the repository.
 - The page-service layer supports an internal `options.discardChanges` flag that auto-dismisses a close-triggered dialog by invoking `No` (SystemAction `390`). The `bc_close_page` tool does **not** expose this option — `ClosePageInput` carries only `pageContextId`. So if a save-changes dialog appears, it is returned in `dialogsOpened` with `requiresDialogResponse: true` for the caller to resolve via `bc_respond_dialog`.
-- A successful close always reports `success: true`; the meaningful signal is whether `requiresDialogResponse` is `true`, indicating the close is pending a dialog response.
+- `success` and `requiresDialogResponse` are two views of the same fact and are always opposites: a close blocked by a save-changes dialog reports `success: false` + `requiresDialogResponse: true`, and the page context stays valid so the dialog can be answered.
 - After a successful close the `pageContextId` is gone from the repository; reusing it yields a "Page context not found" error from any page-bound tool.
 
 ## Related tools

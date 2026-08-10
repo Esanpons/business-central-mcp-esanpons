@@ -29,24 +29,51 @@ function makePageContext(
 describe('SectionResolver', () => {
   const resolver = new SectionResolver();
 
-  it('derives lines section for child form with repeater', () => {
+  const repeaterChild = (serverId: string, caption: string) => ({
+    t: 'lf',
+    ServerId: serverId,
+    Caption: caption,
+    PageType: 1,
+    Children: [{
+      t: 'rc',
+      Columns: [{ t: 'rcc', Caption: 'No.', ColumnBinderPath: '37_SalesLine.6' }],
+    }],
+  });
+
+  it('derives lines section for a SUBFORM child with a repeater', () => {
     const ctx = makePageContext();
     // Real BC FormCreated payloads include t:'lf', ServerId, PageType at root
-    const childTree = {
-      t: 'lf',
-      ServerId: 'child1',
-      Caption: 'Sales Order Subform',
-      PageType: 1,
-      Children: [{
-        t: 'rc',
-        Columns: [{ t: 'rcc', Caption: 'No.', ColumnBinderPath: '37_SalesLine.6' }],
-      }],
-    };
-    const section = resolver.deriveSection(ctx, 'child1', childTree);
+    const section = resolver.deriveSection(ctx, 'child1', repeaterChild('child1', 'Sales Order Subform'), { isSubForm: true });
     expect(section.kind).toBe('lines');
     expect(section.sectionId).toBe('lines');
     expect(section.formId).toBe('child1');
     expect(section.repeaterControlPath).toBeDefined();
+  });
+
+  it('a PART with a repeater is a subpage, not lines (a Card hosting a ListPart is not a Document)', () => {
+    const ctx = makePageContext();
+    const section = resolver.deriveSection(ctx, 'part1', repeaterChild('part1', 'Item Attributes'), { isSubForm: false });
+    expect(section.kind).toBe('subpage');
+    expect(section.sectionId).toBe('subpage:Item Attributes');
+    // ...but its rows stay readable/refreshable: the repeater path is still recorded.
+    expect(section.repeaterControlPath).toBeDefined();
+  });
+
+  it('defaults to "not a subform" when the caller has no IsSubForm evidence', () => {
+    const ctx = makePageContext();
+    const section = resolver.deriveSection(ctx, 'part2', repeaterChild('part2', 'Some Part'));
+    expect(section.kind).toBe('subpage');
+  });
+
+  it('derives a factbox section with the same uniqueness rule', () => {
+    const existing = new Map<string, SectionDescriptor>([
+      ['factbox:Customer Statistics', { sectionId: 'factbox:Customer Statistics', kind: 'factbox', caption: 'Customer Statistics', formId: 'f1', valid: true }],
+    ]);
+    const ctx = makePageContext(existing);
+    const section = resolver.deriveFactboxSection(ctx, { serverId: 'f2', caption: 'Customer Statistics' });
+    expect(section.kind).toBe('factbox');
+    expect(section.sectionId).toBe('factbox:Customer Statistics#2');
+    expect(section.formId).toBe('f2');
   });
 
   it('derives subpage for child form without repeater', () => {
@@ -69,7 +96,7 @@ describe('SectionResolver', () => {
       PageType: 1,
       Children: [{ t: 'rc', Columns: [{ t: 'rcc', Caption: 'Col' }] }],
     };
-    const section = resolver.deriveSection(ctx, 'child3', childTree);
+    const section = resolver.deriveSection(ctx, 'child3', childTree, { isSubForm: true });
     expect(section.sectionId).toBe('lines#2');
     expect(section.kind).toBe('lines');
   });
@@ -166,10 +193,13 @@ describe('PageContextRepository FormClosed handling', () => {
     };
     repo.applyEvents([formCreated]);
 
-    // Verify section was created and is valid
+    // Verify section was created and is valid. (A bare FormCreated carries no
+    // IsSubForm flag and the parent tree has no fhc host node, so the child is
+    // classified as a subpage — with its repeater path recorded.)
     let ctx = repo.get(pcId)!;
-    const linesSection = Array.from(ctx.sections.values()).find(s => s.kind === 'lines');
+    const linesSection = Array.from(ctx.sections.values()).find(s => s.formId === 'child1');
     expect(linesSection).toBeDefined();
+    expect(linesSection!.repeaterControlPath).toBeDefined();
     expect(linesSection!.valid).toBe(true);
 
     // Now close the child form
@@ -178,9 +208,11 @@ describe('PageContextRepository FormClosed handling', () => {
 
     // Verify section is now invalid
     ctx = repo.get(pcId)!;
-    const updatedSection = Array.from(ctx.sections.values()).find(s => s.kind === 'lines');
+    const updatedSection = Array.from(ctx.sections.values()).find(s => s.sectionId === linesSection!.sectionId);
     expect(updatedSection).toBeDefined();
     expect(updatedSection!.valid).toBe(false);
+    // ...and the dead FormState is gone, so it can no longer swallow row events.
+    expect(ctx.forms.has('child1')).toBe(false);
 
     // Resolving the stale section should return an error
     const result = resolveSection(ctx, updatedSection!.sectionId);

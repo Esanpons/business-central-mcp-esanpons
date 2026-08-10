@@ -69,6 +69,11 @@ export function resolveObjectColumns(cellKeys: readonly string[]): ObjectColumnK
   return { id, type, name, ...(caption ? { caption } : {}), ...(app ? { app } : {}) };
 }
 
+/** Compare BC base URLs ignoring case and a trailing slash. */
+export function normalizeBaseUrl(url: string | undefined): string {
+  return (url ?? '').trim().replace(/\/+$/, '').toLowerCase();
+}
+
 export interface BcObject {
   type: string;
   id: number;
@@ -115,16 +120,44 @@ export class ObjectIndexService {
     return resolve(dir, 'object-index.json');
   }
 
-  private load(): ObjectIndexFile {
+  /** Raw file contents, or null when absent/corrupt. NOT environment-checked. */
+  private loadRaw(): ObjectIndexFile | null {
     const p = this.indexPath();
-    if (existsSync(p)) {
-      try {
-        return JSON.parse(readFileSync(p, 'utf8')) as ObjectIndexFile;
-      } catch {
-        /* corrupt — start fresh */
-      }
+    if (!existsSync(p)) return null;
+    try {
+      const parsed = JSON.parse(readFileSync(p, 'utf8')) as ObjectIndexFile;
+      return Array.isArray(parsed?.objects) ? parsed : null;
+    } catch {
+      return null; // corrupt — start fresh
     }
+  }
+
+  private empty(): ObjectIndexFile {
     return { updatedAt: '', baseUrl: this.baseUrl, tenantId: this.tenantId, objects: [] };
+  }
+
+  /**
+   * The documented two-server setup (bc-docker + bc-saas registered side by side)
+   * shares one cwd, so both instances read the SAME .state/object-index.json. The
+   * file records which environment built it; an index built elsewhere is treated
+   * as EMPTY rather than answering bc_find_object with another environment's object
+   * IDs (silently wrong ids are worse than "run bc_refresh_objects").
+   */
+  private isOwnEnvironment(file: ObjectIndexFile): boolean {
+    return normalizeBaseUrl(file.baseUrl) === normalizeBaseUrl(this.baseUrl)
+      && (file.tenantId ?? '') === (this.tenantId ?? '');
+  }
+
+  private load(): ObjectIndexFile {
+    const raw = this.loadRaw();
+    if (raw && this.isOwnEnvironment(raw)) return raw;
+    return this.empty();
+  }
+
+  /** The cached file when it belongs to ANOTHER environment (for the find() note). */
+  private foreignIndex(): ObjectIndexFile | null {
+    const raw = this.loadRaw();
+    return raw && !this.isOwnEnvironment(raw) ? raw : null;
   }
 
   private save(file: ObjectIndexFile): void {
@@ -154,13 +187,23 @@ export class ObjectIndexService {
     // don't change mid-run). `seenKeys` feeds the error message when they can't be.
     let cols: ObjectColumnKeys | null = null;
     let seenKeys: string[] = [];
+    // Sub-ranges that were NOT read completely. The merge below replaces the whole
+    // [from,to] window with what was collected, so persisting a scan with holes
+    // DELETES the objects that live in those holes — the same class of incident as
+    // the 0-object wipe. Any hole aborts the save.
+    const gaps: Array<{ from: number; to: number; reason: string }> = [];
 
     const readRange = async (lo: number, hi: number): Promise<void> => {
-      if (lo > hi || reads >= SAFETY_MAX_READS) return;
+      if (lo > hi) return;
+      if (reads >= SAFETY_MAX_READS) {
+        gaps.push({ from: lo, to: hi, reason: `read budget (${SAFETY_MAX_READS}) exhausted` });
+        return;
+      }
       const r = await this.pageService.openPage(OBJECTS_PAGE, { filters: [{ column: 'Object ID', value: `${lo}..${hi}` }], tenantId: this.tenantId });
       reads++;
       if (!isOk(r)) {
         this.logger.warn(`[objects] refresh open failed for ${lo}..${hi}: ${r.error.message}`);
+        gaps.push({ from: lo, to: hi, reason: r.error.message });
         return;
       }
       const rows = buildAllSections(r.value).flatMap((s) => s.rows ?? []);
@@ -203,6 +246,22 @@ export class ObjectIndexService {
         + '(any locale). Extend resolveObjectColumns() with this locale.',
       );
     }
+    // A scan with holes must NEVER be merged either: the merge replaces the whole
+    // [from,to] window, so every object inside an unread sub-range would be deleted
+    // from the saved index (a mid-refresh session death used to do exactly that,
+    // silently). Abort loudly instead — same policy as the 0-object guard below.
+    if (gaps.length > 0) {
+      const existing = this.load();
+      const shown = gaps.slice(0, 5).map((g) => `${g.from}..${g.to} (${g.reason})`).join('; ');
+      throw new Error(
+        `Refresh of range ${from}..${to} could not read ${gaps.length} sub-range(s) — the index was left `
+        + `UNTOUCHED (${existing.objects.length} objects, updated ${existing.updatedAt || 'never'}). `
+        + `Saving a partial scan would DELETE the objects that live in the unread sub-ranges, because the `
+        + `merge replaces everything in [${from},${to}]. Failed: ${shown}`
+        + `${gaps.length > 5 ? ` (+${gaps.length - 5} more)` : ''}. `
+        + 'Fix the cause (usually a dead/expired BC session — retry) or refresh a narrower range.',
+      );
+    }
     // A scan that found nothing must NEVER be merged: with `all: true` the merge keeps
     // nothing outside [from,to], so saving an empty result would wipe the whole cache
     // (that is exactly how a good 14k index was lost once).
@@ -242,9 +301,17 @@ export class ObjectIndexService {
     // Rank: exact name/caption first, then startsWith, then by name length.
     results = results.sort((a, b) => rank(a, q) - rank(b, q) || a.name.length - b.name.length);
 
-    const note = index.objects.length === 0
-      ? 'The object index is empty. Run bc_refresh_objects first (default refreshes custom/add-in objects; pass { all: true } for the full standard set).'
-      : undefined;
+    let note: string | undefined;
+    if (index.objects.length === 0) {
+      const foreign = this.foreignIndex();
+      note = foreign
+        ? `The cached object index was built against a DIFFERENT environment `
+          + `(${foreign.baseUrl || 'unknown'} / tenant ${foreign.tenantId || 'unknown'}, `
+          + `${foreign.objects.length} objects, updated ${foreign.updatedAt || 'never'}) and was ignored — `
+          + `this server talks to ${this.baseUrl} / tenant ${this.tenantId}. `
+          + 'Run bc_refresh_objects to build the index for THIS environment (it will replace the cached file).'
+        : 'The object index is empty. Run bc_refresh_objects first (default refreshes custom/add-in objects; pass { all: true } for the full standard set).';
+    }
 
     return {
       query,

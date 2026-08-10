@@ -39,12 +39,30 @@ import type { WizardNavigateOperation } from '../operations/wizard-navigate.js';
 import type { ScreenshotOperation } from '../operations/screenshot.js';
 import type { BuildManualOperation } from '../operations/build-manual.js';
 
-export interface ToolDefinition {
+/**
+ * The STATIC half of a tool: everything `initialize` / `tools/list` needs, with no
+ * services, no session and no BC connection behind it. Split out from the executable
+ * half because both server entrypoints must advertise the tool surface before any BC
+ * login has happened — the old workaround built the entire service graph on a forged
+ * `{} as BCSession` just to harvest these four fields, which only worked as long as no
+ * constructor dereferenced the session.
+ */
+export interface ToolMetadata {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
   zodSchema: z.ZodType;
+}
+
+export interface ToolDefinition extends ToolMetadata {
   execute: (input: unknown) => Promise<unknown>;
+}
+
+/** A tool's executable half: pure routing from validated input to an operation. */
+type ToolExecutor = (ops: Operations, input: unknown) => Promise<unknown>;
+
+interface ToolSpec extends ToolMetadata {
+  execute: ToolExecutor;
 }
 
 export interface Operations {
@@ -67,8 +85,7 @@ export interface Operations {
   refreshObjects: RefreshObjectsOperation;
 }
 
-export function buildToolRegistry(ops: Operations): ToolDefinition[] {
-  return [
+const TOOL_SPECS: ToolSpec[] = [
     {
       name: 'bc_open_page',
       description: `Opens a Business Central page by its numeric page ID and returns its complete state as a list of sections. Each section has a sectionId, kind (header / lines / factbox / subpage / requestPage), caption, and the appropriate content shape. Card-shape sections (most headers, factboxes, requestPages) carry fields[] (and headers also carry actions[]). List-shape sections (lines, list-bodied headers, repeater subpages) carry rows[] and totalRowCount. The header section adapts to its page: it is card-shape on Card pages and list-shape on List pages -- the kind stays "header" either way for path stability. This is the entry point for all Business Central operations -- it returns a pageContextId that every other bc_ tool requires as input. Use bc_search_pages first if you do not know the page ID for an entity.
@@ -79,12 +96,14 @@ Typical workflow: bc_open_page -> bc_read_data (refresh / filter / paginate a se
 
 Optional bookmark parameter opens a Card page to a specific record. Bookmarks come from list rows in any prior section.
 
+Large pages: an un-narrowed open of a document or a long list can serialize hundreds of fields and rows and blow the response budget (the server then refuses it with RESPONSE_TOO_LARGE). Narrow it up front: summary:true returns section identity only (best first call on an unfamiliar big page), then pull what you need with sections:["header"], tab, columns and range -- or with bc_read_data section by section.
+
 Examples:
 - { "pageId": 22 } opens Customer List. Sections: [{ "sectionId": "header", "kind": "header", "rows": [...], "actions": [...] }] (no fields[] on a list-shape header).
 - { "pageId": 21, "bookmark": "..." } opens Customer Card. Sections include the header card plus FactBoxes (e.g. { "sectionId": "factbox:Customer Statistics", "kind": "factbox", "fields": [...] }).`,
       inputSchema: toMcpJsonSchema(OpenPageSchema),
       zodSchema: OpenPageSchema,
-      execute: (input) => ops.openPage.execute(input as Parameters<typeof ops.openPage.execute>[0]),
+      execute: (ops, input) => ops.openPage.execute(input as Parameters<typeof ops.openPage.execute>[0]),
     },
     {
       name: 'bc_read_data',
@@ -105,13 +124,21 @@ Examples:
 - Refresh a FactBox: { "pageContextId": "abc", "section": "factbox:Customer Statistics" }`,
       inputSchema: toMcpJsonSchema(ReadDataSchema),
       zodSchema: ReadDataSchema,
-      execute: (input) => ops.readData.execute(input as Parameters<typeof ops.readData.execute>[0]),
+      execute: (ops, input) => ops.readData.execute(input as Parameters<typeof ops.readData.execute>[0]),
     },
     {
       name: 'bc_write_data',
       description: `Writes one or more field values on an already-open Business Central page. Pass a fields object with caption-name keys and string values. BC validates each field and returns the server-confirmed value, which may differ from input due to formatting, auto-completion, or lookups (e.g., entering a partial customer name resolves to the full match). Requires a pageContextId from bc_open_page.
 
-Fields must be editable -- writing to a read-only field returns an error. Write related fields together in one call (e.g., quantity and unit price), but avoid writing unrelated groups together because BC validation cascades may change dependent fields in unexpected order. Check the returned confirmed values to see what BC actually stored.
+NEVER trust "success" alone. Each entry in the results array carries requested / changed / reason: "success" only means the SaveValue interaction completed without a protocol error, NOT that the value stuck. A write that BC rejected, reverted, or refused because the field is read-only comes back success:true with changed:false and a "reason" (e.g. "not editable") — it does NOT raise an error. Branch on "changed". The top-level "allSucceeded" is true only when EVERY requested field actually changed; when it is false, read the per-field reason to find out which one and why.
+
+When BC REFUSES a value it does not raise an error — it completes the interaction and explains itself. That explanation now comes back as reason:"validation error" plus "validationMessage" carrying BC's own words (e.g. "Sale must be equal to 'Yes' in Item: No.=0000001"). Read it: it names the business rule that blocked the write, so you can pick a valid value instead of retrying the same one. Two other reasons are NOT failures: "already set" (the field already held that value) and "unverified" (BC echoed nothing, so the effect is unknown — re-read to confirm).
+
+Editability is tri-state: a field reported as editable:"unknown" (BC emitted no flag — common for page-variable option controls like Ship-to/Bill-to) is NOT read-only. Attempt the write and confirm via "changed".
+
+Write related fields together in one call (e.g., quantity and unit price), but avoid writing unrelated groups together because BC validation cascades may change dependent fields in unexpected order. Check the returned confirmed values to see what BC actually stored -- they may differ from the input due to formatting, auto-completion, or lookups.
+
+Duplicate captions: document headers repeat captions across groups (Sell-to / Bill-to / Ship-to all have "Name", "Address", "City"). Target one unambiguously by using the field's controlPath as the fields key (e.g. { "server:c[4]/c[1]/c[1]/c[0]": "2000008" }), or by passing group: "Bill-to" alongside caption-keyed fields.
 
 For Document page line items (Sales Order lines, Purchase Order lines), specify section: "lines" to write to the lines repeater. Use rowIndex (0-based row position) or bookmark (stable row identifier from bc_read_data results) to target a specific line. Prefer bookmark over rowIndex when rows may have been reordered or inserted since the last read.
 
@@ -123,7 +150,7 @@ Examples:
 - Write with bookmark targeting: { "pageContextId": "abc", "section": "lines", "bookmark": "XXXX", "fields": { "Description": "Consulting Services" } }`,
       inputSchema: toMcpJsonSchema(WriteDataSchema),
       zodSchema: WriteDataSchema,
-      execute: (input) => ops.writeData.execute(input as Parameters<typeof ops.writeData.execute>[0]),
+      execute: (ops, input) => ops.writeData.execute(input as Parameters<typeof ops.writeData.execute>[0]),
     },
     {
       name: 'bc_execute_action',
@@ -139,6 +166,8 @@ If the action triggers a confirmation dialog or modal page, the response include
 
 Row-scoped actions (Delete, Edit on a list row) require targeting a specific row. Use rowIndex (0-based) or bookmark to specify which row the action applies to. For Document pages, use section to disambiguate between header and line actions (e.g., "Delete" on header deletes the whole document, "Delete" on "lines" deletes one line).
 
+For a bookmark-targeted Delete, do NOT read "success" as "the row is gone": BC can complete the action and keep the row (an uncommitted blank placeholder line, or a page not opened for editing). The repeater is re-read from the server afterwards and the verdict comes back as "deleted" (true/false) plus a "note" explaining a false. When the delete opens a confirmation dialog, "deleted" is absent on purpose — the delete is not resolved until you answer with bc_respond_dialog.
+
 Do NOT use this for writing field values -- use bc_write_data. Do NOT use this to open records from a list -- use bc_navigate with drill_down action instead.
 
 Examples:
@@ -149,18 +178,20 @@ Examples:
 - Delete a document line: { "pageContextId": "abc", "action": "Delete", "section": "lines", "rowIndex": 2 }`,
       inputSchema: toMcpJsonSchema(ExecuteActionSchema),
       zodSchema: ExecuteActionSchema,
-      execute: (input) => ops.executeAction.execute(input as Parameters<typeof ops.executeAction.execute>[0]),
+      execute: (ops, input) => ops.executeAction.execute(input as Parameters<typeof ops.executeAction.execute>[0]),
     },
     {
       name: 'bc_close_page',
       description: `Closes an open Business Central page and frees its server-side resources including the WebSocket form session. Always call this when you are finished working with a page to prevent resource leaks on the BC server. Requires a pageContextId from bc_open_page.
 
-After closing, the pageContextId becomes invalid -- any subsequent bc_read_data, bc_write_data, bc_execute_action, or bc_navigate calls using it will fail. It is safe to call this even if prior operations on the page encountered errors. If you opened a drill-down page via bc_navigate (which returns a new pageContextId), close both the drill-down page and the original list page when done.
+IMPORTANT -- "success" does NOT always mean the page closed. If the page has unsaved changes, BC intercepts the close with a "save changes?" dialog and the page STAYS OPEN; the response is success:true but with requiresDialogResponse:true, a dialogsOpened entry, the still-valid pageContextId and a "hint". In that case the page is not closed yet: either answer the dialog with bc_respond_dialog (yes = save and close, no = discard and close) or re-call bc_close_page with discardChanges:true. Treat the close as done only when requiresDialogResponse is false/absent.
+
+After a real close, the pageContextId becomes invalid -- any subsequent bc_read_data, bc_write_data, bc_execute_action, or bc_navigate calls using it will fail. It is safe to call this even if prior operations on the page encountered errors. If you opened a drill-down page via bc_navigate (which returns a new pageContextId), close both the drill-down page and the original list page when done.
 
 Do NOT call this in the middle of a multi-step workflow -- finish all reads, writes, and actions on the page first. Do NOT call this to "reset" a page; use bc_read_data to refresh data instead.`,
       inputSchema: toMcpJsonSchema(ClosePageSchema),
       zodSchema: ClosePageSchema,
-      execute: (input) => ops.closePage.execute(input as Parameters<typeof ops.closePage.execute>[0]),
+      execute: (ops, input) => ops.closePage.execute(input as Parameters<typeof ops.closePage.execute>[0]),
     },
     {
       name: 'bc_search_pages',
@@ -177,29 +208,29 @@ Examples:
 - Empty case: { "results": [], "note": "No results. Tell Me is profile-scoped..." }.`,
       inputSchema: toMcpJsonSchema(SearchPagesSchema),
       zodSchema: SearchPagesSchema,
-      execute: (input) => ops.searchPages.execute(input as Parameters<typeof ops.searchPages.execute>[0]),
+      execute: (ops, input) => ops.searchPages.execute(input as Parameters<typeof ops.searchPages.execute>[0]),
     },
     {
       name: 'bc_navigate',
-      description: `Navigates to a specific record on an open Business Central List or Document page using its bookmark. Supports three actions: "select" positions the cursor on a row without opening it, "drill_down" opens the record in its Card/Document page, and "lookup" triggers the lookup action on a specific field. Requires a pageContextId from bc_open_page and a bookmark from row data returned by bc_open_page or bc_read_data.
+      description: `Navigates to a specific record on an open Business Central List or Document page using its bookmark. Supports exactly TWO actions: "select" positions the cursor on a row without opening it, and "drill_down" opens the record in its Card/Document page. Requires a pageContextId from bc_open_page and a bookmark from row data returned by bc_open_page or bc_read_data.
 
 Action "select" (default): Positions the cursor on the specified row. Use this before bc_execute_action when you need to target a specific record for an action like Delete. Does NOT open the record or return new data -- it only moves the selection.
 
 Action "drill_down": Opens the record's detail page (e.g., drilling down from Customer List opens Customer Card, drilling down from Sales Orders opens Sales Order). Returns a NEW pageContextId for the opened Card/Document page with its full state. The original List page remains open. Remember to bc_close_page both pages when done.
 
-Action "lookup": Triggers a lookup on a specific field (specified via the field parameter) to open the related entity's list for selection.
+Row targeting is by bookmark only; there is no field/column parameter and no "lookup" action. The drill-down always uses the row's default action (BC's own row Edit), which is what the web client does when you click the row. To reach a related entity from a field, open its page with bc_open_page instead.
 
-Section and field targeting: Use section (e.g., "lines") to navigate within a Document page's subpage repeater. Use field to specify which column to drill down or look up from (e.g., field: "No." to drill down on the item number column).
+Section targeting: use section (e.g., "lines") to navigate within a Document page's subpage repeater. Omit it for the page's main/header repeater.
 
 Do NOT use this for Card pages -- it only works on pages with repeater rows. Do NOT confuse "select" with "drill_down": select just moves the cursor, drill_down opens a new page.
 
 Examples:
 - Select a row: { "pageContextId": "abc", "bookmark": "XXXX", "action": "select" }
 - Drill down to Card: { "pageContextId": "abc", "bookmark": "XXXX", "action": "drill_down" }
-- Drill down on a line item field: { "pageContextId": "abc", "bookmark": "XXXX", "action": "drill_down", "section": "lines", "field": "No." }`,
+- Drill down on a document line: { "pageContextId": "abc", "bookmark": "XXXX", "action": "drill_down", "section": "lines" }`,
       inputSchema: toMcpJsonSchema(NavigateSchema),
       zodSchema: NavigateSchema,
-      execute: (input) => ops.navigate.execute(input as Parameters<typeof ops.navigate.execute>[0]),
+      execute: (ops, input) => ops.navigate.execute(input as Parameters<typeof ops.navigate.execute>[0]),
     },
     {
       name: 'bc_respond_dialog',
@@ -214,7 +245,7 @@ Do NOT call this without a preceding dialog -- there is no dialog to respond to 
 Example: { "pageContextId": "abc", "dialogFormId": "dialog-123", "response": "yes" }`,
       inputSchema: toMcpJsonSchema(RespondDialogSchema),
       zodSchema: RespondDialogSchema,
-      execute: (input) => ops.respondDialog.execute(input as Parameters<typeof ops.respondDialog.execute>[0]),
+      execute: (ops, input) => ops.respondDialog.execute(input as Parameters<typeof ops.respondDialog.execute>[0]),
     },
     {
       name: 'bc_switch_company',
@@ -227,7 +258,7 @@ Do NOT switch companies in the middle of a multi-step workflow (e.g., between cr
 Example: { "companyName": "CRONUS International Ltd." }`,
       inputSchema: toMcpJsonSchema(SwitchCompanySchema),
       zodSchema: SwitchCompanySchema,
-      execute: (input) => ops.switchCompany.execute(input as Parameters<typeof ops.switchCompany.execute>[0]),
+      execute: (ops, input) => ops.switchCompany.execute(input as Parameters<typeof ops.switchCompany.execute>[0]),
     },
     {
       name: 'bc_list_companies',
@@ -238,7 +269,7 @@ This tool opens the BC Companies system page internally, reads all entries, and 
 Do NOT use this if you already know the company name -- call bc_switch_company directly. If you need to work with data in a specific company, use bc_switch_company followed by bc_open_page.`,
       inputSchema: toMcpJsonSchema(ListCompaniesSchema),
       zodSchema: ListCompaniesSchema,
-      execute: () => ops.listCompanies.execute(),
+      execute: (ops) => ops.listCompanies.execute(),
     },
     {
       name: 'bc_run_report',
@@ -251,7 +282,7 @@ Do NOT use this for viewing data -- use bc_open_page and bc_read_data for data r
 Example: { "reportId": 6 }`,
       inputSchema: toMcpJsonSchema(RunReportSchema),
       zodSchema: RunReportSchema,
-      execute: (input) => ops.runReport.execute(input as Parameters<typeof ops.runReport.execute>[0]),
+      execute: (ops, input) => ops.runReport.execute(input as Parameters<typeof ops.runReport.execute>[0]),
     },
     {
       name: 'bc_download_report',
@@ -271,7 +302,7 @@ Example: { "reportId": 6 } -> { "downloaded": true, "path": "C:/.../report-6-...
 Example: { "reportId": 6, "format": "excel" } -> an .xlsx, or downloaded:false + availableFormats when report 6 has no Excel option.`,
       inputSchema: toMcpJsonSchema(DownloadReportSchema),
       zodSchema: DownloadReportSchema,
-      execute: (input) => ops.downloadReport.execute(input as Parameters<typeof ops.downloadReport.execute>[0]),
+      execute: (ops, input) => ops.downloadReport.execute(input as Parameters<typeof ops.downloadReport.execute>[0]),
     },
     {
       name: 'bc_wizard_navigate',
@@ -286,7 +317,7 @@ Do NOT use this for non-wizard pages -- use bc_execute_action instead. Do NOT ca
 Example: { "pageContextId": "abc", "action": "next" }`,
       inputSchema: toMcpJsonSchema(WizardNavigateSchema),
       zodSchema: WizardNavigateSchema,
-      execute: (input) => ops.wizardNavigate.execute(input as Parameters<typeof ops.wizardNavigate.execute>[0]),
+      execute: (ops, input) => ops.wizardNavigate.execute(input as Parameters<typeof ops.wizardNavigate.execute>[0]),
     },
     {
       name: 'bc_screenshot',
@@ -317,7 +348,7 @@ Examples:
 - Save to a file, no inline image: { "pageId": 21, "out": "C:/manuals/customer-card.png", "inline": false }`,
       inputSchema: toMcpJsonSchema(ScreenshotSchema),
       zodSchema: ScreenshotSchema,
-      execute: (input) => ops.screenshot.execute(input as Parameters<typeof ops.screenshot.execute>[0]),
+      execute: (ops, input) => ops.screenshot.execute(input as Parameters<typeof ops.screenshot.execute>[0]),
     },
     {
       name: 'bc_build_manual',
@@ -343,7 +374,7 @@ Example:
 }`,
       inputSchema: toMcpJsonSchema(BuildManualSchema),
       zodSchema: BuildManualSchema,
-      execute: (input) => ops.buildManual.execute(input as Parameters<typeof ops.buildManual.execute>[0]),
+      execute: (ops, input) => ops.buildManual.execute(input as Parameters<typeof ops.buildManual.execute>[0]),
     },
     {
       name: 'bc_find_object',
@@ -359,7 +390,7 @@ Examples:
 - { "query": "9174" } -> the object with id 9174.`,
       inputSchema: toMcpJsonSchema(FindObjectSchema),
       zodSchema: FindObjectSchema,
-      execute: (input) => ops.findObject.execute(input as Parameters<typeof ops.findObject.execute>[0]),
+      execute: (ops, input) => ops.findObject.execute(input as Parameters<typeof ops.findObject.execute>[0]),
     },
     {
       name: 'bc_refresh_objects',
@@ -375,9 +406,43 @@ Examples:
 - { "all": true } -> full rebuild including standard (slow).`,
       inputSchema: toMcpJsonSchema(RefreshObjectsSchema),
       zodSchema: RefreshObjectsSchema,
-      execute: (input) => ops.refreshObjects.execute(input as Parameters<typeof ops.refreshObjects.execute>[0]),
+      execute: (ops, input) => ops.refreshObjects.execute(input as Parameters<typeof ops.refreshObjects.execute>[0]),
     },
-  ];
+];
+
+/**
+ * Tool metadata only — safe to read at process start, before any BC connection.
+ * (bc_health is NOT here: it is built separately by buildHealthTool because it
+ * bypasses the session gate.)
+ */
+export const TOOL_METADATA: readonly ToolMetadata[] = TOOL_SPECS.map(({ execute: _execute, ...meta }) => meta);
+
+/** Bind the static specs to a live set of operations. */
+export function buildToolRegistry(ops: Operations): ToolDefinition[] {
+  return TOOL_SPECS.map(spec => ({
+    name: spec.name,
+    description: spec.description,
+    inputSchema: spec.inputSchema,
+    zodSchema: spec.zodSchema,
+    execute: (input: unknown) => spec.execute(ops, input),
+  }));
+}
+
+/**
+ * Same tool surface, but the operations are resolved lazily on the FIRST tools/call.
+ * `resolveOperations` is expected to open (or recover) the BC session and return the
+ * freshly built Operations — it is awaited per call, so a session recreated between
+ * calls is picked up without rebuilding the tool list. This is what both entrypoints
+ * register, so initialize/tools/list answer instantly with BC still cold.
+ */
+export function buildLazyToolRegistry(resolveOperations: () => Promise<Operations>): ToolDefinition[] {
+  return TOOL_SPECS.map(spec => ({
+    name: spec.name,
+    description: spec.description,
+    inputSchema: spec.inputSchema,
+    zodSchema: spec.zodSchema,
+    execute: async (input: unknown) => spec.execute(await resolveOperations(), input),
+  }));
 }
 
 /**

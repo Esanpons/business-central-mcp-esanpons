@@ -1,10 +1,28 @@
 import { z } from 'zod';
 
 // MCP delivers params as strings or typed values — coerce everything.
-// Note: .transform() breaks z.toJSONSchema(), so we keep a separate
-// JSON-schema-safe version (StringOrNumberInput) for schema generation.
-const StringOrNumber = z.union([z.string(), z.number()]).transform(v => String(v).trim());
-const StringOrNumberInput = z.union([z.string(), z.number()]);
+// Note: .transform() breaks z.toJSONSchema(), so every schema whose runtime shape
+// coerces keeps a JSON-schema-safe twin used by toMcpJsonSchema (see the bottom of
+// this file). The twins must advertise the SAME constraints, or the model is told
+// one contract and validated against another.
+//
+// Object IDs (pageId / reportId) end up VERBATIM in BC's OpenForm query string
+// (`page=<id>&tenant=...`) and in the browser deep-links. Without a numeric check a
+// value like "22&mode=Edit&filter='No.' IS '10000'" smuggles extra OpenForm
+// parameters past every other guard. Trim first, then require digits only.
+const NUMERIC_ID_RE = /^\d+$/;
+const numericIdMessage = (what: string) => `${what} must be a plain numeric BC object id (digits only, e.g. 22). Anything else — an id with extra query parameters, a name, a range — is rejected.`;
+const NumericId = (what: string) =>
+  z.union([z.string(), z.number()])
+    .transform(v => String(v).trim())
+    .refine(v => NUMERIC_ID_RE.test(v), { message: numericIdMessage(what) });
+// JSON-Schema-safe twin (no .transform()), used by toMcpJsonSchema so the published
+// schema advertises the same constraint as `pattern`.
+const NumericIdInput = z.union([z.string().regex(NUMERIC_ID_RE), z.number().int().nonnegative()]);
+
+// Tenant ids are GUIDs or simple names ("default"). Same injection surface as pageId:
+// the value is concatenated into the OpenForm query and the deep-link URL.
+const TenantId = z.string().regex(/^[A-Za-z0-9._-]+$/, 'tenantId may only contain letters, digits, dot, underscore and hyphen.');
 
 // Field / filter values: an agent naturally sends { "Quantity": 5, "Blocked": true },
 // not { "Quantity": "5" }. Accept string|number|boolean and coerce to string at the
@@ -18,7 +36,7 @@ const WriteValue = z.union([z.string(), z.number(), z.boolean()]);
 // advertising a real parameter (it already happened once: `filters` was invisible).
 const openPageFields = {
   bookmark: z.string().optional().describe('Open the page to a specific record. Bookmarks come from list row results in bc_open_page or bc_read_data.'),
-  tenantId: z.string().optional().describe('BC tenant ID. Defaults to the server-configured tenant. Only needed in multi-tenant deployments.'),
+  tenantId: TenantId.optional().describe('BC tenant ID. Defaults to the server-configured tenant. Only needed in multi-tenant deployments.'),
   mode: z.enum(['Create', 'Edit', 'View']).optional().describe('Record mode. "Create" opens a BLANK, initialised record (BC runs OnNewRecord and the No. Series) ready to fill with bc_write_data — this is how you CREATE a record; bc_execute_action {action:"New"} only navigates. "Edit"/"View" force editability of the record the page lands on. Omit for BC\'s default.'),
   filters: z.array(z.object({
     column: z.string().describe('AL field NAME (invariant), e.g. "No.", "Name", "City" — NOT the localized caption ("Nº"/"Nombre" fail).'),
@@ -37,7 +55,7 @@ const openPageFields = {
 const PAGE_ID_DESC = 'Numeric BC page ID (e.g., 22 for Customer List, 21 for Customer Card). Use bc_search_pages to find IDs.';
 
 export const OpenPageSchema = z.object({
-  pageId: StringOrNumber.describe(PAGE_ID_DESC),
+  pageId: NumericId('pageId').describe(PAGE_ID_DESC),
   ...openPageFields,
 });
 
@@ -112,7 +130,7 @@ export const SwitchCompanySchema = z.object({
 });
 
 export const RunReportSchema = z.object({
-  reportId: StringOrNumber.describe('Numeric BC report ID to execute (e.g., 1306 for Customer Statement, 6 for Trial Balance).'),
+  reportId: NumericId('reportId').describe('Numeric BC report ID to execute (e.g., 1306 for Customer Statement, 6 for Trial Balance).'),
 });
 
 // Shared between the runtime schema and the JSON-Schema-safe variant (see toMcpJsonSchema).
@@ -126,7 +144,7 @@ const downloadReportFields = {
 };
 
 export const DownloadReportSchema = z.object({
-  reportId: StringOrNumber.describe('Numeric BC report ID to render and download (e.g., 6 Trial Balance, 1306 Customer Statement).'),
+  reportId: NumericId('reportId').describe('Numeric BC report ID to render and download (e.g., 6 Trial Balance, 1306 Customer Statement).'),
   ...downloadReportFields,
 });
 
@@ -155,7 +173,7 @@ const AnnotationSchema = z.object({
 const HighlightSchema = z.union([z.string(), z.array(z.string()), z.array(AnnotationSchema)]);
 
 export const ScreenshotSchema = z.object({
-  pageId: StringOrNumberInput.describe('Numeric BC page ID to screenshot (e.g., 21 for Customer Card, 22 for Customer List). Use bc_search_pages to find IDs.'),
+  pageId: NumericIdInput.describe('Numeric BC page ID to screenshot (e.g., 21 for Customer Card, 22 for Customer List). Use bc_search_pages to find IDs.'),
   bookmark: z.string().optional().describe('Open a specific record before capturing. Bookmarks come from list row results in bc_open_page / bc_read_data. Omit for list/role-center pages.'),
   company: z.string().optional().describe('Company to capture in. Defaults to the session\'s current company. Pin it explicitly for consistent manuals across runs.'),
   highlight: HighlightSchema.optional().describe('Draw callout(s) on the page. A single caption -> one red box. A list of captions -> auto-numbered badges (1,2,3...) for ordered manual steps. A list of {target,label,style} objects -> full control. Ideal for "click here" manual steps.'),
@@ -172,7 +190,7 @@ export const ScreenshotSchema = z.object({
 });
 
 const ManualScreenshotSchema = z.object({
-  pageId: StringOrNumberInput.describe('BC page ID to capture for this step.'),
+  pageId: NumericIdInput.describe('BC page ID to capture for this step.'),
   bookmark: z.string().optional().describe('Record bookmark (from bc_open_page / bc_read_data rows).'),
   company: z.string().optional().describe('Company to capture in (defaults to the session company).'),
   highlight: HighlightSchema.optional().describe('Callout(s): a caption, a list of captions (auto-numbered), or {target,label,style} objects.'),
@@ -190,6 +208,7 @@ const ManualStepSchema = z.object({
   body: z.string().optional().describe('Prose explaining the step.'),
   screenshot: ManualScreenshotSchema.optional().describe('Capture a fresh annotated screenshot for this step.'),
   image: z.string().optional().describe('Or reference an existing PNG (absolute path, or relative to the manual dir).'),
+  caption: z.string().optional().describe('Caption printed under this step\'s figure (e.g. "Customer Card, General FastTab"). Rendered as a <figcaption> in the HTML and as an italic line in Markdown.'),
 });
 
 export const BuildManualSchema = z.object({
@@ -216,25 +235,26 @@ export const WizardNavigateSchema = z.object({
  * z.toJSONSchema() cannot represent. All other schemas pass through directly.
  */
 export function toMcpJsonSchema(schema: z.ZodType): Record<string, unknown> {
-  // OpenPageSchema uses StringOrNumber with .transform() — use the safe variant
+  // OpenPageSchema's pageId uses .transform()+.refine() — use the safe twin, which
+  // carries the same digits-only constraint as a JSON Schema `pattern`.
   if (schema === OpenPageSchema) {
     const safe = z.object({
-      pageId: StringOrNumberInput.describe(PAGE_ID_DESC),
+      pageId: NumericIdInput.describe(PAGE_ID_DESC),
       ...openPageFields,
     });
     return z.toJSONSchema(safe) as Record<string, unknown>;
   }
-  // RunReportSchema uses StringOrNumber with .transform() — use the safe variant
+  // RunReportSchema — same treatment for reportId.
   if (schema === RunReportSchema) {
     const safe = z.object({
-      reportId: StringOrNumberInput.describe('Numeric BC report ID to execute (e.g., 1306 for Customer Statement, 6 for Trial Balance).'),
+      reportId: NumericIdInput.describe('Numeric BC report ID to execute (e.g., 1306 for Customer Statement, 6 for Trial Balance).'),
     });
     return z.toJSONSchema(safe) as Record<string, unknown>;
   }
-  // DownloadReportSchema uses StringOrNumber with .transform() — use the safe variant
+  // DownloadReportSchema — same treatment for reportId.
   if (schema === DownloadReportSchema) {
     const safe = z.object({
-      reportId: StringOrNumberInput.describe('Numeric BC report ID to render and download (e.g., 6 Trial Balance, 1306 Customer Statement).'),
+      reportId: NumericIdInput.describe('Numeric BC report ID to render and download (e.g., 6 Trial Balance, 1306 Customer Statement).'),
       ...downloadReportFields,
     });
     return z.toJSONSchema(safe) as Record<string, unknown>;

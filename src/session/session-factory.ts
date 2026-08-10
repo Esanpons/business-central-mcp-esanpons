@@ -23,7 +23,12 @@ export class SessionFactory {
 
     // SaaS binds a server-assigned backend tenant (discovered from the WS URL);
     // on-prem uses the configured tenant. The provider decides.
-    const tenantId = this.connectionFactory.provider.getTenantIdOverride() ?? this.tenantId;
+    const provider = this.connectionFactory.provider;
+    const tenantId = provider.getTenantIdOverride() ?? this.tenantId;
+    // SaaS omits `&tenant=` from OpenForm-style queries (BCSession.runReport);
+    // the provider is the single source of truth for the mode, exactly as
+    // PageService is configured from the mode at construction time.
+    const omitTenantInQueries = provider.omitsTenantInQueries?.() ?? false;
 
     const session = new BCSession(
       wsResult.value,
@@ -33,6 +38,7 @@ export class SessionFactory {
       tenantId,
       this.timeoutMs,
       this.profile,
+      omitTenantInQueries,
     );
 
     const initResult = await session.initialize(tenantId);

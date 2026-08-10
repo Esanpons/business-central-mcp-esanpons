@@ -5,8 +5,7 @@ import type { PageContextRepository } from '../protocol/page-context-repo.js';
 import type { ControlField } from '../protocol/types.js';
 import { resolveSection } from '../protocol/section-resolver.js';
 import { detectChangedSections, detectDialogs } from '../protocol/mutation-result.js';
-import { isEffectivelyVisible } from '../protocol/visibility.js';
-import { fields as treeFields, groupVisibility as treeGroupVisibility } from '../protocol/form-views.js';
+import { visibleCaptionedFields } from '../protocol/section-dto.js';
 
 export interface ExecuteActionInput {
   pageContextId: string;
@@ -32,6 +31,15 @@ export interface ExecuteActionOutput {
   openedPages: Array<{ pageContextId: string; caption: string }>;
   dialogsOpened: Array<{ formId: string; message?: string; fields?: ControlField[] }>;
   requiresDialogResponse: boolean;
+  /**
+   * For a bookmark-targeted Delete: whether the row is REALLY gone, checked against
+   * the repeater re-read from the server. `false` means BC completed the action and
+   * kept the row — see `note`. Absent when the action was not such a delete, or when
+   * a dialog is still pending.
+   */
+  deleted?: boolean;
+  /** Why an action completed without doing what its name says. */
+  note?: string;
 }
 
 export class ExecuteActionOperation {
@@ -63,10 +71,7 @@ export class ExecuteActionOperation {
     if (!quiet && ar.updatedState) {
       const resolved = resolveSection(ar.updatedState, 'header');
       if (!('error' in resolved)) {
-        const root = resolved.form.root;
-        const groupVis = treeGroupVisibility(root);
-        updatedFields = treeFields(root)
-          .filter(f => f.properties.caption && isEffectivelyVisible(root, f.controlPath, groupVis, ar.updatedState!.wizardState))
+        updatedFields = visibleCaptionedFields(resolved.form.root, ar.updatedState.wizardState)
           .map(f => ({ name: f.properties.caption!, value: f.properties.stringValue }));
       }
     }
@@ -99,6 +104,8 @@ export class ExecuteActionOperation {
       openedPages,
       dialogsOpened,
       requiresDialogResponse: dialogsOpened.length > 0,
+      ...(ar.deleted !== undefined ? { deleted: ar.deleted } : {}),
+      ...(ar.note ? { note: ar.note } : {}),
     };
   }
 }

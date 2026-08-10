@@ -93,7 +93,7 @@ const executeAction = new ExecuteActionOperation(actionService, repo);
 const closePage = new ClosePageOperation(pageService);
 const searchPages = new SearchPagesOperation(searchService);
 const navigate = new NavigateOperation(navigationService);
-const respondDialog = new RespondDialogOperation(session, repo);
+const respondDialog = new RespondDialogOperation(session, repo, logger);
 const switchCompany = new SwitchCompanyOperation(session, repo, logger);
 const listCompanies = new ListCompaniesOperation(pageService, dataService, () => session.companyName, logger);
 const runReport = new RunReportOperation(session);

@@ -21,6 +21,12 @@ export function fieldNodeToControlField(root: FormNode, f: FieldNode): ControlFi
     columnBinderName: f.columnBinder?.name,
     ...(f.hasLookup ? { isLookup: true } : {}),
     ...(f.properties.showMandatory ? { showMandatory: true } : {}),
+    // Same shape SectionField publishes, so both DTOs answer "what may I write
+    // into this option field?" identically.
+    ...(f.properties.options ? { options: f.properties.options.map(o => o.text) } : {}),
+    ...(f.properties.options && f.properties.optionIndex !== undefined && f.properties.optionIndex >= 0
+      ? { selectedOption: f.properties.options[f.properties.optionIndex]?.text }
+      : {}),
     ancestorGroupPaths: ancestorGroupPaths(root, f.controlPath),
   };
 }

@@ -94,7 +94,11 @@ function buildChildren(rawChildren: unknown, parentPath: string, insideRepeater:
 
 function buildNode(obj: Record<string, unknown>, controlPath: string, insideRepeater: boolean): FormNode {
   const t = obj.t as string | undefined;
-  if (!t) return makeUnknown(controlPath, '', readProperties(obj));
+  // A tagless node still carries a subtree: build its children too, exactly as
+  // the unknown-WITH-`t` branch below does. Dropping them would erase every
+  // descendant controlPath, so later PropertyChanged events on those paths
+  // would silently no-op.
+  if (!t) return makeUnknown(controlPath, '', readProperties(obj), buildChildren(obj.Children, controlPath, insideRepeater));
 
   if (t === 'gc') return buildGroup(obj, controlPath, insideRepeater);
   if (t === 'ac') return buildAction(obj, controlPath, insideRepeater);
@@ -125,12 +129,9 @@ function buildField(obj: Record<string, unknown>, t: FieldType, controlPath: str
     return makeUnknown(controlPath, '__spacer__', {});
   }
 
+  // The ExpressionProperties.Visible fallback lives in readProperties() so it
+  // applies to EVERY control kind (gc / stackgc / ac / rc), not just fields.
   const props = readProperties(obj);
-  // ExpressionProperties.Visible fallback when top-level Visible is absent.
-  if (props.visible === undefined && obj.ExpressionProperties && typeof obj.ExpressionProperties === 'object') {
-    const expr = obj.ExpressionProperties as Record<string, unknown>;
-    if (typeof expr.Visible === 'boolean') (props as Record<string, unknown>).visible = expr.Visible;
-  }
   const binder = obj.ColumnBinder as { Name?: string; Path?: string } | undefined;
   const hasLookup = !!(obj.AssistEditAction || obj.LookupAction);
 
@@ -187,13 +188,81 @@ function buildRepeater(obj: Record<string, unknown>, controlPath: string): Repea
       });
     }
   }
+
+  // Option/enum choices are published on the ROW-CELL TEMPLATE controls, never on
+  // the `rcc` header node. On the live BC27/BC28 wire those templates sit under
+  // `CurrentRow.Children` (see cuegroup-rolecenter-2026-04-28.json); older/other
+  // tiers put them in `Children`. Scan both raw arrays, key by ColumnBinder.Name,
+  // and merge the options onto the matching column. We deliberately read the raw
+  // wire nodes instead of building them into the tree: CurrentRow children belong
+  // to the `cr` path space (`{repeater}/cr/c[N]`), which the tree does not model.
+  const optionsByBinder = collectRowTemplateOptions(obj);
+  if (optionsByBinder.size > 0) {
+    for (let k = 0; k < columns.length; k++) {
+      const col = columns[k]!;
+      const binderName = col.columnBinder?.name;
+      if (!binderName) continue;
+      const opts = optionsByBinder.get(binderName);
+      if (!opts) continue;
+      columns[k] = { ...col, properties: { ...col.properties, options: opts } };
+    }
+  }
+
   return {
     type: 'rc',
     controlPath,
     properties: readProperties(obj),
     columns,
     children: buildChildren(obj.Children, controlPath, true),
+    headerActions: buildHeaderActions(obj.HeaderActions, controlPath),
   };
+}
+
+/**
+ * Parse the repeater's wire `HeaderActions` array into ActionNodes addressed by
+ * the `ha[N]` path segment (`RepeaterControl.ResolvePathName`). These are the
+ * row-scoped actions ("Open", "Delete", …) BC renders above/next to a list, so
+ * they are marked `isLineScoped: true`.
+ */
+function buildHeaderActions(raw: unknown, controlPath: string): ActionNode[] {
+  if (!Array.isArray(raw)) return [];
+  const result: ActionNode[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const a = raw[i];
+    if (!a || typeof a !== 'object') continue;
+    const node = a as Record<string, unknown>;
+    if (node.t !== 'ac') continue;
+    result.push(buildAction(node, `${controlPath}/ha[${i}]`, true));
+  }
+  return result;
+}
+
+type OptionList = ReadonlyArray<{ readonly text: string; readonly value: string }>;
+
+/** Map ColumnBinder.Name -> option list, from a repeater's row-cell templates. */
+function collectRowTemplateOptions(obj: Record<string, unknown>): Map<string, OptionList> {
+  const map = new Map<string, OptionList>();
+  const currentRow = obj.CurrentRow as Record<string, unknown> | undefined;
+  const sources: unknown[] = [
+    ...(Array.isArray(obj.Children) ? obj.Children : []),
+    ...(currentRow && Array.isArray(currentRow.Children) ? currentRow.Children : []),
+  ];
+  for (const raw of sources) {
+    if (!raw || typeof raw !== 'object') continue;
+    const c = raw as Record<string, unknown>;
+    const binderName = (c.ColumnBinder as { Name?: string } | undefined)?.Name;
+    if (!binderName || map.has(binderName)) continue;
+    const opts = readOptions(c);
+    if (opts) map.set(binderName, opts);
+  }
+  return map;
+}
+
+function readOptions(obj: Record<string, unknown>): OptionList | undefined {
+  if (!Array.isArray(obj.Items)) return undefined;
+  return (obj.Items as Array<unknown>)
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+    .map(item => ({ text: String(item.Text ?? ''), value: String(item.Value ?? '') }));
 }
 
 function buildFormHost(obj: Record<string, unknown>, controlPath: string): FormHostNode {
@@ -268,10 +337,21 @@ function readProperties(obj: Record<string, unknown>): NodeProperties {
   if (typeof obj.TotalRowCount === 'number') p.totalRowCount = obj.TotalRowCount;
   if (typeof obj.Bookmark === 'string') p.bookmark = obj.Bookmark;
   if (typeof obj.HasFiltersApplied === 'boolean') p.hasFiltersApplied = obj.HasFiltersApplied;
-  // Record whether ExpressionProperties.Visible exists (wizard step detection).
+  // Record whether ExpressionProperties.Visible exists (wizard step detection),
+  // and use it as the `visible` value when the top-level flag is absent. BC
+  // publishes the computed binding there for ANY control kind — gc/stackgc/ac/rc
+  // included — so the fallback must live here rather than in buildField alone.
   const expr = obj.ExpressionProperties;
   if (expr && typeof expr === 'object' && 'Visible' in (expr as Record<string, unknown>)) {
     p.hasVisibleExpression = true;
+    const exprVisible = (expr as Record<string, unknown>).Visible;
+    if (p.visible === undefined && typeof exprVisible === 'boolean') p.visible = exprVisible;
   }
+  // Option/enum choices: `Items` = [{Text, Value}], `CurrentIndex` = selected
+  // index (-1 = none). Present on `sec` (option/enum) and `bc` (boolean)
+  // controls. Verified on the live wire — see NodeProperties.options.
+  const opts = readOptions(obj);
+  if (opts) p.options = opts;
+  if (typeof obj.CurrentIndex === 'number') p.optionIndex = obj.CurrentIndex;
   return p as NodeProperties;
 }

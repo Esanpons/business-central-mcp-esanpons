@@ -125,6 +125,19 @@ export class FilterService {
     if ('error' in resolved) return err(new ProtocolError(resolved.error, { availableSections: resolved.availableSections }));
     if (!resolved.repeater) return err(new ProtocolError('Page has no repeater -- cannot clear filters'));
 
+    // Fail as loudly as applyFilters does. On BC27/BC28 the filter PANE is inert
+    // (columns ship a ColumnBinder.Name but no .Path), so a Reset here completes
+    // happily and clears nothing — reporting success for a no-op, while the
+    // symmetric applyFilters hard-errors. Both must point at the working path.
+    const hasBinderPath = resolved.repeater.columns.some(c => !!c.columnBinder?.path);
+    if (!hasBinderPath) {
+      return err(new ProtocolError(
+        'Clearing filters via the filter pane is not supported on this BC build (no column carries a columnBinderPath), ' +
+        'so a Reset here would silently do nothing. Clear the filters by re-opening the page without them ' +
+        '(bc_read_data with filters: [], which re-opens the form unfiltered).',
+      ));
+    }
+
     const fpath = filterControlPath(resolved.form.root);
     const controlPath = fpath ?? resolved.repeater.controlPath;
 

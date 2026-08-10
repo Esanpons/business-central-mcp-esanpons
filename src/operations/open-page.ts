@@ -54,6 +54,12 @@ export interface OpenPageOutput {
    * factboxes, requestPage. See `Section` in protocol/section-dto.ts.
    */
   sections: Section[];
+  /**
+   * Non-fatal problems with the narrowing arguments — e.g. a `tab` that matched no
+   * FastTab, which would otherwise return the FULL field set and look like the
+   * filter had worked. The page IS open and usable; the pageContextId is valid.
+   */
+  warnings?: string[];
 }
 
 export class OpenPageOperation {
@@ -109,11 +115,20 @@ export class OpenPageOperation {
     }
 
     let out = sections;
+    const warnings: string[] = [];
 
     // P7: narrow which sections to return.
     if (input.sections && input.sections.length > 0) {
       const want = new Set(input.sections.map(s => s.toLowerCase()));
-      out = out.filter(s => want.has(s.sectionId.toLowerCase()));
+      const kept = out.filter(s => want.has(s.sectionId.toLowerCase()));
+      if (kept.length === 0) {
+        warnings.push(
+          `sections ${JSON.stringify(input.sections)} matched none of this page's sections ` +
+          `(${sections.map(s => s.sectionId).join(', ')}); returning all of them.`,
+        );
+      } else {
+        out = kept;
+      }
     }
 
     // summary mode short-circuits all per-field work: identity only.
@@ -123,14 +138,21 @@ export class OpenPageOperation {
       // tab filter applies to the header (root form) card fields only.
       if (input.tab) {
         const rootForm = ctx.forms.get(ctx.rootFormId);
-        const tab = rootForm
-          ? treeTabs(rootForm.root).find(t => t.caption.toLowerCase() === input.tab!.toLowerCase())
-          : undefined;
+        const allTabs = rootForm ? treeTabs(rootForm.root) : [];
+        const tab = allTabs.find(t => t.caption.toLowerCase() === input.tab!.toLowerCase());
         if (tab) {
           const tabCaptions = new Set(tab.fields.map(f => (f.properties.caption ?? '').toLowerCase()));
           out = out.map(s => (s.kind === 'header' && s.fields)
             ? { ...s, fields: s.fields.filter(f => tabCaptions.has(f.name.toLowerCase())) }
             : s);
+        } else {
+          // Silently ignoring the miss returned every header field and defeated the
+          // whole point of the argument (token budget). The page is open and valid,
+          // so this is a warning rather than an error — but it must be visible.
+          warnings.push(
+            `tab "${input.tab}" matched no FastTab; header fields were NOT narrowed. ` +
+            (allTabs.length > 0 ? `Available tabs: ${allTabs.map(t => t.caption).join(', ')}.` : 'This page exposes no tabs.'),
+          );
         }
       }
       if (input.columns && input.columns.length > 0) {
@@ -148,6 +170,7 @@ export class OpenPageOperation {
       isModal: ctx.isModal,
       activeFilters: [...ctx.activeFilters],
       sections: out,
+      ...(warnings.length > 0 ? { warnings } : {}),
     });
   }
 }

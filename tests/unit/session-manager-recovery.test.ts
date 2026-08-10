@@ -115,6 +115,83 @@ describe('SessionManager recovery', () => {
     expect(factory.create).toHaveBeenCalledTimes(2); // initial + one recovery
   });
 
+  it('does not publish the session until the pinned company has been applied', async () => {
+    // Publishing first was a race: a concurrent getSession() could enqueue an
+    // invoke ahead of the ChangeCompany and read the WRONG company.
+    const dead = mockSession('CRONUS', true);
+    const fresh = mockSession('CRONUS', true);
+    let releaseChange: (() => void) | null = null;
+    fresh.changeCompany = vi.fn(async (name: string) => {
+      await new Promise<void>((r) => { releaseChange = r; });
+      fresh.companyName = name;
+      return ok([]);
+    });
+    let handed = 0;
+    const factory = { create: vi.fn(async () => ok(handed++ === 0 ? dead : fresh)) };
+    const mgr = new TestSessionManager(factory as never, mockRepo() as never, silentLogger as never);
+
+    await mgr.getSession();
+    mgr.rememberCompany('CRONUS ES');
+    dead.isAlive = false;
+
+    const recovering = mgr.getSession().then(() => 'resolved', (e: unknown) => e);
+    // Let recovery reach the (blocked) changeCompany.
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fresh.changeCompany).toHaveBeenCalled();
+    // The half-configured session must NOT be visible yet.
+    expect(mgr.currentSession).toBeNull();
+
+    releaseChange!();
+    expect(await recovering).toBeInstanceOf(SessionLostError);
+    expect(mgr.currentSession).toBe(fresh);
+    expect(mgr.currentSession?.companyName).toBe('CRONUS ES');
+  });
+
+  it('first-connect failure surfaces the underlying reason, not a bare Error', async () => {
+    const factory = {
+      create: vi.fn(async () => err(new ConnectionError('Authentication failed: Invalid username or password'))),
+    };
+    const mgr = new TestSessionManager(factory as never, mockRepo() as never, silentLogger as never, {
+      maxRetries: 1,
+      baseDelayMs: 1,
+    });
+
+    try {
+      await mgr.getSession();
+      throw new Error('should have thrown');
+    } catch (e) {
+      expect(e).toBeInstanceOf(SessionLostError);
+      const sle = e as SessionLostError;
+      expect(sle.code).toBe('SESSION_LOST');
+      expect(sle.reconnectFailed).toBe(true);
+      expect(sle.message).toContain('Session creation failed after all retry attempts');
+      expect(sle.message).toContain('Invalid username or password');
+    }
+  });
+
+  it('concurrent first callers share one create and both get the same session', async () => {
+    let releaseCreate: (() => void) | null = null;
+    const session = mockSession('CRONUS', true);
+    const factory = {
+      create: vi.fn(async () => {
+        await new Promise<void>((r) => { releaseCreate = r; });
+        return ok(session);
+      }),
+    };
+    const mgr = new TestSessionManager(factory as never, mockRepo() as never, silentLogger as never);
+
+    const a = mgr.getSession();
+    await new Promise((r) => setTimeout(r, 0));
+    const b = mgr.getSession();
+    await new Promise((r) => setTimeout(r, 0));
+    releaseCreate!();
+
+    expect(await a).toBe(session);
+    expect(await b).toBe(session);
+    expect(factory.create).toHaveBeenCalledTimes(1);
+  });
+
   it('B3: a concurrent caller gets the reconnect-failed error when recovery fails', async () => {
     const dead = mockSession('CRONUS', true);
     let handed = 0;

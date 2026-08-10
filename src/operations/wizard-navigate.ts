@@ -4,9 +4,8 @@ import type { ActionService } from '../services/action-service.js';
 import type { PageContextRepository } from '../protocol/page-context-repo.js';
 import { resolveSection } from '../protocol/section-resolver.js';
 import { detectChangedSections, detectDialogs } from '../protocol/mutation-result.js';
-import { isEffectivelyVisible } from '../protocol/visibility.js';
+import { visibleCaptionedActions, visibleCaptionedFields } from '../protocol/section-dto.js';
 import type { ControlField } from '../protocol/types.js';
-import { fields as treeFields, actions as treeActions, groupVisibility as treeGroupVisibility } from '../protocol/form-views.js';
 import { classifyWizardNav, type WizardNav } from '../protocol/wizard-classify.js';
 
 export type { WizardNav };
@@ -54,16 +53,13 @@ export class WizardNavigateOperation {
         const ws = ctx.wizardState;
         caption = ctx.caption || caption;
         if (root) {
-          const groupVis = treeGroupVisibility(root);
-          fieldsOut = treeFields(root)
-            .filter(f => f.properties.caption && isEffectivelyVisible(root, f.controlPath, groupVis, ws))
-            .map(f => ({
-              name: f.properties.caption!,
-              value: f.properties.stringValue,
-              editable: f.properties.editable ?? false,
-            }));
-          availableNav = treeActions(root)
-            .filter(a => (a.properties.enabled ?? true) && isEffectivelyVisible(root, a.controlPath, groupVis, ws))
+          fieldsOut = visibleCaptionedFields(root, ws).map(f => ({
+            name: f.properties.caption!,
+            value: f.properties.stringValue,
+            editable: f.properties.editable ?? false,
+          }));
+          availableNav = visibleCaptionedActions(root, ws)
+            .filter(a => a.properties.enabled ?? true)
             .map(a => classifyWizardNav(a))
             .filter((v): v is WizardNav => !!v);
         }

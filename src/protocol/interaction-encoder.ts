@@ -34,9 +34,82 @@ const BC_SUPPORTED_EXTENSIONS = JSON.stringify([
   { Name: 'Microsoft.Dynamics.Nav.Client.Capabilities.Designer' },
 ]);
 
+/** Wire shape of OpenSession's `timeZoneInformation`. All offsets in minutes east of UTC. */
+export interface TimeZoneInfo {
+  /** STANDARD (non-DST) UTC offset in minutes east. Madrid = 60 year-round. */
+  readonly timeZoneBaseOffset: number;
+  /** Extra minutes added while DST is in effect; 0 when the zone has no DST. */
+  readonly dstOffset: number;
+  /** ISO start of the DST window. Omitted (null) when dstOffset is 0. */
+  readonly dstPeriodStart: string | null;
+  /** ISO end of the DST window. Omitted (null) when dstOffset is 0. */
+  readonly dstPeriodEnd: string | null;
+}
+
+/**
+ * Derive BC's `timeZoneInformation` from the host clock, WITHOUT assuming
+ * Europe or even that DST exists.
+ *
+ * The bug this replaces: `-now.getTimezoneOffset()` already INCLUDES the DST
+ * shift when it is called during summer, yet a fixed `dstOffset: 60` plus the
+ * EU last-Sunday-of-March/October window was sent alongside it. A Madrid host
+ * in August therefore told BC "base +120 and add 60 more" = +180. Hosts outside
+ * the EU, hosts with no DST (UTC, most of Asia), and southern-hemisphere hosts
+ * (DST spans the new year) all got fictional windows.
+ *
+ * Method: probe both solstice months. `Date.prototype.getTimezoneOffset` is
+ * evaluated for the host zone at that instant, so January and July bracket the
+ * standard and daylight offsets in either hemisphere:
+ *   - standard offset = the SMALLER of the two (in minutes east; DST always
+ *     moves the clock forward, i.e. increases the minutes-east value)
+ *   - dstOffset       = their difference (0 when the zone observes no DST)
+ *   - the DST window  = the half of the year whose probe carries the larger
+ *     offset — northern zones get roughly Apr–Oct, southern zones Oct–Apr.
+ *
+ * The window bounds are deliberately MONTH-GRANULAR approximations: BC only
+ * uses them to render local times, no jurisdiction's exact transition date is
+ * derivable from the ECMAScript API without an IANA rule table, and the
+ * offsets themselves (which is what matters for correctness) are exact.
+ *
+ * Exported as a pure function of `now` so it is testable without changing the
+ * machine timezone.
+ */
+export function deriveTimeZoneInfo(now: Date = new Date()): TimeZoneInfo {
+  const year = now.getFullYear();
+  // Minutes EAST of UTC (getTimezoneOffset returns minutes WEST).
+  const janOffset = -new Date(year, 0, 1).getTimezoneOffset();
+  const julOffset = -new Date(year, 6, 1).getTimezoneOffset();
+
+  const standardOffset = Math.min(janOffset, julOffset);
+  const dstOffset = Math.abs(julOffset - janOffset);
+
+  if (dstOffset === 0) {
+    // No DST in this zone (UTC, IST, most of Asia, Arizona, …).
+    return { timeZoneBaseOffset: standardOffset, dstOffset: 0, dstPeriodStart: null, dstPeriodEnd: null };
+  }
+
+  // Northern hemisphere: July is the DST half -> window inside the year.
+  // Southern hemisphere: January is the DST half -> window straddles new year.
+  const northern = julOffset > janOffset;
+  const start = northern ? new Date(year, 3, 1, 2, 0, 0, 0) : new Date(year, 9, 1, 2, 0, 0, 0);
+  const end = northern ? new Date(year, 9, 1, 2, 0, 0, 0) : new Date(year + 1, 3, 1, 2, 0, 0, 0);
+
+  return {
+    timeZoneBaseOffset: standardOffset,
+    dstOffset,
+    dstPeriodStart: start.toISOString(),
+    dstPeriodEnd: end.toISOString(),
+  };
+}
+
 export class InteractionEncoder {
   /**
-   * @param clientVersion  BC client version string (e.g. "27.0.0.0").
+   * @param _clientVersion  BC client version string (e.g. "27.0.0.0"). ACCEPTED
+   *   BUT UNUSED: no BC payload this encoder builds carries a client version —
+   *   the wire compatibility number lives in the protocol codec, not here. The
+   *   parameter is kept so the many call sites need no change; see the report on
+   *   `BC_CLIENT_VERSION` / `BCConfig.clientVersionString`, which only feeds
+   *   `bc_health` output today.
    * @param applicationId  navigationContext.applicationId sent in OpenSession/Invoke.
    *   Must match what the NST expects for the target BC build. On BC 27
    *   (ltsc2025) the real web client sends "NAV"; sending "FIN" makes the server
@@ -45,7 +118,7 @@ export class InteractionEncoder {
    *   Defaults to "NAV". Override via BC_APPLICATION_ID for other builds.
    */
   constructor(
-    readonly clientVersion: string,
+    _clientVersion: string,
     private readonly applicationId: string = 'NAV',
   ) {}
 
@@ -117,32 +190,11 @@ export class InteractionEncoder {
         features: BC_FEATURES,
         profile: profile ?? '',
         rememberCompany: false,
-        timeZoneInformation: this.getTimezoneInfo(),
+        timeZoneInformation: deriveTimeZoneInfo(),
         profileDescription: { Id: null, Caption: null, Description: null },
         disableResponseSequencing: true,
       }],
     };
-  }
-
-  private getTimezoneInfo() {
-    const now = new Date();
-    const offset = -now.getTimezoneOffset();
-    const year = now.getFullYear();
-    const dstStart = this.lastSunday(year, 2); // March (0-indexed)
-    const dstEnd = this.lastSunday(year, 9);   // October (0-indexed)
-    return {
-      timeZoneBaseOffset: offset,
-      dstOffset: 60,
-      dstPeriodStart: dstStart.toISOString(),
-      dstPeriodEnd: dstEnd.toISOString(),
-    };
-  }
-
-  private lastSunday(year: number, month: number): Date {
-    const d = new Date(year, month + 1, 0); // Last day of month
-    d.setDate(d.getDate() - d.getDay());    // Back to Sunday
-    d.setHours(2, 0, 0, 0);
-    return d;
   }
 
   private buildInvocation(interaction: BCInteraction, callbackId: string): Record<string, unknown> {

@@ -42,6 +42,12 @@ export class SessionManager {
    * and failed later with a baffling "page context not found".
    */
   private recovery: { promise: Promise<BCSession | null>; impactedIds: string[] } | null = null;
+  /**
+   * The in-flight FIRST create (no previous session to lose). Concurrent callers
+   * join it instead of starting a second create -- and, more importantly, none of
+   * them sees `this.session` until the pinned company has been applied to it.
+   */
+  private firstCreate: Promise<BCSession | null> | null = null;
   /** Last session-create error message, surfaced in SessionLostError when all retries fail. */
   private lastCreateError: string | null = null;
   /**
@@ -122,8 +128,10 @@ export class SessionManager {
       this.servicesInvalidated = true;
 
       // Publish the in-flight recovery BEFORE awaiting it, so a concurrent caller
-      // takes the branch above instead of the first-create branch.
-      const promise = this.createWithBackoff();
+      // takes the branch above instead of the first-create branch. The promise
+      // covers create AND company-pinning AND publication, so `this.recovery`
+      // stays set for the whole window in which `this.session` is not yet usable.
+      const promise = this.createAndPublish();
       this.recovery = { promise, impactedIds };
       let newSession: BCSession | null;
       try {
@@ -136,10 +144,7 @@ export class SessionManager {
         throw this.reconnectFailedError(impactedIds);
       }
 
-      this.session = newSession;
       this.metrics?.recordReconnect();
-      this.metrics?.recordSessionCreated();
-      await this.applyDesiredCompany(newSession);
       this.logger.info('Session recovered successfully');
 
       // Throw SessionLostError so the MCP handler returns a clear message to the LLM
@@ -149,23 +154,61 @@ export class SessionManager {
       );
     }
 
-    // No session yet -- create one (first call), also with backoff for LogicalModalityViolation
-    const newSession = await this.createWithBackoff();
-    if (newSession === null) {
-      throw new Error('Session creation failed after all retry attempts');
+    // No session yet -- create one (first call), also with backoff for
+    // LogicalModalityViolation. A concurrent caller joins the same attempt.
+    if (this.firstCreate !== null) {
+      const joined = await this.firstCreate;
+      if (joined === null) throw this.createFailedError();
+      return joined;
     }
 
-    // Another caller may have won the race and already installed a session; keep
-    // theirs so both callers share one session (createWithBackoff coalesces, so
-    // this is the same object in practice — the guard is for correctness, and it
-    // is also why recordSessionCreated must not fire twice for one session).
-    if (this.session !== null) return this.session;
+    const attempt = this.createAndPublish();
+    this.firstCreate = attempt;
+    let newSession: BCSession | null;
+    try {
+      newSession = await attempt;
+    } finally {
+      this.firstCreate = null;
+    }
+    if (newSession === null) throw this.createFailedError();
 
-    this.session = newSession;
-    this.metrics?.recordSessionCreated();
-    await this.applyDesiredCompany(newSession);
     this.logger.info('BC session established');
-    return this.session;
+    return newSession;
+  }
+
+  /**
+   * Create a session, put it on the pinned company, and only THEN publish it as
+   * `this.session`.
+   *
+   * Publishing first was a race: `getSession()` returned as soon as the session
+   * object existed, so a concurrent caller could enqueue an invoke ahead of the
+   * ChangeCompany and read data from the wrong company. Both call sites keep a
+   * fence (`recovery` / `firstCreate`) set for the whole duration of this call,
+   * so no caller can observe the half-configured session.
+   */
+  private async createAndPublish(): Promise<BCSession | null> {
+    const session = await this.createWithBackoff();
+    if (session === null) return null;
+    await this.applyDesiredCompany(session);
+    this.session = session;
+    this.metrics?.recordSessionCreated();
+    return session;
+  }
+
+  /**
+   * First-connect failure. This used to be a bare `Error` that threw away
+   * `lastCreateError`, so the caller never learned WHY (wrong password, expired
+   * Entra session needing `npm run login:aad`, unreachable host, self-signed TLS).
+   * A SessionLostError carries the SESSION_LOST code the MCP handler and
+   * error-translator already understand, plus the underlying reason.
+   */
+  private createFailedError(): SessionLostError {
+    const detail = this.lastCreateError ? ` Last error: ${this.lastCreateError}` : '';
+    return new SessionLostError(
+      `Session creation failed after all retry attempts.${detail}`,
+      [],
+      { reconnectFailed: true },
+    );
   }
 
   /**

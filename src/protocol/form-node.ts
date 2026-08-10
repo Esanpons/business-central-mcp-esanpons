@@ -44,6 +44,26 @@ export interface NodeProperties {
    * Reference: `LogicalControlSerializer.WriteExpressionProperty` (decompiled)
    */
   readonly hasVisibleExpression?: boolean;
+  /**
+   * Option/enum choices parsed from the wire `Items` array. Present on `sec`
+   * (option/enum) and `bc` (boolean) controls, and propagated onto the matching
+   * `rcc` repeater column. `text` is the human-readable caption, `value` is the
+   * raw string BC expects in SaveValue.
+   *
+   * Live evidence: `src/protocol/captures/cuegroup-rolecenter-2026-04-28.json`
+   * — a `bc` "Mark as completed" control carries
+   * `Items: [{Text:"No",Value:"False"},{Text:"Yes",Value:"True"}]`, and a `sec`
+   * "Status" carries the four checklist states.
+   */
+  readonly options?: ReadonlyArray<{ readonly text: string; readonly value: string }>;
+  /**
+   * Zero-based index into `options` of the currently selected choice (wire
+   * `CurrentIndex`). `-1` means "no selection / blank". Consumers should fall
+   * back to matching `stringValue` against the option texts when this is absent
+   * — BC's SaveValue echo frequently carries `StringValue` without a refreshed
+   * `CurrentIndex`.
+   */
+  readonly optionIndex?: number;
 }
 
 interface NodeBase<T extends string> {
@@ -85,6 +105,18 @@ export interface ActionNode extends NodeBase<'ac'> {
 export interface RepeaterNode extends NodeBase<'rc'> {
   readonly columns: readonly RepeaterColumnNode[];
   readonly children: readonly FormNode[];     // row-cell field templates
+  /**
+   * Row-scoped actions published by BC in the wire `HeaderActions` array (e.g.
+   * "Open", "Edit", "Delete" on a list repeater). They live OUTSIDE `Children`
+   * and are addressed by the `ha[N]` path segment documented in
+   * `RepeaterControl.ResolvePathName` — hence `${controlPath}/ha[N]`.
+   *
+   * Live evidence: `src/protocol/captures/cuegroup-rolecenter-2026-04-28.json`,
+   * two `rc` nodes carrying `HeaderActions: [{ t: 'ac', Caption: 'Open', … }]`.
+   *
+   * Always present (possibly empty) so walkers/mutators need no `?? []` guard.
+   */
+  readonly headerActions: readonly ActionNode[];
 }
 
 export interface RepeaterColumnNode extends NodeBase<'rcc'> {

@@ -18,6 +18,7 @@ import { isErr } from '../core/result.js';
 import type { BCConfig } from '../core/config.js';
 import type { Logger } from '../core/logger.js';
 import type { IBCAuthProvider } from '../connection/auth/auth-provider.js';
+import { FormsAuthProvider } from '../connection/auth/forms-provider.js';
 import type { RawCookie } from '../connection/auth/cookies.js';
 
 export { parseSetCookie } from '../connection/auth/cookies.js';
@@ -65,6 +66,48 @@ export async function ensureAuthJar(provider: IBCAuthProvider): Promise<RawCooki
   return provider.getCookieJar();
 }
 
+/**
+ * Fallback auth provider for standalone use: when no ACTIVE provider is injected
+ * (scripts, tests), build a self-contained forms provider from config. Shared by
+ * ScreenshotService and ReportDownloadService so the construction lives in one
+ * place.
+ */
+export function fallbackFormsProvider(config: BCConfig, logger: Logger): IBCAuthProvider {
+  return new FormsAuthProvider({
+    baseUrl: config.baseUrl,
+    username: config.username,
+    password: config.password,
+    tenantId: config.tenantId,
+    tlsInsecure: config.tlsInsecure,
+  }, logger);
+}
+
+/**
+ * Shared SignIn-bounce recovery: when cookie injection lands on the login page,
+ * the injected jar is stale server-side. Drop it (so the next capture AND the
+ * next WS reconnect, if the provider is shared, re-authenticate), log in once
+ * in-page, and optionally re-navigate to the original deep link. Returns true
+ * when a bounce was detected and recovered.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function recoverIfOnSignIn(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  p: any,
+  provider: IBCAuthProvider,
+  config: BCConfig,
+  logger: Logger,
+  opts?: { tag?: string; returnTo?: string },
+): Promise<boolean> {
+  if (!(await onSignIn(p))) return false;
+  logger.warn(`[${opts?.tag ?? 'bc-web'}] cookie injection landed on SignIn — logging in in-page`);
+  provider.invalidate();
+  await inPageLogin(config, p);
+  if (opts?.returnTo) {
+    await p.goto(opts.returnTo, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => undefined);
+  }
+  return true;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function onSignIn(p: any): Promise<boolean> {
   if (p.url().includes('SignIn')) return true;
@@ -94,7 +137,7 @@ export async function inPageLogin(config: BCConfig, p: any): Promise<void> {
  * (report download) drives the request page right after regardless of the return.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function waitReady(p: any, _logger?: Logger, opts?: { timeoutMs?: number; settleMs?: number }): Promise<boolean> {
+export async function waitReady(p: any, opts?: { timeoutMs?: number; settleMs?: number }): Promise<boolean> {
   const deadline = Date.now() + (opts?.timeoutMs ?? 60000);
   let ready = false;
   while (Date.now() < deadline) {
@@ -110,6 +153,9 @@ export async function waitReady(p: any, _logger?: Logger, opts?: { timeoutMs?: n
     if (!st.spinnerVisible && !st.generic) { ready = true; break; }
     await sleep(1000);
   }
-  await sleep(opts?.settleMs ?? 3500); // settle final layout / data binding
+  // Settle final layout / data binding — but only when the page actually became
+  // ready: after a timed-out poll there is nothing to settle, and the extra sleep
+  // just made every not-ready path slower.
+  if (ready) await sleep(opts?.settleMs ?? 3500);
   return ready;
 }

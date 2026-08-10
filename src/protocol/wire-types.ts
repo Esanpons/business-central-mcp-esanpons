@@ -34,17 +34,6 @@ export function resolveChangeType(wireType: string): string | undefined {
   return CHANGE_TYPES[wireType];
 }
 
-export const CONTROL_TYPES: Record<string, string> = {
-  'lf': 'LogicalForm',
-  'DN.LogicalForm': 'LogicalForm',
-  'rc': 'RepeaterControl',
-  'DN.RepeaterControl': 'RepeaterControl',
-  'sc': 'StringControl',
-  'DN.StringControl': 'StringControl',
-  'ac': 'ActionControl',
-  'DN.ActionControl': 'ActionControl',
-};
-
 export const SESSION_EVENTS = {
   FormToShow: 'FormToShow',
   DialogToShow: 'DialogToShow',

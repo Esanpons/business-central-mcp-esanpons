@@ -25,6 +25,20 @@ describe('renderInline', () => {
   it('leaves a non-http link target as plain text', () => {
     expect(renderInline('[x](javascript:alert(1))')).toBe('[x](javascript:alert(1))');
   });
+
+  it('never applies inline formatting inside a link href', () => {
+    // Underscores and asterisks are ordinary URL characters; emphasising them
+    // used to inject <em> into the href and break the link.
+    expect(renderInline('[doc](https://aesva.es/a_b_c)'))
+      .toBe('<a href="https://aesva.es/a_b_c">doc</a>');
+    expect(renderInline('see [x](https://aesva.es/a_b_c) and _this_'))
+      .toBe('see <a href="https://aesva.es/a_b_c">x</a> and <em>this</em>');
+  });
+
+  it('still formats the link LABEL', () => {
+    expect(renderInline('[**bold**](https://aesva.es/)'))
+      .toBe('<a href="https://aesva.es/"><strong>bold</strong></a>');
+  });
 });
 
 describe('renderBlocks', () => {

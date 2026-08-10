@@ -12,6 +12,12 @@ export interface RawCookie {
   sameSite: 'None' | 'Lax' | 'Strict';
 }
 
+/** Value of a `key=value` attribute, keeping every `=` after the first one. */
+function attrValue(attr: string): string {
+  const eq = attr.indexOf('=');
+  return eq < 0 ? '' : attr.slice(eq + 1);
+}
+
 export function parseSetCookie(line: string, host: string): RawCookie {
   const parts = line.split(';').map((s) => s.trim());
   const nv = parts[0] ?? '';
@@ -22,14 +28,21 @@ export function parseSetCookie(line: string, host: string): RawCookie {
   let sameSite: RawCookie['sameSite'] = 'Lax';
   const ss = attrs.find((a) => a.toLowerCase().startsWith('samesite='));
   if (ss) {
-    const v = (ss.split('=')[1] ?? '').toLowerCase();
+    const v = attrValue(ss).toLowerCase();
     sameSite = v === 'none' ? 'None' : v === 'strict' ? 'Strict' : 'Lax';
   }
+  // A name/value pair with no '=' (`Set-Cookie: justavalue`) has an EMPTY name and
+  // the whole token as its value. `slice(0, -1)` / `slice(0)` would instead have
+  // produced a truncated name and the full token as the value, silently corrupting
+  // the jar. Likewise attribute values are taken from the FIRST '=' only: a
+  // `Path=/tenant/x=y` used to be truncated at the second '='.
+  const name = eq < 0 ? '' : nv.slice(0, eq);
+  const value = eq < 0 ? nv : nv.slice(eq + 1);
   return {
-    name: nv.slice(0, eq),
-    value: nv.slice(eq + 1),
+    name,
+    value,
     domain: host,
-    path: pathAttr ? (pathAttr.split('=')[1] ?? '/') : '/',
+    path: pathAttr ? (attrValue(pathAttr) || '/') : '/',
     secure: lower.includes('secure'),
     httpOnly: lower.includes('httponly'),
     sameSite,

@@ -50,7 +50,9 @@ The operation returns a `ScreenshotOutput` object (serialized as the JSON text c
 | `pageTitle` | string | The browser document title after the SPA loaded. |
 | `authenticated` | boolean | `true` if the final page is not the sign-in page (auth succeeded). |
 | `spaReady` | boolean | `true` if the SPA settled (spinner gone, non-generic title) before the wait deadline; `false` means capture proceeded after the timeout. |
-| `annotations` | `{ target: string; found: boolean }[]` (optional) | One entry per requested `highlight` annotation (redact entries are not reported here), reporting whether each caption was located. Present only when `highlight` was given. |
+| `annotations` | `{ target: string; found: boolean }[]` (optional) | One entry per requested `highlight` annotation, reporting whether each caption was located. Present only when `highlight` was given. |
+| `redactions` | `{ target: string; found: boolean }[]` (optional) | One entry per requested `redact` caption. **Always check this.** `found: false` means the caption was never located, so the PNG on disk STILL SHOWS that value — a silent redaction miss is the worst failure mode this tool has, which is why it is reported separately from `annotations`. |
+| `warning` | string (optional) | Loud, human-readable alert when something is wrong with the capture — failed redactions first, naming the file that may still show the values. Also logged at error level. |
 | `cropped` | boolean | `true` if a crop clip rectangle was computed and applied. |
 | `width` | number | Viewport width used (px). |
 | `height` | number | Viewport height used (px). |

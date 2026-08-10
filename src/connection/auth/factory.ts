@@ -26,5 +26,6 @@ export function createAuthProvider(bc: BCConfig, logger: Logger): IBCAuthProvide
     username: bc.username,
     password: bc.password,
     tenantId: bc.tenantId,
+    tlsInsecure: bc.tlsInsecure,
   }, logger);
 }

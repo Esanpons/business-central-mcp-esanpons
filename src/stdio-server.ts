@@ -9,35 +9,9 @@ import { InteractionEncoder } from './protocol/interaction-encoder.js';
 import { PageContextRepository } from './protocol/page-context-repo.js';
 import { SessionFactory } from './session/session-factory.js';
 import { SessionManager } from './session/session-manager.js';
-import type { BCSession } from './session/bc-session.js';
-import { PageService } from './services/page-service.js';
-import { DataService } from './services/data-service.js';
-import { ActionService } from './services/action-service.js';
-import { NavigationService } from './services/navigation-service.js';
-import { SearchService } from './services/search-service.js';
-import { ScreenshotService } from './services/screenshot-service.js';
-import { ReportDownloadService } from './services/report-download-service.js';
-import { ManualService } from './services/manual-service.js';
-import { ObjectIndexService } from './services/object-index-service.js';
-import { OpenPageOperation } from './operations/open-page.js';
-import { ReadDataOperation } from './operations/read-data.js';
-import { WriteDataOperation } from './operations/write-data.js';
-import { ExecuteActionOperation } from './operations/execute-action.js';
-import { ClosePageOperation } from './operations/close-page.js';
-import { SearchPagesOperation } from './operations/search-pages.js';
-import { NavigateOperation } from './operations/navigate.js';
-import { RespondDialogOperation } from './operations/respond-dialog.js';
-import { SwitchCompanyOperation } from './operations/switch-company.js';
-import { ListCompaniesOperation } from './operations/list-companies.js';
-import { RunReportOperation } from './operations/run-report.js';
-import { DownloadReportOperation } from './operations/download-report.js';
-import { WizardNavigateOperation } from './operations/wizard-navigate.js';
-import { ScreenshotOperation } from './operations/screenshot.js';
-import { BuildManualOperation } from './operations/build-manual.js';
-import { FindObjectOperation } from './operations/find-object.js';
-import { RefreshObjectsOperation } from './operations/refresh-objects.js';
-import { buildToolRegistry, buildHealthTool, type Operations } from './mcp/tool-registry.js';
-import { MCPHandler } from './mcp/handler.js';
+import { buildHealthTool, buildLazyToolRegistry, type Operations } from './mcp/tool-registry.js';
+import { buildOperations } from './mcp/build-operations.js';
+import { MCPHandler, type JsonRpcRequest } from './mcp/handler.js';
 import { Metrics } from './services/metrics.js';
 // isErr no longer needed — SessionManager handles session creation errors internally
 
@@ -67,90 +41,70 @@ async function main() {
     baseDelayMs: config.bc.reconnectBaseDelayMs,
   }, metrics, authProvider);
 
-  let realTools: ReturnType<typeof buildToolRegistry> | null = null;
+  const operationsDeps = {
+    config,
+    logger,
+    authProvider,
+    pageContextRepo,
+    onCompanySelected: (c: string) => sessionManager.rememberCompany(c),
+    metrics,
+  };
 
-  // Services — built once after session is available
-  function buildServices(s: BCSession): ReturnType<typeof buildToolRegistry> {
-    const pageService = new PageService(s, pageContextRepo, logger, { tenantId: config.bc.tenantId, authMode: config.bc.authMode });
-    const dataService = new DataService(s, pageContextRepo, logger, config.logging.redactValues);
-    const actionService = new ActionService(s, pageContextRepo, logger);
-    const navigationService = new NavigationService(s, pageContextRepo, logger);
-    const searchService = new SearchService(s, logger);
-    const screenshotService = new ScreenshotService(config.bc, config.screenshotDir, () => s.companyName, logger, authProvider);
-    const reportDownloadService = new ReportDownloadService(config.bc, config.reportDir, () => s.companyName, logger, authProvider);
-    const objectIndexService = new ObjectIndexService(pageService, config.stateDir, config.bc.baseUrl, config.bc.tenantId, logger);
+  let operations: Operations | null = null;
+  /** In-flight guard so two concurrent first calls build the service graph once. */
+  let readyPromise: Promise<Operations> | null = null;
 
-    const operations: Operations = {
-      openPage: new OpenPageOperation(pageService),
-      readData: new ReadDataOperation(dataService, pageContextRepo, pageService),
-      writeData: new WriteDataOperation(dataService, pageContextRepo),
-      executeAction: new ExecuteActionOperation(actionService, pageContextRepo),
-      closePage: new ClosePageOperation(pageService),
-      searchPages: new SearchPagesOperation(searchService),
-      navigate: new NavigateOperation(navigationService),
-      respondDialog: new RespondDialogOperation(s, pageContextRepo),
-      switchCompany: new SwitchCompanyOperation(s, pageContextRepo, logger, (c) => sessionManager.rememberCompany(c)),
-      listCompanies: new ListCompaniesOperation(pageService, dataService, () => s.companyName, logger),
-      runReport: new RunReportOperation(s),
-      downloadReport: new DownloadReportOperation(reportDownloadService),
-      wizardNavigate: new WizardNavigateOperation(actionService, pageContextRepo),
-      screenshot: new ScreenshotOperation(screenshotService),
-      buildManual: new BuildManualOperation(new ManualService(screenshotService, config.manualDir, logger)),
-      findObject: new FindObjectOperation(objectIndexService),
-      refreshObjects: new RefreshObjectsOperation(objectIndexService),
-    };
-
-    return buildToolRegistry(operations);
-  }
-
-  // Build MCPHandler eagerly with lazy-executing tool wrappers.
-  // Tool definitions (name, description, inputSchema, zodSchema) are static and
-  // available immediately so initialize/tools/list work before any BC connection.
-  // The execute functions call ensureSession() on first invocation.
-  // SessionManager throws SessionLostError on recovery — MCPHandler catches it.
-
-  async function ensureSession(): Promise<ReturnType<typeof buildToolRegistry>> {
+  async function buildReady(): Promise<Operations> {
+    // ALWAYS go through the session manager: dead-session detection and recovery
+    // live there, so this must run on every call, not only the first.
     const s = await sessionManager.getSession();
-    // Rebuild services if session was recreated
-    if (realTools === null || sessionManager.needsServiceRebuild) {
-      realTools = buildServices(s);
+    if (operations === null || sessionManager.needsServiceRebuild) {
+      operations = buildOperations(s, operationsDeps);
       sessionManager.markServicesRebuilt();
     }
-    return realTools;
+    return operations;
   }
 
-  // Produce a static set of tool definitions whose execute functions delegate
-  // lazily to the real operations (created on first tools/call).
-  const staticTools = buildServices({} as BCSession);  // Only used to extract metadata
-  const lazyTools = staticTools.map(toolDef => ({
-    ...toolDef,
-    execute: async (input: unknown) => {
-      const tools = await ensureSession();
-      const resolved = tools.find(t => t.name === toolDef.name);
-      if (!resolved) throw new Error(`Tool not found after session init: ${toolDef.name}`);
-      return resolved.execute(input);
-    },
-  }));
+  function ensureSession(): Promise<Operations> {
+    // Calls that arrive while a build/recovery is in flight join it instead of
+    // starting a second one. (The derived promise is what callers get, so a
+    // rejection is always handled.)
+    if (readyPromise) return readyPromise;
+    readyPromise = buildReady().finally(() => { readyPromise = null; });
+    return readyPromise;
+  }
 
-  // bc_health bypasses the ensureSession gate — it reports status even when BC is down.
+  // The tool DEFINITIONS (name, description, inputSchema, zodSchema) are static and
+  // need no services at all, so initialize / tools/list answer immediately with BC
+  // cold; only the execute half awaits ensureSession(). (This used to build the whole
+  // service graph on a forged `{} as BCSession` just to read those four fields — it
+  // worked solely because no constructor dereferenced the session.)
+  // SessionManager throws SessionLostError on recovery — MCPHandler catches it.
   const healthTool = buildHealthTool({ currentSession: () => sessionManager.currentSession, metrics, bc: config.bc });
-  const mcpHandler = new MCPHandler([...lazyTools, healthTool], logger, metrics);
+  const mcpHandler = new MCPHandler([...buildLazyToolRegistry(ensureSession), healthTool], logger, metrics);
 
   // Read JSON-RPC from stdin, write responses to stdout
   const rl = createInterface({ input: process.stdin, terminal: false });
 
+  // NOTE — this handler is deliberately async and NOT serialized: several requests
+  // may be in flight at once and their responses may interleave. That is correct and
+  // intentional. JSON-RPC explicitly allows out-of-order responses (the client
+  // correlates by id), and each `process.stdout.write` of one complete line is
+  // atomic, so frames never interleave mid-line. Do NOT "fix" this into an await
+  // chain: that would serialize every request behind the slowest BC call (a 30s
+  // invoke would block bc_health and every other tool behind it).
   rl.on('line', async (line: string) => {
     if (!line.trim()) return;
 
     let id: unknown = undefined;
     try {
-      const request = JSON.parse(line) as { jsonrpc: string; id: unknown; method: string; params?: unknown };
+      const request = JSON.parse(line) as JsonRpcRequest;
       id = request.id;
 
       const response = await mcpHandler.handleRequest(request);
 
-      // Notifications (no id) don't get responses
-      if (request.id !== undefined && request.id !== null) {
+      // Notifications (no id) get no response: handleRequest returns null for them.
+      if (response !== null) {
         process.stdout.write(JSON.stringify(response) + '\n');
       }
     } catch (e) {
@@ -165,20 +119,20 @@ async function main() {
     }
   });
 
-  rl.on('close', () => {
-    logger.info('stdin closed, shutting down');
+  let shuttingDown = false;
+  async function shutdown(reason: string): Promise<void> {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info(reason);
     sessionManager.close();
-    process.exit(0);
-  });
-
-  function shutdown(): void {
-    logger.info('Shutting down...');
-    sessionManager.close();
+    // Drain buffered log lines before exiting — process.exit() would drop them.
+    await logger.flush?.();
     process.exit(0);
   }
 
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  rl.on('close', () => { void shutdown('stdin closed, shutting down'); });
+  process.on('SIGINT', () => { void shutdown('Shutting down...'); });
+  process.on('SIGTERM', () => { void shutdown('Shutting down...'); });
 }
 
 main().catch((e) => {

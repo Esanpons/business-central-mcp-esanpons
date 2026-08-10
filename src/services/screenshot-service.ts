@@ -3,9 +3,12 @@ import { isAbsolute, resolve } from 'node:path';
 import type { BCConfig } from '../core/config.js';
 import type { Logger } from '../core/logger.js';
 import type { IBCAuthProvider } from '../connection/auth/auth-provider.js';
-import { FormsAuthProvider } from '../connection/auth/forms-provider.js';
 import { launchHeadless } from './browser.js';
-import { ensureAuthJar, deepLinkPage, onSignIn, inPageLogin, waitReady } from './bc-web-auth.js';
+import {
+  ensureAuthJar, deepLinkPage, onSignIn, waitReady,
+  fallbackFormsProvider, recoverIfOnSignIn,
+} from './bc-web-auth.js';
+import type { Metrics } from './metrics.js';
 
 /**
  * ScreenshotService — captures a REAL screenshot of the BC web client.
@@ -77,10 +80,31 @@ export interface CaptureResult {
   authenticated: boolean;
   spaReady: boolean;
   annotations?: Array<{ target: string; found: boolean }>;
+  /**
+   * Per-`redact` outcome. A redaction that was NOT found means the PNG on disk
+   * still SHOWS that value — this must never be silently dropped, which is why it
+   * is reported separately from `annotations` and also raised in `warning`.
+   */
+  redactions?: Array<{ target: string; found: boolean }>;
+  /** Loud, human-readable alert when something is wrong with the capture (redaction misses first). */
+  warning?: string;
   cropped?: boolean;
   width: number;
   height: number;
   base64?: string;
+}
+
+/**
+ * A capture session holds ONE authenticated browser open across many captures.
+ *
+ * A manual with 10 steps used to pay a full browser launch + auth + SPA boot per
+ * step (~5s each, before BC even started rendering). `bc_screenshot` keeps using
+ * the single-shot `capture()`, which is this same path opened and closed around
+ * one capture.
+ */
+export interface ScreenshotSession {
+  capture(input: CaptureInput): Promise<CaptureResult>;
+  close(): Promise<void>;
 }
 
 interface Rect { x: number; y: number; w: number; h: number; }
@@ -96,6 +120,7 @@ export class ScreenshotService {
     private readonly getCompany: () => string | undefined,
     private readonly logger: Logger,
     authProvider?: IBCAuthProvider,
+    private readonly metrics?: Metrics,
   ) {
     this._auth = authProvider;
   }
@@ -103,113 +128,160 @@ export class ScreenshotService {
   /** Shared auth provider (one login for WS + browser). Standalone scripts that
    * don't inject one get a self-contained forms provider built from config. */
   private auth(): IBCAuthProvider {
-    if (!this._auth) {
-      this._auth = new FormsAuthProvider({
-        baseUrl: this.config.baseUrl,
-        username: this.config.username,
-        password: this.config.password,
-        tenantId: this.config.tenantId,
-      }, this.logger);
-    }
+    if (!this._auth) this._auth = fallbackFormsProvider(this.config, this.logger);
     return this._auth;
   }
 
+  /**
+   * Open a reusable capture session: ONE browser, ONE login, many captures.
+   * The caller MUST close it (try/finally). `bc_build_manual` uses this so a
+   * 10-step manual pays a single browser launch instead of ten.
+   */
+  async openSession(): Promise<ScreenshotSession> {
+    const browser = await launchHeadless();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let page: any;
+    return {
+      capture: async (input: CaptureInput): Promise<CaptureResult> => {
+        // Cheap when the provider is already authenticated (no network); after an
+        // in-page SignIn recovery it re-authenticates and hands back a fresh jar.
+        const cookies = await ensureAuthJar(this.auth());
+        if (!page) page = await browser.newPage();
+        return this.captureOn(page, cookies, input);
+      },
+      close: async (): Promise<void> => {
+        await browser.close().catch(() => undefined);
+      },
+    };
+  }
+
+  /** Single capture: a session opened and closed around one shot. */
   async capture(input: CaptureInput): Promise<CaptureResult> {
+    const session = await this.openSession();
+    try {
+      return await session.capture(input);
+    } finally {
+      await session.close();
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async captureOn(p: any, cookies: unknown[], input: CaptureInput): Promise<CaptureResult> {
+    const started = Date.now();
+    try {
+      const r = await this.captureInner(p, cookies, input);
+      this.metrics?.recordScreenshot(true, Date.now() - started);
+      return r;
+    } catch (e) {
+      this.metrics?.recordScreenshot(false, Date.now() - started);
+      throw e;
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async captureInner(p: any, cookies: unknown[], input: CaptureInput): Promise<CaptureResult> {
     const pageId = String(input.pageId).trim();
     const company = input.company || this.getCompany();
     const url = deepLinkPage(this.config, pageId, input.bookmark, company);
     this.logger.info(`[screenshot] capturing ${url}`);
 
-    const browser = await launchHeadless();
-    try {
-      const cookies = await ensureAuthJar(this.auth());
-      const p = await browser.newPage();
-      const width = input.width ?? 1600;
-      const height = input.height ?? 1000;
-      await p.setViewport({ width, height, deviceScaleFactor: input.scale ?? 2 });
-      await p.setCookie(...cookies);
-      await p.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+    const width = input.width ?? 1600;
+    const height = input.height ?? 1000;
+    await p.setViewport({ width, height, deviceScaleFactor: input.scale ?? 2 });
+    await p.setCookie(...cookies);
+    await p.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
 
-      // Fallback: if cookie injection didn't take, log in once via the bounced
-      // SignIn form (its ReturnUrl is our deep link, so BC redirects right back).
-      if (await onSignIn(p)) {
-        this.logger.warn('[screenshot] cookie injection landed on SignIn — logging in in-page');
-        // The injected jar is stale server-side; drop it so the next capture (and
-        // the next WS reconnect, if the provider is shared) re-authenticates.
-        this.auth().invalidate();
-        await inPageLogin(this.config, p);
-      }
+    // Fallback: if cookie injection didn't take, log in once via the bounced
+    // SignIn form (its ReturnUrl is our deep link, so BC redirects right back).
+    await recoverIfOnSignIn(p, this.auth(), this.config, this.logger, { tag: 'screenshot' });
 
-      const spaReady = await waitReady(p, this.logger);
+    const spaReady = await waitReady(p);
 
-      // Explicit reveal: expand all collapsed FastTabs + click all "Show more" up front.
-      if (input.expand) {
-        await this.revealAll(p);
-        await sleep(800); // let the relayout settle before locating controls
-      }
-
-      // G6: explicit toggles, after the generic reveal so a caption the reveal pass
-      // already opened is not toggled shut again.
-      if (input.clickBeforeCapture?.length) {
-        for (const caption of input.clickBeforeCapture) {
-          const hit = await this.clickByCaption(p, caption);
-          this.logger.info(`[screenshot] clickBeforeCapture "${caption}" -> ${hit ? 'clicked' : 'NOT FOUND'}`);
-          await sleep(600);
-        }
-      }
-
-      // Redacted captions are just blur-style annotations.
-      const annos: Annotation[] = [
-        ...(input.annotations ?? []),
-        ...(input.redact ?? []).map((t) => ({ target: t, style: 'blur' as const })),
-      ];
-      const cropTargets = input.crop ?? [];
-
-      let annotations: CaptureResult['annotations'];
-      let clip: Rect | undefined;
-      if (annos.length || cropTargets.length) {
-        // BC content scrolls INSIDE an iframe, so a control below the fold (common once a
-        // FastTab/Show-more is revealed) is off-screen in the capture. Scroll the primary
-        // target into view so its callout/crop actually lands in the screenshot.
-        const scrollTarget = input.annotations?.[0]?.target ?? cropTargets[0];
-        let res = await this.annotate(p, annos, cropTargets, width, height, scrollTarget);
-        // Reveal-when-needed: a requested callout/crop target that wasn't found may be
-        // hidden behind a collapsed FastTab or a "Show more" toggle. Expand once and retry.
-        const missing = res.annotations.some((a) => !a.found) || (cropTargets.length > 0 && !res.clip);
-        if (missing && !input.expand) {
-          this.logger.info('[screenshot] target(s) not found — expanding groups / Show more and retrying');
-          await this.revealAll(p);
-          await sleep(800);
-          res = await this.annotate(p, annos, cropTargets, width, height, scrollTarget);
-        }
-        if (input.annotations?.length) annotations = res.annotations.slice(0, input.annotations.length);
-        clip = res.clip;
-        await sleep(300); // let any scroll-into-view settle before the capture
-      }
-
-      const file = this.resolveOut(input.out, pageId);
-      const buf: Uint8Array = await p.screenshot({
-        path: file,
-        ...(clip ? { clip: { x: clip.x, y: clip.y, width: clip.w, height: clip.h } } : { fullPage: input.fullPage ?? false }),
-      });
-      const pageTitle = await p.title();
-      const authenticated = !(await onSignIn(p));
-
-      return {
-        path: file,
-        url,
-        pageTitle,
-        authenticated,
-        spaReady,
-        annotations,
-        cropped: !!clip,
-        width,
-        height,
-        base64: input.inline ? Buffer.from(buf).toString('base64') : undefined,
-      };
-    } finally {
-      await browser.close();
+    // Explicit reveal: expand all collapsed FastTabs + click all "Show more" up front.
+    if (input.expand) {
+      await this.revealAll(p);
+      await sleep(800); // let the relayout settle before locating controls
     }
+
+    // G6: explicit toggles. They run after the `expand` reveal pass (so a caption
+    // that pass already opened is not toggled shut again) but BEFORE the automatic
+    // reveal-when-needed retry below, which only fires if a target is still missing.
+    if (input.clickBeforeCapture?.length) {
+      for (const caption of input.clickBeforeCapture) {
+        const hit = await this.clickByCaption(p, caption);
+        this.logger.info(`[screenshot] clickBeforeCapture "${caption}" -> ${hit ? 'clicked' : 'NOT FOUND'}`);
+        await sleep(600);
+      }
+    }
+
+    // Redacted captions are just blur-style annotations, appended AFTER the
+    // requested ones — the split below relies on that order.
+    const requested = input.annotations ?? [];
+    const redactTargets = input.redact ?? [];
+    const annos: Annotation[] = [
+      ...requested,
+      ...redactTargets.map((t) => ({ target: t, style: 'blur' as const })),
+    ];
+    const cropTargets = input.crop ?? [];
+
+    let annotations: CaptureResult['annotations'];
+    let redactions: CaptureResult['redactions'];
+    let clip: Rect | undefined;
+    if (annos.length || cropTargets.length) {
+      // BC content scrolls INSIDE an iframe, so a control below the fold (common once a
+      // FastTab/Show-more is revealed) is off-screen in the capture. Scroll the primary
+      // target into view so its callout/crop actually lands in the screenshot.
+      const scrollTarget = input.annotations?.[0]?.target ?? cropTargets[0];
+      let res = await this.annotate(p, annos, cropTargets, width, height, scrollTarget);
+      // Reveal-when-needed: a requested callout/crop target that wasn't found may be
+      // hidden behind a collapsed FastTab or a "Show more" toggle. Expand once and retry.
+      const missing = res.annotations.some((a) => !a.found) || (cropTargets.length > 0 && !res.clip);
+      if (missing && !input.expand) {
+        this.logger.info('[screenshot] target(s) not found — expanding groups / Show more and retrying');
+        await this.revealAll(p);
+        await sleep(800);
+        res = await this.annotate(p, annos, cropTargets, width, height, scrollTarget);
+      }
+      if (requested.length) annotations = res.annotations.slice(0, requested.length);
+      // The redaction outcomes used to be sliced off and thrown away, so a caption
+      // that matched nothing shipped a PNG with the sensitive value still visible
+      // and a result that looked perfectly clean.
+      if (redactTargets.length) redactions = res.annotations.slice(requested.length);
+      clip = res.clip;
+      await sleep(300); // let any scroll-into-view settle before the capture
+    }
+
+    const file = this.resolveOut(input.out, pageId);
+    const buf: Uint8Array = await p.screenshot({
+      path: file,
+      ...(clip ? { clip: { x: clip.x, y: clip.y, width: clip.w, height: clip.h } } : { fullPage: input.fullPage ?? false }),
+    });
+    const pageTitle = await p.title();
+    const authenticated = !(await onSignIn(p));
+
+    const missedRedactions = (redactions ?? []).filter((r) => !r.found).map((r) => r.target);
+    let warning: string | undefined;
+    if (missedRedactions.length) {
+      warning = `REDACTION FAILED: [${missedRedactions.join(', ')}] matched no control, so ${file} may still `
+        + 'SHOW those values. Do not share this image. Check the caption exactly as the page renders it '
+        + '(locale-dependent), or crop the area out.';
+      this.logger.error(`[screenshot] ${warning}`);
+    }
+
+    return {
+      path: file,
+      url,
+      pageTitle,
+      authenticated,
+      spaReady,
+      annotations,
+      redactions,
+      ...(warning ? { warning } : {}),
+      cropped: !!clip,
+      width,
+      height,
+      base64: input.inline ? Buffer.from(buf).toString('base64') : undefined,
+    };
   }
 
   // BC renders page content inside an iframe — search every frame for each control
@@ -452,17 +524,32 @@ export class ScreenshotService {
           await sleep(300);
         }
         // 2. Click each "Show more" that is currently collapsed (detected by effect).
-        const count: number = await f.evaluate(
+        //    The button list is re-queried after EVERY click: clicking one re-renders
+        //    that part of the page, so a snapshotted count + index would drift onto a
+        //    different button (or onto undefined, silently skipping it). Buttons are
+        //    marked as handled with a private attribute instead of by position; the
+        //    loop ends when no unmarked button is left. `data-bcmcp-more` deliberately
+        //    does NOT match the `[data-bcmcp]` selector the annotator cleans up.
+        await f.evaluate(async () => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          () => (globalThis as any).document.querySelectorAll('button.show-more-fields-button').length,
-        );
-        for (let i = 0; i < count; i++) {
-          await f.evaluate(async (idx: number) => {
+          const doc = (globalThis as any).document;
+          let prevPending = -1;
+          let stale = 0;
+          for (let guard = 0; guard < 40; guard++) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const doc = (globalThis as any).document;
-            const btns = doc.querySelectorAll('button.show-more-fields-button');
-            const b = btns[idx];
-            if (!b) return;
+            const btns: any[] = Array.prototype.slice.call(doc.querySelectorAll('button.show-more-fields-button'));
+            const pending = btns.filter((x) => !x.hasAttribute('data-bcmcp-more'));
+            if (!pending.length) break;
+            // If BC re-created the buttons, our marks are gone and the pending count
+            // never falls: stop rather than toggling the same button forever.
+            if (prevPending !== -1 && pending.length >= prevPending) {
+              if (++stale >= 2) break;
+            } else {
+              stale = 0;
+            }
+            prevPending = pending.length;
+            const b = pending[0];
+            b.setAttribute('data-bcmcp-more', '1');
             const all1 = doc.querySelectorAll('*');
             let before = 0;
             for (let k = 0; k < all1.length; k++) if (all1[k].offsetParent !== null) before++;
@@ -471,12 +558,13 @@ export class ScreenshotService {
             const all2 = doc.querySelectorAll('*');
             let after = 0;
             for (let k = 0; k < all2.length; k++) if (all2[k].offsetParent !== null) after++;
+            // Fewer visible nodes -> that click COLLAPSED an already-expanded tab; undo it.
             if (after < before) {
               b.click();
               await new Promise((r) => setTimeout(r, 250));
             }
-          }, i);
-        }
+          }
+        });
       } catch (e) {
         // Cross-origin / empty frames are expected — keep this at debug level.
         this.logger.debug('screenshot', `reveal frame skipped: ${e instanceof Error ? e.message : String(e)}`);

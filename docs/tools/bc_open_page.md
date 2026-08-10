@@ -40,6 +40,11 @@ Returns `OpenPageOutput` (`src/operations/open-page.ts`):
 | `caption` | string | Page caption; falls back to the root form id when BC reports no caption. |
 | `isModal` | boolean | True when the page opened as a modal (wizard, request page, confirmation). |
 | `sections` | `Section[]` | Every visible page section in canonical order: header, lines, subpages, factboxes, requestPage. |
+| `warnings` | `string[]` (optional) | Narrowing parameters that matched nothing — an unknown `tab`, or `sections` ids that do not exist on this page. These are warnings rather than errors because the page IS already open: erroring would strand the context you would then have to close. Treat a warning as "you did not get the narrowing you asked for". |
+
+**A part that contains a repeater is now `kind: 'subpage'`, not `'lines'`.** Only a real subform (a
+document's line grid) is `lines`, so an ordinary ListPart no longer flips the page to `pageType:
+'Document'`. If something addressed such a part as `section: "lines"`, use its `subpage:<caption>` id.
 
 Each `Section` (`src/protocol/section-dto.ts`):
 
@@ -68,6 +73,13 @@ Each `Section` (`src/protocol/section-dto.ts`):
 | `isLookup?` | true | Present only when the field has an AssistEdit/Lookup action attached. |
 
 `SectionAction`: `name` (string caption), `systemAction` (number; SystemAction ordinal, 0 = custom AL action), `enabled` (boolean), `wizardNav?` (`'back' | 'next' | 'finish' | 'cancel'`).
+
+Disabled actions are now LISTED with `enabled: false` instead of being filtered out, so an agent can
+tell "this action does not exist here" from "it exists but BC has it greyed out right now" (release
+the document, select a row, …). `bc_execute_action` still refuses to invoke them.
+
+Repeater **header actions** (the row-scoped commands BC attaches to a grid, addressed by the `ha[N]`
+path segment) now appear too, flagged `isLineScoped: true` — they require a row to be selected first.
 
 `SectionRow` (alias of internal `RepeaterRow`): `bookmark` (string) plus `cells` keyed by the column binder name (e.g. `"1165569367_c2"`), not by caption. When `columns` is applied, row cells are filtered by their caption key.
 

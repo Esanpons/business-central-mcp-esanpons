@@ -10,8 +10,9 @@ import { resolveSection } from '../protocol/section-resolver.js';
 import type { FormState } from '../protocol/form-state.js';
 import { isEffectivelyVisible } from '../protocol/visibility.js';
 import { actions as treeActions, groupVisibility as treeGroupVisibility, cues as treeCues } from '../protocol/form-views.js';
-import { classifyWizardNav } from '../protocol/wizard-classify.js';
+import { classifyWizardNav, pickWizardNavAction } from '../protocol/wizard-classify.js';
 import type { Logger } from '../core/logger.js';
+import { resyncRepeater } from './repeater-sync.js';
 
 /** System actions that target a specific row via the repeater control. */
 const ROW_TARGETING_ACTIONS: Set<number> = new Set([
@@ -33,6 +34,15 @@ export interface ActionResult {
   events: BCEvent[];
   dialog?: { formId: string; controlTree: unknown };
   updatedState?: PageContext;
+  /**
+   * Row-delete outcome, verified against the repeater re-read from the server:
+   * `true` the row is gone, `false` BC completed the action and the row survived.
+   * Absent when the action was not a bookmark-targeted Delete, or when a dialog is
+   * pending (the delete is not resolved yet — answer it, then re-read).
+   */
+  deleted?: boolean;
+  /** Human-readable explanation when an action completed without doing what it says. */
+  note?: string;
 }
 
 export class ActionService {
@@ -100,12 +110,29 @@ export class ActionService {
       if (isErr(pos)) return pos;
       const ctx2 = this.repo.get(pageContextId);
       const re = ctx2 ? resolveSection(ctx2, sectionId, 'header') : undefined;
-      if (re && !('error' in re)) {
-        const refreshed = treeActions(re.form.root).find(a => (a.properties.caption ?? '').toLowerCase() === lower);
-        if (refreshed) {
-          return this.invokeAction(pageContextId, re.form, refreshed.controlPath, refreshed.systemAction);
-        }
+      if (!re || 'error' in re) {
+        return err(new ProtocolError(
+          `Section '${sectionId ?? 'header'}' became unavailable after selecting the row; the action was NOT executed. Re-read the page and retry.`,
+        ));
       }
+      const refreshed = treeActions(re.form.root).find(a => (a.properties.caption ?? '').toLowerCase() === lower);
+      if (!refreshed) {
+        // Do NOT fall back to the pre-positioning controlPath: BC rearranges action
+        // paths after a row selection, so the stale path points at a DIFFERENT
+        // action (or out of range) — exactly the fragility documented in
+        // NavigationService.drillDown. Refuse instead of invoking something else.
+        return err(new ProtocolError(
+          `Action '${actionName}' disappeared after selecting the row, so its control path is no longer trustworthy; nothing was invoked. ` +
+          `Re-read the page (bc_read_data) and retry — the action may only be available for other rows.`,
+          {
+            availableActions: treeActions(re.form.root)
+              .filter(a => a.properties.enabled ?? true)
+              .map(a => a.properties.caption ?? '')
+              .filter(Boolean),
+          },
+        ));
+      }
+      return this.invokeAction(pageContextId, re.form, refreshed.controlPath, refreshed.systemAction);
     }
 
     return this.invokeAction(pageContextId, form, actionNode.controlPath, actionNode.systemAction);
@@ -174,7 +201,9 @@ export class ActionService {
     if (!root) return err(new ProtocolError(`Root form not found for page ${pageContextId}`));
 
     const allActions = treeActions(root.root);
-    const actionNode = allActions.find(a => classifyWizardNav(a) === nav);
+    // Document order must not decide which action a semantic role maps to: for
+    // 'cancel' the true abort actions win (see pickWizardNavAction).
+    const actionNode = pickWizardNavAction(allActions, nav);
     if (!actionNode) {
       const available = allActions.map(a => classifyWizardNav(a)).filter(Boolean);
       return err(new ProtocolError(
@@ -192,7 +221,15 @@ export class ActionService {
     // PropertyChanged events when Next/Back fires. Mirror the step transition
     // ourselves so subsequent reads see the right step's fields. Only nudge on
     // forward/back; finish & cancel close the wizard server-side.
-    if (isOk(result) && (nav === 'next' || nav === 'back')) {
+    //
+    // A dialog in the response means BC BLOCKED the navigation (a validation
+    // message on the step being left): the wizard did not move, so bumping the
+    // mirrored index would desync it and make the active-step visibility override
+    // describe the wrong step's subtree.
+    if (isOk(result) && result.value.dialog) {
+      this.logger.info(`[wizard] '${nav}' opened a dialog (formId=${result.value.dialog.formId}); step index NOT advanced.`);
+    }
+    if (isOk(result) && !result.value.dialog && (nav === 'next' || nav === 'back')) {
       const ws = this.repo.get(pageContextId)?.wizardState;
       if (ws) {
         const delta = nav === 'next' ? 1 : -1;
@@ -230,9 +267,12 @@ export class ActionService {
     // for a row-scoped action (Delete/Edit/View/DrillDown/New), position the
     // cursor on THAT row first. Without this the action hits whatever row BC
     // currently has selected -- e.g. Delete would remove the wrong record.
+    let deletedBookmark: string | undefined;
     if (repeater && ROW_TARGETING_ACTIONS.has(systemAction) && row && (row.bookmark !== undefined || row.rowIndex !== undefined)) {
       const bm = this.resolveBookmark(resolved.rows, row.bookmark, row.rowIndex);
       if (isErr(bm)) return bm;
+      // Remembered so the post-delete re-sync can check whether the row really went.
+      deletedBookmark = bm.value;
       const pos = await this.positionRow(pageContextId, form.formId, repeater.controlPath, bm.value);
       if (isErr(pos)) return pos;
       // The repo replaced the context after SetCurrentRow -- re-resolve.
@@ -250,7 +290,19 @@ export class ActionService {
       controlPath = repeater.controlPath + '/cr/c[0]';
     } else {
       const action = treeActions(form.root).find(a => a.systemAction === systemAction);
-      controlPath = action?.controlPath ?? 'server:c[0]';
+      if (!action) {
+        // NEVER guess `server:c[0]`: that invokes whatever DefaultAction resolves at
+        // the first control of the form — an arbitrary action — and reported success.
+        const available = treeActions(form.root)
+          .filter(a => a.systemAction !== 0)
+          .map(a => ({ name: a.properties.caption ?? '', systemAction: a.systemAction, enabled: a.properties.enabled ?? true }));
+        return err(new ProtocolError(
+          `No action with systemAction=${systemAction} on section '${resolved.section.sectionId}' of ${pageContextId}` +
+          (repeater ? '' : ' (and the section has no repeater, so it cannot be a row action)') + '.',
+          { requestedSystemAction: systemAction, availableSystemActions: available },
+        ));
+      }
+      controlPath = action.controlPath;
     }
 
     const result = await this.invokeAction(pageContextId, form, controlPath, systemAction);
@@ -262,32 +314,45 @@ export class ActionService {
     // in the projection and a later bookmark action on it would hit
     // InvalidBookmarkException. A full reload is cheap next to a destructive action
     // and makes the client state true regardless of the wire shape.
-    if (isOk(result) && repeater && systemAction === SystemAction.Delete) {
-      const refreshed = await this.reloadFormData(pageContextId, form.formId);
-      if (isOk(refreshed)) {
+    // ...but ONLY once BC has actually finished the delete. A row delete on an
+    // editable document opens a "Confirmar" dialog, and the re-sync is itself an
+    // InvokeAction: firing it while that modal is pending tears the dialog down, so
+    // the caller's bc_respond_dialog then dies with FormNotFoundException and the
+    // row is never deleted (verified live on devel1, page 42 in Edit mode). When a
+    // dialog is pending the row state is answered by RespondDialogOperation, which
+    // re-syncs after the answer.
+    if (isOk(result) && repeater && systemAction === SystemAction.Delete && !result.value.dialog) {
+      const refreshed = await resyncRepeater(this.session, this.repo, pageContextId, form.formId, repeater.controlPath, this.logger);
+      if (refreshed) {
         const ctx3 = this.repo.get(pageContextId);
-        if (ctx3) return ok({ ...result.value, updatedState: ctx3 });
+        if (ctx3) {
+          // BC can complete a Delete and change nothing — a row it will not delete
+          // (a blank placeholder, a read-only document) answers with a bare
+          // InvokeCompleted: no dialog, no row change, no error. Reporting plain
+          // success there is the same lie `bc_write_data` was fixed for, so say it:
+          // the re-synced rows are ground truth, so if the bookmark survived, the
+          // delete did not happen.
+          const targetBookmark = deletedBookmark;
+          if (targetBookmark) {
+            const re2 = resolveSection(ctx3, sectionId);
+            const stillThere = !('error' in re2)
+              && re2.rows.some(r => r.bookmark === targetBookmark);
+            if (stillThere) {
+              return ok({
+                ...result.value,
+                updatedState: ctx3,
+                deleted: false,
+                note: 'BC completed the Delete without removing the row: it is still present after re-reading the repeater from the server. '
+                  + 'Common causes: the row is an uncommitted blank placeholder, or the page is not open for editing (open it with mode "Edit").',
+              });
+            }
+          }
+          return ok({ ...result.value, updatedState: ctx3, ...(targetBookmark ? { deleted: true } : {}) });
+        }
       }
     }
 
     return result;
-  }
-
-  /**
-   * Ask BC to re-send a form's data and fold it into the projection. Used after a
-   * destructive row action, where an incremental update cannot be trusted.
-   */
-  private async reloadFormData(pageContextId: string, formId: string): Promise<Result<void, ProtocolError>> {
-    const result = await this.session.invoke(
-      { type: 'LoadForm', formId, loadData: true },
-      (event) => event.type === 'InvokeCompleted',
-    );
-    if (isErr(result)) {
-      this.logger.warn(`[action] post-delete reload failed for form ${formId}: ${result.error.message}`);
-      return result;
-    }
-    this.repo.applyToPage(pageContextId, result.value);
-    return ok(undefined);
   }
 
   /** Resolve a bookmark from an explicit bookmark or a 0-based rowIndex into the loaded rows. */

@@ -10,6 +10,12 @@ export interface ClosePageInput {
 }
 
 export interface ClosePageOutput {
+  /**
+   * Whether the page is actually CLOSED. False when a save-changes dialog
+   * intercepted the close: the interaction completed, but the page is still open
+   * and the context is still alive waiting for an answer. Reporting `true` there
+   * told callers the resource was freed when it was not.
+   */
   success: boolean;
   dialogsOpened: Array<{ formId: string; message?: string; fields?: import('../protocol/types.js').ControlField[] }>;
   requiresDialogResponse: boolean;
@@ -27,7 +33,7 @@ export class ClosePageOperation {
       const dialogsOpened = detectDialogs(r.events);
       const requiresDialogResponse = dialogsOpened.length > 0;
       return {
-        success: true,
+        success: !requiresDialogResponse,
         dialogsOpened,
         requiresDialogResponse,
         // When a save-changes dialog is pending, the page context is deliberately

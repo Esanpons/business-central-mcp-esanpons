@@ -185,7 +185,6 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 var(--pad-x);
   border-top: 1px solid var(--line);
   margin: 0 var(--pad-x);
   padding: 5mm 0 0;

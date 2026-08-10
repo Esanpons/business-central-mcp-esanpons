@@ -3,6 +3,7 @@ import { ok, err, type Result } from '../../core/result.js';
 import { AuthenticationError } from '../../core/errors.js';
 import type { IBCAuthProvider, AuthResult } from './auth-provider.js';
 import { parseSetCookie, type RawCookie } from './cookies.js';
+import { insecureFetch } from './tls.js';
 import type { Logger } from '../../core/logger.js';
 
 interface FormsProviderConfig {
@@ -10,6 +11,8 @@ interface FormsProviderConfig {
   username: string;
   password: string;
   tenantId: string;
+  /** BC_TLS_INSECURE: accept a self-signed certificate for these requests only. */
+  tlsInsecure?: boolean;
 }
 
 /**
@@ -37,11 +40,11 @@ export class FormsAuthProvider implements IBCAuthProvider {
     try {
       // Step 1: GET /SignIn
       const signInUrl = `${this.config.baseUrl}/SignIn?tenant=${this.config.tenantId}`;
-      const getResponse = await fetch(signInUrl, {
+      const getResponse = await insecureFetch(signInUrl, {
         method: 'GET',
         redirect: 'manual',
         headers: { 'User-Agent': 'BCMCPServer/2.0' },
-      });
+      }, this.config.tlsInsecure === true);
 
       const setCookies = getResponse.headers.getSetCookie?.() ?? [];
       this.cookies = setCookies.map(c => c.split(';')[0]!).join('; ');
@@ -61,7 +64,7 @@ export class FormsAuthProvider implements IBCAuthProvider {
         __RequestVerificationToken: verificationToken,
       });
 
-      const postResponse = await fetch(signInUrl, {
+      const postResponse = await insecureFetch(signInUrl, {
         method: 'POST',
         redirect: 'manual',
         headers: {
@@ -70,7 +73,7 @@ export class FormsAuthProvider implements IBCAuthProvider {
           'User-Agent': 'BCMCPServer/2.0',
         },
         body: postBody.toString(),
-      });
+      }, this.config.tlsInsecure === true);
 
       // Merge updated cookies into a name->value map (used below for both the
       // auth-success check and CSRF extraction).
@@ -103,15 +106,22 @@ export class FormsAuthProvider implements IBCAuthProvider {
       // Detect a failed sign-in. A successful POST /SignIn answers with a 302
       // redirect AND sets the auth-ticket cookie `.AspNetCore.Cookies`. A wrong
       // password returns 200 with the login page re-rendered and NO auth ticket.
-      // The old code accepted that silently (the antiforgery cookie from the GET
-      // was enough to extract a CSRF token), so the failure only surfaced later
-      // as an opaque WebSocket/OpenSession error and burned a full reconnect cycle.
+      //
+      // The auth TICKET is the only proof of a real sign-in. Accepting "302 with
+      // no ticket" (as this code used to) reports authenticated=true for a redirect
+      // to an error/consent page, and the dead credentials then surface much later
+      // as an opaque WebSocket/OpenSession failure -- burning a whole reconnect
+      // cycle first. So the ticket is now required, and a ticket-less redirect gets
+      // its own message pointing at where it landed.
       const hasAuthTicket = [...cookieMap.keys()].some(k => k.startsWith('.AspNetCore.Cookies'));
-      const isRedirect = postResponse.status >= 300 && postResponse.status < 400;
-      if (!hasAuthTicket && !isRedirect) {
+      if (!hasAuthTicket) {
+        const isRedirect = postResponse.status >= 300 && postResponse.status < 400;
+        const location = postResponse.headers.get('location') ?? '';
         return err(new AuthenticationError(
-          `Invalid username or password for ${this.config.baseUrl} (Business Central did not establish a session for user "${this.config.username}").`,
-          { baseUrl: this.config.baseUrl, username: this.config.username, status: postResponse.status },
+          isRedirect
+            ? `Sign-in to ${this.config.baseUrl} redirected to "${location || '(no Location header)'}" without establishing a session for user "${this.config.username}" (no .AspNetCore.Cookies auth ticket). Check the credentials and that the user is enabled in Business Central.`
+            : `Invalid username or password for ${this.config.baseUrl} (Business Central did not establish a session for user "${this.config.username}").`,
+          { baseUrl: this.config.baseUrl, username: this.config.username, status: postResponse.status, location },
         ));
       }
 
@@ -169,6 +179,11 @@ export class FormsAuthProvider implements IBCAuthProvider {
   /** On-prem uses the configured tenant. */
   getTenantIdOverride(): string | null {
     return null;
+  }
+
+  /** On-prem OpenForm queries carry `&tenant=`. */
+  omitsTenantInQueries(): boolean {
+    return false;
   }
 
   isAuthenticated(): boolean {

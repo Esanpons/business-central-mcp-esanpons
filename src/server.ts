@@ -8,38 +8,12 @@ import { InteractionEncoder } from './protocol/interaction-encoder.js';
 import { PageContextRepository } from './protocol/page-context-repo.js';
 import { SessionFactory } from './session/session-factory.js';
 import { SessionManager } from './session/session-manager.js';
-import type { BCSession } from './session/bc-session.js';
-import { PageService } from './services/page-service.js';
-import { DataService } from './services/data-service.js';
-import { ActionService } from './services/action-service.js';
-import { NavigationService } from './services/navigation-service.js';
-import { SearchService } from './services/search-service.js';
-import { ScreenshotService } from './services/screenshot-service.js';
-import { ReportDownloadService } from './services/report-download-service.js';
-import { ManualService } from './services/manual-service.js';
-import { ObjectIndexService } from './services/object-index-service.js';
-import { OpenPageOperation } from './operations/open-page.js';
-import { ReadDataOperation } from './operations/read-data.js';
-import { WriteDataOperation } from './operations/write-data.js';
-import { ExecuteActionOperation } from './operations/execute-action.js';
-import { ClosePageOperation } from './operations/close-page.js';
-import { SearchPagesOperation } from './operations/search-pages.js';
-import { NavigateOperation } from './operations/navigate.js';
-import { RespondDialogOperation } from './operations/respond-dialog.js';
-import { SwitchCompanyOperation } from './operations/switch-company.js';
-import { ListCompaniesOperation } from './operations/list-companies.js';
-import { RunReportOperation } from './operations/run-report.js';
-import { DownloadReportOperation } from './operations/download-report.js';
-import { WizardNavigateOperation } from './operations/wizard-navigate.js';
-import { ScreenshotOperation } from './operations/screenshot.js';
-import { BuildManualOperation } from './operations/build-manual.js';
-import { FindObjectOperation } from './operations/find-object.js';
-import { RefreshObjectsOperation } from './operations/refresh-objects.js';
-import { buildToolRegistry, buildHealthTool, type Operations } from './mcp/tool-registry.js';
-import { MCPHandler } from './mcp/handler.js';
+import { buildHealthTool, buildLazyToolRegistry, type Operations } from './mcp/tool-registry.js';
+import { buildOperations } from './mcp/build-operations.js';
+import { MCPHandler, type JsonRpcRequest } from './mcp/handler.js';
 import { Metrics } from './services/metrics.js';
 import { HealthOperation } from './operations/health.js';
-import { createApiRoutes } from './api/routes.js';
+import { createApiRoutes, API_ROUTE_KEYS, validateRouteBody } from './api/routes.js';
 import { parseJsonBody, checkApiToken } from './api/middleware.js';
 // isErr no longer needed — SessionManager handles session creation errors internally
 
@@ -73,53 +47,50 @@ async function main() {
   const healthTool = buildHealthTool(healthDeps);
   const healthOp = new HealthOperation(healthDeps);
 
-  // Services — built once after session is available
-  function buildServices(s: BCSession): { operations: Operations; tools: ReturnType<typeof buildToolRegistry> } {
-    const pageService = new PageService(s, pageContextRepo, logger, { tenantId: config.bc.tenantId, authMode: config.bc.authMode });
-    const dataService = new DataService(s, pageContextRepo, logger, config.logging.redactValues);
-    const actionService = new ActionService(s, pageContextRepo, logger);
-    const navigationService = new NavigationService(s, pageContextRepo, logger);
-    const searchService = new SearchService(s, logger);
-    const screenshotService = new ScreenshotService(config.bc, config.screenshotDir, () => s.companyName, logger, authProvider);
-    const reportDownloadService = new ReportDownloadService(config.bc, config.reportDir, () => s.companyName, logger, authProvider);
-    const objectIndexService = new ObjectIndexService(pageService, config.stateDir, config.bc.baseUrl, config.bc.tenantId, logger);
+  const operationsDeps = {
+    config,
+    logger,
+    authProvider,
+    pageContextRepo,
+    onCompanySelected: (c: string) => sessionManager.rememberCompany(c),
+    metrics,
+  };
 
-    const operations: Operations = {
-      openPage: new OpenPageOperation(pageService),
-      readData: new ReadDataOperation(dataService, pageContextRepo, pageService),
-      writeData: new WriteDataOperation(dataService, pageContextRepo),
-      executeAction: new ExecuteActionOperation(actionService, pageContextRepo),
-      closePage: new ClosePageOperation(pageService),
-      searchPages: new SearchPagesOperation(searchService),
-      navigate: new NavigateOperation(navigationService),
-      respondDialog: new RespondDialogOperation(s, pageContextRepo),
-      switchCompany: new SwitchCompanyOperation(s, pageContextRepo, logger, (c) => sessionManager.rememberCompany(c)),
-      listCompanies: new ListCompaniesOperation(pageService, dataService, () => s.companyName, logger),
-      runReport: new RunReportOperation(s),
-      downloadReport: new DownloadReportOperation(reportDownloadService),
-      wizardNavigate: new WizardNavigateOperation(actionService, pageContextRepo),
-      screenshot: new ScreenshotOperation(screenshotService),
-      buildManual: new BuildManualOperation(new ManualService(screenshotService, config.manualDir, logger)),
-      findObject: new FindObjectOperation(objectIndexService),
-      refreshObjects: new RefreshObjectsOperation(objectIndexService),
-    };
-
-    return { operations, tools: buildToolRegistry(operations) };
-  }
-
-  let mcpHandler: MCPHandler | null = null;
+  let operations: Operations | null = null;
   let apiRoutes: ReturnType<typeof createApiRoutes> | null = null;
+  /**
+   * In-flight guard. Two concurrent first requests both used to see `null` here, both
+   * built the entire service graph, and each overwrote the other's handler/route map.
+   * Same pattern SessionManager uses for its own lazy session creation.
+   */
+  let readyPromise: Promise<Operations> | null = null;
 
-  async function ensureReady(): Promise<void> {
+  async function buildReady(): Promise<Operations> {
+    // ALWAYS go through the session manager: this is where a dead session is
+    // detected and recovered, so it must run on every request, not only the first.
     const s = await sessionManager.getSession();
-    // Rebuild services if session was recreated or first call
-    if (mcpHandler === null || sessionManager.needsServiceRebuild) {
-      const { operations, tools } = buildServices(s);
-      mcpHandler = new MCPHandler([...tools, healthTool], logger, metrics);
+    // Rebuild services if the session was recreated, or on the first call.
+    if (operations === null || sessionManager.needsServiceRebuild) {
+      operations = buildOperations(s, operationsDeps);
       apiRoutes = createApiRoutes(operations, logger);
       sessionManager.markServicesRebuilt();
     }
+    return operations;
   }
+
+  function ensureReady(): Promise<Operations> {
+    // Requests that arrive while a build/recovery is in flight join it instead of
+    // starting a second one. (The derived promise is what callers get, so a
+    // rejection is always handled.)
+    if (readyPromise) return readyPromise;
+    readyPromise = buildReady().finally(() => { readyPromise = null; });
+    return readyPromise;
+  }
+
+  // The tool surface is static (name/description/inputSchema/zodSchema need no
+  // services), so initialize and tools/list answer with BC still cold; only the
+  // first tools/call pays for the session.
+  const mcpHandler = new MCPHandler([...buildLazyToolRegistry(ensureReady), healthTool], logger, metrics);
 
   // HTTP Server
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -145,34 +116,79 @@ async function main() {
 
       // MCP endpoint
       if (pathname === '/mcp' && method === 'POST') {
-        await ensureReady();
-        const body = await parseJsonBody(req) as Parameters<MCPHandler['handleRequest']>[0];
-        const response = await mcpHandler!.handleRequest(body);
+        let body: JsonRpcRequest;
+        try {
+          body = await parseJsonBody(req) as JsonRpcRequest;
+        } catch (e) {
+          // A malformed body is a JSON-RPC Parse error (-32700) with a null id, not a
+          // 500 with a bare {"error":...} that no MCP client can interpret.
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(MCPHandler.parseErrorResponse(e instanceof Error ? e.message : undefined)));
+          return;
+        }
+        const response = await mcpHandler.handleRequest(body);
+        if (response === null) {
+          // Notification (no id): JSON-RPC forbids a response. Acknowledge at the
+          // transport level with an empty 202 instead of writing an id-less frame.
+          res.writeHead(202, { 'Content-Type': 'application/json' });
+          res.end();
+          return;
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(response));
         return;
       }
 
-      // REST API routes — resolve the handler BEFORE forcing a session so an
-      // unknown URL (port scan, browser probe) gets a fast 404 instead of
-      // triggering a full BC login + WebSocket connect.
+      // REST API routes. The route KEY set is static, so an unknown URL (port scan,
+      // browser probe) gets a real 404 without triggering a BC login + WebSocket
+      // connect — and, unlike before, without dereferencing a still-null route map
+      // and turning every cold-process request into a 500.
       const routeKey = `${method} ${pathname}`;
-      const handler = apiRoutes!.get(routeKey);
-      if (handler) {
+      if (API_ROUTE_KEYS.has(routeKey)) {
+        let body: unknown = {};
+        if (method === 'POST') {
+          try {
+            body = await parseJsonBody(req);
+          } catch (e) {
+            // A malformed body is the caller's mistake -> 400, not a 500.
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: e instanceof Error ? e.message : 'Invalid JSON body', code: 'INVALID_JSON' }));
+            return;
+          }
+        }
+        // Validate BEFORE forcing a session: a bad body should no more trigger a BC
+        // login + WebSocket connect than an unknown URL should.
+        const validation = validateRouteBody(routeKey, body);
+        if (!validation.ok) {
+          logger.warn(`400 ${routeKey}: input validation failed`);
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(validation.errorBody));
+          return;
+        }
         await ensureReady();
-        const body = method === 'POST' ? await parseJsonBody(req) : {};
+        const handler = apiRoutes?.get(routeKey);
+        if (!handler) {
+          // Only reachable if a spec key and the built map ever disagree.
+          res.writeHead(503, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Route not available: services are not ready' }));
+          return;
+        }
         await handler(req, res, body);
         return;
       }
 
       // 404
       res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Not found' }));
+      res.end(JSON.stringify({ error: `Not found: ${method} ${pathname}` }));
 
     } catch (e) {
       logger.error(`Request error: ${e instanceof Error ? e.message : String(e)}`);
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: e instanceof Error ? e.message : 'Internal error' }));
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e instanceof Error ? e.message : 'Internal error' }));
+      } else {
+        res.end();
+      }
     }
   });
 
@@ -191,15 +207,21 @@ async function main() {
     logger.info(`REST API: POST http://${config.server.bindAddress}:${config.port}/api/v1/...`);
   });
 
-  function shutdown(): void {
+  let shuttingDown = false;
+  async function shutdown(): Promise<void> {
+    if (shuttingDown) return;
+    shuttingDown = true;
     logger.info('Shutting down...');
     sessionManager.close();
     server.close();
+    // Drain the buffered log lines before exiting: process.exit() drops whatever is
+    // still sitting in the WriteStream buffer — typically the shutdown reason itself.
+    await logger.flush?.();
     process.exit(0);
   }
 
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', () => { void shutdown(); });
+  process.on('SIGTERM', () => { void shutdown(); });
 }
 
 main().catch((e) => {

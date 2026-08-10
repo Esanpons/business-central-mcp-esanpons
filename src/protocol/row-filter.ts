@@ -23,6 +23,17 @@
 //   blank      ""            matches everything (an empty filter is dropped upstream)
 // Values are compared against the cell's DISPLAY text (what BC formatted), except for
 // numeric comparisons, which parse the text as a number when possible.
+//
+// KNOWN LIMITATIONS (client-side matching works on display text, not on typed values):
+//   * DATES are compared LEXICOGRAPHICALLY. `01/01/2026..31/03/2026` therefore does NOT
+//     mean what a BC user means by it — dd/mm/yyyy text does not sort chronologically.
+//     Only an ISO-formatted date column (yyyy-mm-dd) ranges correctly. For real date
+//     filtering use the server-side OpenForm `filter=` query on the page's main list
+//     (see filter-query.ts), which BC evaluates against the typed field.
+//   * A DOT-GROUPED INTEGER is ambiguous: `1.234` is 1234 in es-ES and 1.234 in en-US.
+//     We refuse to guess (see `toNumber`) and fall back to string comparison, so a
+//     numeric comparison against such a cell is best-effort. Decimal cells that carry
+//     an explicit decimal comma (`1.234,56`) are unambiguous and parse correctly.
 
 export interface RowLike {
   readonly bookmark: string;
@@ -47,11 +58,23 @@ export function cellText(value: unknown): string {
   return String(value);
 }
 
-/** BC-ish number parse: tolerates thousands separators and both decimal marks. */
+/**
+ * A number written with dot thousands-groups and no decimal mark — `1.234`,
+ * `12.345.678`. Locale-ambiguous: es-ES reads 1234, en-US reads 1.234. See the
+ * header note; we decline to guess and let the caller fall back to text compare.
+ */
+const DOT_GROUPED_INTEGER = /^-?\d{1,3}(\.\d{3})+$/;
+
+/**
+ * BC-ish number parse: tolerates thousands separators and both decimal marks.
+ * Returns null when the text is not a number OR when reading it as one would
+ * require guessing the locale (see DOT_GROUPED_INTEGER).
+ */
 function toNumber(text: string): number | null {
   const t = text.trim();
   if (!t) return null;
-  // "1.234,56" (es) and "1,234.56" (en) both become 1234.56; a bare "1.234" stays 1.234.
+  if (DOT_GROUPED_INTEGER.test(t)) return null;   // ambiguous -> compare as text
+  // "1.234,56" (es) and "1,234.56" (en) both become 1234.56.
   const normalized = /,\d{1,2}$/.test(t)
     ? t.replace(/\./g, '').replace(',', '.')
     : t.replace(/,(?=\d{3}\b)/g, '');
@@ -60,15 +83,16 @@ function toNumber(text: string): number | null {
 }
 
 function wildcardToRegExp(pattern: string): RegExp {
-  // Both wildcards are lifted OUT before escaping and put back afterwards. Escaping
-  // first would turn `?` into `\?`, and a later `?` -> `.` pass would then rewrite
-  // that escape into `\.` — matching a literal dot instead of any character.
-  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, (ch) => {
-    if (ch === '*') return ' STAR ';
-    if (ch === '?') return ' ANY ';
-    return `\\${ch}`;
-  });
-  const source = escaped.split(' STAR ').join('.*').split(' ANY ').join('.');
+  // Built in ONE left-to-right pass. The previous two-pass version substituted the
+  // wildcards for the literal placeholders " STAR " / " ANY " and split on them
+  // afterwards, so a pattern containing that literal text (`*ROCK STAR BAND*`) was
+  // rewritten into `.*` and matched everything.
+  let source = '';
+  for (const ch of pattern) {
+    if (ch === '*') { source += '.*'; continue; }
+    if (ch === '?') { source += '.'; continue; }
+    source += ch.replace(/[.*+?^${}()|[\]\\]/, (c) => `\\${c}`);
+  }
   return new RegExp(`^${source}$`, 'i');
 }
 
@@ -143,27 +167,45 @@ export interface RowFilterOutcome<T extends RowLike> {
   applied: Array<{ column: string; value: string; resolvedKey: string }>;
 }
 
+export interface FilterRowsOptions {
+  /**
+   * The section's repeater column captions. This is the AUTHORITATIVE column list:
+   * derived from the repeater's columns, it is complete even when zero rows are
+   * loaded and unaffected by rows that happen to carry only some cells. Without it
+   * the column list is inferred from the rows present, so an empty result set made
+   * every filter throw "column not found. Available columns:" with nothing after it.
+   */
+  columns?: readonly string[];
+  /** Extra names accepted for a column (e.g. AL/binder name -> caption). */
+  aliases?: ReadonlyMap<string, string>;
+}
+
 /**
  * Apply every filter (AND) to `rows`. Throws a plain Error naming the offending
  * column when one can't be resolved — callers turn it into a ProtocolError with the
- * available column list attached.
+ * available column list attached. A column that IS known but has no matching rows
+ * yields an empty result, never an error.
  */
 export function filterRows<T extends RowLike>(
   rows: readonly T[],
   filters: readonly RowFilter[],
-  aliases?: ReadonlyMap<string, string>,
+  options?: FilterRowsOptions,
 ): RowFilterOutcome<T> {
-  const availableKeys = Array.from(new Set(rows.flatMap((r) => Object.keys(r.cells))));
+  const fromRows = rows.flatMap((r) => Object.keys(r.cells));
+  const availableKeys = Array.from(new Set([...(options?.columns ?? []), ...fromRows]));
   const applied: RowFilterOutcome<T>['applied'] = [];
 
   for (const f of filters) {
-    const key = resolveCellKey(f.column, availableKeys, aliases);
+    const key = resolveCellKey(f.column, availableKeys, options?.aliases);
     if (!key) {
-      throw new Error(`Filter column not found: "${f.column}". Available columns: ${availableKeys.join(', ')}`);
+      const listed = availableKeys.length > 0 ? availableKeys.join(', ') : '(none — the section exposes no columns)';
+      throw new Error(`Filter column not found: "${f.column}". Available columns: ${listed}`);
     }
     applied.push({ column: f.column, value: f.value, resolvedKey: key });
   }
 
+  // Zero rows is a trivially-empty match, not an error: the filter resolved fine,
+  // there is simply nothing to match against.
   const out = rows.filter((row) => applied.every((a) => matchesFilterValue(row.cells[a.resolvedKey], a.value)));
   return { rows: [...out], scanned: rows.length, applied };
 }

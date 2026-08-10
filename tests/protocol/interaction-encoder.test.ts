@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { InteractionEncoder, type SessionContext } from '../../src/protocol/interaction-encoder.js';
+import { describe, it, expect, vi } from 'vitest';
+import { InteractionEncoder, deriveTimeZoneInfo, type SessionContext } from '../../src/protocol/interaction-encoder.js';
 import type { OpenFormInteraction, SaveValueInteraction } from '../../src/protocol/types.js';
 
 describe('InteractionEncoder', () => {
@@ -174,7 +174,10 @@ describe('InteractionEncoder', () => {
     expect(interactions[0]!.interactionName).toBe('OpenForm');
     const tz = params.timeZoneInformation as Record<string, unknown>;
     expect(typeof tz.timeZoneBaseOffset).toBe('number');
-    expect(typeof tz.dstPeriodStart).toBe('string');
+    expect(typeof tz.dstOffset).toBe('number');
+    // dstPeriodStart is a string only where the host zone observes DST; a
+    // no-DST host (UTC CI runner) correctly sends null.
+    expect(tz.dstPeriodStart === null || typeof tz.dstPeriodStart === 'string').toBe(true);
   });
 
   describe('encodeOpenSession profile', () => {
@@ -197,6 +200,104 @@ describe('InteractionEncoder', () => {
       const call = enc.encodeOpenSession('default', 'spa-1', undefined);
       const params = (call.params[0] as Record<string, unknown>);
       expect(params.profile).toBe('');
+    });
+  });
+
+  // Finding 8 — timezone must be derived, not hardcoded to the EU.
+  describe('deriveTimeZoneInfo', () => {
+    /**
+     * Runs `fn` with `Date.prototype.getTimezoneOffset` faked for a zone whose
+     * January / July offsets (in MINUTES EAST of UTC) are the given values.
+     * The real API returns minutes WEST, hence the negation.
+     */
+    function withZone(janEast: number, julEast: number, fn: () => void): void {
+      const spy = vi.spyOn(Date.prototype, 'getTimezoneOffset').mockImplementation(function (this: Date) {
+        return this.getMonth() < 6 ? -janEast : -julEast;
+      });
+      try { fn(); } finally { spy.mockRestore(); }
+    }
+
+    const summer = new Date(2026, 7, 15, 12, 0, 0); // August — the old bug's trigger
+    const winter = new Date(2026, 0, 15, 12, 0, 0);
+
+    it('reports the STANDARD offset in summer, not the DST-inflated one (Madrid)', () => {
+      withZone(60, 120, () => {
+        const tz = deriveTimeZoneInfo(summer);
+        // The old code sent base=120 (already DST-shifted) AND dstOffset=60 => +180.
+        expect(tz.timeZoneBaseOffset).toBe(60);
+        expect(tz.dstOffset).toBe(60);
+      });
+    });
+
+    it('reports the same standard offset in winter (stable across the year)', () => {
+      withZone(60, 120, () => {
+        expect(deriveTimeZoneInfo(winter).timeZoneBaseOffset).toBe(60);
+        expect(deriveTimeZoneInfo(winter).dstOffset).toBe(60);
+      });
+    });
+
+    it('sends no DST window for a zone without DST (UTC)', () => {
+      withZone(0, 0, () => {
+        const tz = deriveTimeZoneInfo(summer);
+        expect(tz).toEqual({ timeZoneBaseOffset: 0, dstOffset: 0, dstPeriodStart: null, dstPeriodEnd: null });
+      });
+    });
+
+    it('sends no DST window for a non-DST zone with a non-zero offset (Kolkata +5:30)', () => {
+      withZone(330, 330, () => {
+        const tz = deriveTimeZoneInfo(summer);
+        expect(tz.timeZoneBaseOffset).toBe(330);
+        expect(tz.dstOffset).toBe(0);
+        expect(tz.dstPeriodStart).toBeNull();
+      });
+    });
+
+    it('handles negative (western) offsets — New York', () => {
+      withZone(-300, -240, () => {
+        const tz = deriveTimeZoneInfo(summer);
+        expect(tz.timeZoneBaseOffset).toBe(-300);
+        expect(tz.dstOffset).toBe(60);
+      });
+    });
+
+    it('handles a southern-hemisphere zone whose DST straddles the new year (Sydney)', () => {
+      withZone(660, 600, () => {
+        const tz = deriveTimeZoneInfo(new Date(2026, 5, 1));
+        expect(tz.timeZoneBaseOffset).toBe(600);   // standard = the SMALLER offset
+        expect(tz.dstOffset).toBe(60);
+        const start = new Date(tz.dstPeriodStart!);
+        const end = new Date(tz.dstPeriodEnd!);
+        expect(end.getTime()).toBeGreaterThan(start.getTime());
+        expect(end.getUTCFullYear()).toBe(2027);   // window crosses into the next year
+      });
+    });
+
+    it('emits a northern DST window inside the same year', () => {
+      withZone(60, 120, () => {
+        const tz = deriveTimeZoneInfo(new Date(2026, 7, 15));
+        const start = new Date(tz.dstPeriodStart!);
+        const end = new Date(tz.dstPeriodEnd!);
+        expect(start.getUTCFullYear()).toBe(2026);
+        expect(end.getUTCFullYear()).toBe(2026);
+        expect(end.getTime()).toBeGreaterThan(start.getTime());
+      });
+    });
+
+    it('handles a half-hour DST shift (Lord Howe, 30 min)', () => {
+      withZone(660, 630, () => {
+        const tz = deriveTimeZoneInfo(summer);
+        expect(tz.timeZoneBaseOffset).toBe(630);
+        expect(tz.dstOffset).toBe(30);
+      });
+    });
+
+    it('is what encodeOpenSession sends on the wire', () => {
+      withZone(60, 120, () => {
+        const call = new InteractionEncoder('27.0.0.0').encodeOpenSession('default', 'spa-1');
+        const tz = (call.params[0] as Record<string, unknown>).timeZoneInformation as Record<string, unknown>;
+        expect(tz.timeZoneBaseOffset).toBe(60);
+        expect(tz.dstOffset).toBe(60);
+      });
     });
   });
 

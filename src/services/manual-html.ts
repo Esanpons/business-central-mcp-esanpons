@@ -67,17 +67,51 @@ function labelsFor(lang: string): Labels {
   return LABELS[lang.toLowerCase().split('-')[0] ?? 'en'] ?? LABELS.en!;
 }
 
+/**
+ * Normalise a language tag to something `Intl` accepts. Callers hand us whatever
+ * they typed ("ca_ES" is the common one), and an underscore makes every Intl API
+ * throw a RangeError — which used to blow up the render AFTER every screenshot
+ * had already been taken.
+ */
+export function normalizeLang(lang: string): string {
+  return lang.trim().replace(/_/g, '-');
+}
+
+/**
+ * Cover date. A structurally invalid tag still throws even after normalisation
+ * (e.g. "not a language"), so the whole call is guarded: a manual must never fail
+ * to render because of a cosmetic label.
+ */
+function formatDate(date: Date, lang: string): string {
+  const opts = { year: 'numeric', month: 'long', day: 'numeric' } as const;
+  try {
+    return date.toLocaleDateString(lang, opts);
+  } catch {
+    return date.toLocaleDateString('en', opts);
+  }
+}
+
+/** Sniff the real image type so an inlined data: URI is not mislabelled as PNG. */
+function mimeOf(bytes: Uint8Array): string {
+  if (bytes[0] === 0x89 && bytes[1] === 0x50) return 'image/png';
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) return 'image/jpeg';
+  if (bytes[0] === 0x47 && bytes[1] === 0x49) return 'image/gif';
+  if (bytes[0] === 0x3c) return 'image/svg+xml';
+  return 'image/png';
+}
+
 function imageSrc(step: ManualStepModel, assets: ManualAssets): string {
   const img = step.image!;
   if (assets === 'files') return escapeHtml(img.relPath.replace(/\\/g, '/'));
-  return `data:image/png;base64,${readFileSync(img.absPath).toString('base64')}`;
+  const bytes = readFileSync(img.absPath);
+  return `data:${mimeOf(bytes)};base64,${bytes.toString('base64')}`;
 }
 
 const PRINTER_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>';
 
 function coverSheet(model: ManualModel, l: Labels, lang: string, date: Date): string {
-  const when = date.toLocaleDateString(lang, { year: 'numeric', month: 'long', day: 'numeric' });
+  const when = formatDate(date, lang);
   const intro = model.intro ? `<div class="c-intro">${renderBlocks(model.intro)}</div>` : '';
   return `<div class="sheet cover" data-cover>
   <div class="cover-band"><span class="c-kicker">${escapeHtml(l.manual)}</span></div>
@@ -116,13 +150,15 @@ function stepUnits(step: ManualStepModel, index: number, assets: ManualAssets): 
     `<h2><span class="step-num">${n}</span>${escapeHtml(step.heading)}</h2>${body}</section>`,
   ];
   if (step.image) {
-    const { width, height } = step.image;
+    const { width, height, caption } = step.image;
     // Intrinsic size keeps the aspect box correct before the image decodes,
-    // which is what makes the measured layout stable for the paginator.
+    // which is what makes the measured layout stable for the paginator. Unknown
+    // (non-PNG) sizes emit no attributes rather than bogus ones.
     const dims = width && height ? ` width="${width}" height="${height}"` : '';
+    const figcaption = caption ? `<figcaption>${escapeHtml(caption)}</figcaption>` : '';
     units.push(
       `<figure class="unit step-fig" data-unit data-group="${group}">` +
-      `<img alt="${escapeHtml(step.heading)}" src="${imageSrc(step, assets)}"${dims}></figure>`,
+      `<img alt="${escapeHtml(caption ?? step.heading)}" src="${imageSrc(step, assets)}"${dims}>${figcaption}</figure>`,
     );
   }
   return units;
@@ -130,7 +166,7 @@ function stepUnits(step: ManualStepModel, index: number, assets: ManualAssets): 
 
 export function renderHtmlDocument(model: ManualModel, options: ManualHtmlOptions = {}): ManualHtmlResult {
   const assets: ManualAssets = options.assets ?? 'inline';
-  const lang = options.lang ?? 'ca';
+  const lang = normalizeLang(options.lang ?? 'ca') || 'ca';
   const l = labelsFor(lang);
   const withCover = options.cover ?? true;
   const withToc = options.toc ?? model.steps.length >= 4;

@@ -29,6 +29,13 @@ export interface ScreenshotOutput {
   authenticated: boolean;
   spaReady: boolean;
   annotations?: Array<{ target: string; found: boolean }>;
+  /**
+   * Per-`redact` outcome. ALWAYS check this: `found:false` means the caption matched
+   * nothing, so the saved PNG still shows that value. `warning` repeats it loudly.
+   */
+  redactions?: Array<{ target: string; found: boolean }>;
+  /** Loud alert about the capture (a failed redaction above all). Absent when clean. */
+  warning?: string;
   cropped?: boolean;
   width: number;
   height: number;

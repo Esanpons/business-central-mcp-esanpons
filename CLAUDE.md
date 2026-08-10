@@ -59,7 +59,7 @@ Local Docker container `devel1` (`mcr.microsoft.com/businesscentral:ltsc2025`, B
 | Username | `admin` |
 | Auth | NavUserPassword |
 | applicationId | **`NAV`** (see OpenSession applicationId) |
-| TLS | self-signed — set `NODE_TLS_REJECT_UNAUTHORIZED=0` |
+| TLS | self-signed — set `BC_TLS_INSECURE=1` (scoped to this server's BC connections: WebSocket, `/SignIn`, headless browser). `NODE_TLS_REJECT_UNAUTHORIZED=0` still works but disables TLS verification for the WHOLE process, Entra logins included |
 
 Server config read from the container: `ClientServicesCredentialType=NavUserPassword`,
 `PublicWebBaseUrl=https://devel1/BC/`. The WebSocket is `wss://devel1/BC/csh`.
@@ -369,6 +369,17 @@ Following Anthropic's official guidance:
 
 Source: https://platform.claude.com/docs/en/docs/agents-and-tools/tool-use/define-tools
 
+## Where the documentation lives
+
+Four files carry everything that is not code. Read the relevant one BEFORE planning work:
+
+| File | What it holds |
+|---|---|
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | **The only place open work is tracked.** Capability gaps, what to port from upstream (with the protocol details upstream already verified live), Page Scripting, a specialised AL/BC testing agent, ecosystem ideas. §12 explains every item in plain Catalan |
+| [`docs/BASE-CONEIXEMENT-IA-BC.md`](docs/BASE-CONEIXEMENT-IA-BC.md) | Inventory of the external BC+AI ecosystem with URLs: Microsoft's MCP servers, community data/admin MCPs, AL development MCPs, agent/skill frameworks, Page Scripting tooling. Ends with a routing table for when several BC MCP servers are registered at once |
+| [`docs/Plans/page-scripting.md`](docs/Plans/page-scripting.md) | The exact plan for exporting agent sessions to Microsoft's Page Scripting YAML and replaying them with `@microsoft/bc-replay`. Wanted, not started |
+| [`docs/SAAS-EVIDENCE.md`](docs/SAAS-EVIDENCE.md) | Frozen record of the SaaS WebSocket discovery and the Docker-vs-SaaS parity matrix. Results only, never pending items |
+
 ## Field targeting, write verification & payload control (Fork additions — BC744)
 
 Hardening derived from task BC744 (full reference: [`docs/guides/conventions.md`](docs/guides/conventions.md);
@@ -619,7 +630,12 @@ unaffected.
 ## Known Limitations
 
 ### Document Pages (Multi-Repeater)
-Document pages (Sales Order=42/43, Purchase Order=50/51) have both a header repeater and a lines subpage repeater. The current PageState only tracks one repeater. Drilling down from document list pages may use the wrong repeater's bookmarks. This is a known architectural limitation to be addressed.
+Document pages (Sales Order=42/43, Purchase Order=50/51) have both a header repeater and a lines subpage repeater. The sections ARE distinguishable (`header` / `lines`, verified live on both environments), so always pass `section` explicitly; omitting it resolves whichever repeater comes first. Note that a plain part containing a repeater is now `subpage:<caption>`, NOT `lines` — only a real subform is `lines`.
+
+### Writes and deletes never report success blindly
+Two rules that the whole write path depends on, both verified live:
+- **BC refuses a value without raising an error.** It completes the interaction and puts the reason in `ValidationResults` on the control. `bc_write_data` surfaces that as `reason: "validation error"` + `validationMessage` (e.g. *"Sale must be equal to 'Yes' in Item: No.=0000001"*). If a write "does not stick", read that message before assuming the code is broken — on `devel1` none of the first 15 items is sellable, which is exactly what it says.
+- **BC can complete a Delete and keep the row** (an uncommitted placeholder line, or a page not opened for editing). `bc_execute_action` re-reads the repeater from the server and reports `deleted: true|false` + a `note`. When the delete opens a confirmation dialog, `deleted` is absent until you answer it — and the post-delete re-sync deliberately waits, because firing it while the modal is open destroys the dialog (`FormNotFoundException` on the answer).
 
 ### Session Recovery
 After a session-killing error, BC holds the NTLM slot for ~15 seconds. The SessionManager handles this with exponential backoff (up to `BC_RECONNECT_MAX_RETRIES` = 6 by default). If an invoke hangs indefinitely (confirmed BC bug), the session-level timeout (default 30s) kills the connection and triggers auto-recovery on the next request.

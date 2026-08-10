@@ -24,9 +24,12 @@ import { isAbsolute, resolve, join, extname } from 'node:path';
 import type { BCConfig } from '../core/config.js';
 import type { Logger } from '../core/logger.js';
 import type { IBCAuthProvider } from '../connection/auth/auth-provider.js';
-import { FormsAuthProvider } from '../connection/auth/forms-provider.js';
 import { launchHeadless } from './browser.js';
-import { ensureAuthJar, deepLinkReport, onSignIn, inPageLogin, waitReady } from './bc-web-auth.js';
+import {
+  ensureAuthJar, deepLinkReport, onSignIn, waitReady,
+  fallbackFormsProvider, recoverIfOnSignIn,
+} from './bc-web-auth.js';
+import type { Metrics } from './metrics.js';
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -77,6 +80,29 @@ export interface DownloadReportInput {
   format?: ReportOutputFormat;
 }
 
+/**
+ * True when the requested format can only come from the "Send to…" dialog.
+ *
+ * BC's default output IS pdf, so a confirm-only request page (no Send-to control)
+ * satisfies `format:"pdf"` — it must run and be reported as a success. Any other
+ * format cannot be produced there, and asking for it must abort BEFORE the confirm
+ * click: running the report and only then declaring failure produced a file the
+ * caller was told did not exist, in a temp dir that was deleted on the way out.
+ */
+export function formatNeedsSendToDialog(format?: ReportOutputFormat): boolean {
+  return !!format && format !== 'pdf';
+}
+
+/**
+ * Captions the caller asked for that matched NO request-page field — across both
+ * filters and parameters. An unmatched caption is silent by nature: BC keeps its
+ * default and renders the report anyway, so the file looks perfectly fine while
+ * containing entirely different data.
+ */
+export function unmatchedCaptions(...groups: Array<FilterApplied[] | undefined>): string[] {
+  return groups.flatMap((g) => g ?? []).filter((f) => !f.matched).map((f) => f.caption);
+}
+
 export interface FilterApplied {
   caption: string;
   matched: boolean;
@@ -122,6 +148,7 @@ export class ReportDownloadService {
     private readonly getCompany: () => string | undefined,
     private readonly logger: Logger,
     authProvider?: IBCAuthProvider,
+    private readonly metrics?: Metrics,
   ) {
     this._auth = authProvider;
   }
@@ -129,18 +156,23 @@ export class ReportDownloadService {
   /** Shared auth provider (one login for WS + browser). Standalone scripts that
    * don't inject one get a self-contained forms provider built from config. */
   private auth(): IBCAuthProvider {
-    if (!this._auth) {
-      this._auth = new FormsAuthProvider({
-        baseUrl: this.config.baseUrl,
-        username: this.config.username,
-        password: this.config.password,
-        tenantId: this.config.tenantId,
-      }, this.logger);
-    }
+    if (!this._auth) this._auth = fallbackFormsProvider(this.config, this.logger);
     return this._auth;
   }
 
   async download(input: DownloadReportInput): Promise<DownloadReportResult> {
+    const started = Date.now();
+    try {
+      const r = await this.runDownload(input);
+      this.metrics?.recordReportDownload(r.downloaded, Date.now() - started);
+      return r;
+    } catch (e) {
+      this.metrics?.recordReportDownload(false, Date.now() - started);
+      throw e;
+    }
+  }
+
+  private async runDownload(input: DownloadReportInput): Promise<DownloadReportResult> {
     const reportId = String(input.reportId).trim();
     const company = input.company || this.getCompany();
     const url = deepLinkReport(this.config, reportId, company);
@@ -164,17 +196,10 @@ export class ReportDownloadService {
       // connections, so networkidle2 routinely waits the full timeout for no
       // benefit. waitReady below handles actual readiness.
       await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      if (await onSignIn(p)) {
-        this.logger.warn('[report] cookie injection landed on SignIn — logging in in-page');
-        // The injected jar is stale server-side; drop it so the next download (and
-        // the next WS reconnect, if the provider is shared) re-authenticates.
-        this.auth().invalidate();
-        await inPageLogin(this.config, p);
-        await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => undefined);
-      }
+      await recoverIfOnSignIn(p, this.auth(), this.config, this.logger, { tag: 'report', returnTo: url });
       // Short readiness budget: a report request page keeps the generic title, so
       // waitReady never trips and would otherwise burn the full 60s default.
-      await waitReady(p, this.logger, { timeoutMs: 12000, settleMs: 1500 });
+      await waitReady(p, { timeoutMs: 12000, settleMs: 1500 });
 
       // SaaS: the report deep-link races with BC's SPA routing and intermittently
       // lands on a "Go back home" error page instead of the request page. Detect it
@@ -182,7 +207,7 @@ export class ReportDownloadService {
       for (let attempt = 0; attempt < 5 && await this.isErrorPage(p); attempt++) {
         this.logger.warn(`[report] deep-link landed on an error page; re-navigating (${attempt + 1}/5)`);
         await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => undefined);
-        await waitReady(p, this.logger, { timeoutMs: 12000, settleMs: 2000 });
+        await waitReady(p, { timeoutMs: 12000, settleMs: 2000 });
       }
 
       // Set request-page filters (e.g. No. = a document number) BEFORE running, so
@@ -215,24 +240,43 @@ export class ReportDownloadService {
       const driven = await this.driveRequestPage(p, input.format);
       this.logger.info(`[report] request-page flow: ${driven.flow ?? 'none'}`);
 
+      // Every return path carries the same request-page diagnostics: which captions
+      // matched, which format was used and what the dialog offered. Leaving them off
+      // the success path is what let an unmatched `parameters` caption ship a
+      // default-options report that looked completely clean.
+      const diagnostics = {
+        filtersApplied, parametersApplied, availableFilterLabels,
+        format: input.format,
+        ...(input.format ? { formatSelected: driven.formatSelected ?? false } : {}),
+        ...(driven.availableFormats ? { availableFormats: driven.availableFormats } : {}),
+      };
+
       // G3: the requested format is not on offer — do NOT fall through to the
       // default (which would hand back a PDF labelled as the requested format).
+      // When the report has no Send-to dialog at all, driveRequestPage refuses to
+      // click ANYTHING for a non-default format, so nothing has run at this point.
       if (input.format && driven.formatSelected === false) {
         return {
           reportId, url, authenticated: !(await onSignIn(p)),
           downloaded: false, requestPageShown: true, pageTitle: await p.title(),
-          note: `Output format "${input.format}" is not offered by report ${reportId}. `
-            + `The Send to dialog offered: [${(driven.availableFormats ?? []).join(' | ')}]. `
-            + 'Re-run without `format` to accept the default, or pick one of those.',
-          filtersApplied, parametersApplied, availableFilterLabels,
-          format: input.format, formatSelected: false, availableFormats: driven.availableFormats,
+          note: driven.noFormatDialog
+            ? `Report ${reportId} offers no output-format dialog ("Send to…" is not on its request page), `
+              + `so only BC's default output (PDF) can be produced. Nothing was run. `
+              + 'Re-run with format:"pdf" or without `format`.'
+            : `Output format "${input.format}" is not offered by report ${reportId}. `
+              + `The Send to dialog offered: [${(driven.availableFormats ?? []).join(' | ')}]. `
+              + 'Re-run without `format` to accept the default, or pick one of those.',
+          ...diagnostics,
         };
       }
 
       // Poll for a completed download (Chrome writes *.crdownload while in flight).
-      const file = await this.waitForDownload(dlDir, timeoutMs);
+      // Once a confirm/OK was actually clicked the report IS running server-side, so
+      // the short start grace must not apply (heavy reports render well past 15s).
+      const file = await this.waitForDownload(dlDir, timeoutMs, driven.confirmed);
       const pageTitle = await p.title();
       const authenticated = !(await onSignIn(p));
+      const unmatched = unmatchedCaptions(filtersApplied, parametersApplied);
 
       if (!file) {
         // The report ran but no binary was captured. The default
@@ -240,14 +284,17 @@ export class ReportDownloadService {
         // devel1, report 6 Trial Balance), so reaching here means this report
         // needs a specific parameter or output-format selection the default flow
         // did not satisfy.
-        const unmatched = filtersApplied?.filter(f => !f.matched).map(f => f.caption) ?? [];
         let note: string;
         if (unmatched.length > 0) {
-          note = `Filter caption(s) [${unmatched.join(', ')}] did not match any request-page field. `
+          note = `Filter/parameter caption(s) [${unmatched.join(', ')}] did not match any request-page field. `
             + `Available editable field labels: [${(availableFilterLabels ?? []).join(' | ')}]. `
             + 'Retry with the caption exactly as the request page shows it (locale-dependent).';
-        } else if (filtersApplied && filtersApplied.length > 0) {
-          note = 'Filters were set but no file was captured. The report may need an output-format '
+        } else if (!driven.confirmed) {
+          note = 'Nothing on the request page could be clicked to run the report (no "Send to…" and no '
+            + 'confirm/OK button matched). Drive the request page interactively with bc_run_report, or run '
+            + 'scripts/capture-report-requestpage.ts <id> so the flow can be extended.';
+        } else if ((filtersApplied?.length ?? 0) + (parametersApplied?.length ?? 0) > 0) {
+          note = 'Filters/parameters were set but no file was captured. The report may need an output-format '
             + 'selection, or the "Send to -> Aceptar" flow did not complete on this report.';
         } else {
           note = 'No file was captured. The report likely needs a specific parameter or output-format '
@@ -258,17 +305,27 @@ export class ReportDownloadService {
         return {
           reportId, url, authenticated,
           downloaded: false, requestPageShown: true, pageTitle,
-          note, filtersApplied, availableFilterLabels,
+          note, ...diagnostics,
         };
       }
 
       const dest = this.resolveOut(input.out, reportId, extname(file));
       copyFileSync(join(dlDir, file), dest);
+      // A file is NOT proof the request page was filled as asked: an unmatched
+      // caption simply leaves BC's default in place and the report renders anyway.
+      // Say so on the success path too (this project's "never trust success alone").
+      const note = unmatched.length > 0
+        ? `WARNING: the file was produced with DEFAULT options — caption(s) [${unmatched.join(', ')}] `
+          + `matched no request-page field, so those values were NOT applied. `
+          + `Available editable field labels: [${(availableFilterLabels ?? []).join(' | ')}]. `
+          + 'Retry with the caption exactly as the request page shows it (locale-dependent).'
+        : undefined;
       return {
         reportId, url, authenticated,
         downloaded: true, path: dest, fileName: file,
         requestPageShown: false, pageTitle,
-        filtersApplied,
+        ...(note ? { note } : {}),
+        ...diagnostics,
       };
     } finally {
       await browser.close();
@@ -276,13 +333,6 @@ export class ReportDownloadService {
     }
   }
 
-  /**
-   * Drive a report's request page to emit a download.
-   * Flow (verified live on devel1, report 6): click "Enviar a…" / "Send to…"
-   * (opens a format dialog) → wait → click the dialog's "Aceptar" / "OK". If no
-   * Send-to control exists, fall back to a direct confirm. Returns a short
-   * description of what it clicked, or null when nothing matched.
-   */
   /**
    * True when the deep link landed on BC's "Go back home" error page instead of
    * the report request page (a SaaS SPA-routing race). Scans all frames because
@@ -305,12 +355,34 @@ export class ReportDownloadService {
     return false;
   }
 
+  /**
+   * Drive a report's request page to emit a download.
+   *
+   * Flow (verified live on devel1, report 6): click "Enviar a…" / "Send to…"
+   * (opens a format dialog) → wait → click the dialog's "Aceptar" / "OK". If no
+   * Send-to control exists, fall back to a direct confirm.
+   *
+   * `confirmed` is the load-bearing part of the return value: it says whether an
+   * OK/confirm was actually CLICKED, i.e. whether the report is now running
+   * server-side. The caller needs it twice — to wait the full timeout for a slow
+   * render, and to keep a confirm-only report from being reported as a failure.
+   *
+   * Format handling is decided BEFORE any confirm click. A report with no Send-to
+   * dialog can only produce BC's default output (PDF): asking for `pdf` runs the
+   * direct flow and counts as a success, while asking for excel/word/xml aborts
+   * WITHOUT clicking, so a file is never produced-then-discarded.
+   */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async driveRequestPage(p: any, format?: ReportOutputFormat): Promise<{
     flow: string | null;
+    /** An OK/confirm was clicked — the report is running. */
+    confirmed: boolean;
     formatSelected?: boolean;
     availableFormats?: string[];
+    /** This report has no "Send to…" dialog, so no format choice exists at all. */
+    noFormatDialog?: boolean;
   }> {
+    const CONFIRM = ['Aceptar', 'OK', "D'acord", 'Accept', 'Acceptar'];
     // "Enviar a..." / "Send to..." — match by prefix (the caption ends in "...").
     const sendTo = await this.clickByText(p, ['Enviar a', 'Envia a', 'Send to'], true);
     if (sendTo) {
@@ -321,29 +393,42 @@ export class ReportDownloadService {
         // that asked for Excel would be worse than failing.
         const picked = await this.selectOutputFormat(p, format);
         if (!picked.selected) {
-          return { flow: `sendTo:"${sendTo}" -> format "${format}" not offered`, formatSelected: false, availableFormats: picked.available };
+          return {
+            flow: `sendTo:"${sendTo}" -> format "${format}" not offered (nothing confirmed)`,
+            confirmed: false, formatSelected: false, availableFormats: picked.available,
+          };
         }
         await sleep(400);
-        const okF = await this.clickByText(p, ['Aceptar', 'OK', "D'acord", 'Accept', 'Acceptar'], false);
+        const okF = await this.clickByText(p, CONFIRM, false);
         await sleep(500);
         return {
           flow: `sendTo:"${sendTo}" -> format:"${picked.matchedLabel}" -> confirm:"${okF ?? 'none'}"`,
+          confirmed: !!okF,
           formatSelected: true,
           availableFormats: picked.available,
         };
       }
-      const ok = await this.clickByText(p, ['Aceptar', 'OK', "D'acord", 'Accept', 'Acceptar'], false);
+      const ok = await this.clickByText(p, CONFIRM, false);
       await sleep(500);
-      return { flow: `sendTo:"${sendTo}" -> confirm:"${ok ?? 'none'}"` };
+      return { flow: `sendTo:"${sendTo}" -> confirm:"${ok ?? 'none'}"`, confirmed: !!ok };
+    }
+
+    // No Send-to control -> this report has no format dialog, only BC's default (PDF).
+    // Decide BEFORE clicking: running the report and THEN declaring the format
+    // unavailable produced a file that the caller was told did not exist, and the
+    // temp dir holding it was deleted on the way out.
+    if (formatNeedsSendToDialog(format)) {
+      return { flow: null, confirmed: false, formatSelected: false, availableFormats: [], noFormatDialog: true };
     }
     // Fallback: a request page that just needs a confirm (no Send-to split button).
     // Confirm-only (NOT Print/Preview, which open a print view rather than a download).
-    const direct = await this.clickByText(p, ['Aceptar', 'OK', "D'acord", 'Accept', 'Acceptar'], false);
-    if (format) {
-      // No Send-to dialog means no format choice exists on this report.
-      return { flow: direct ? `direct:"${direct}"` : null, formatSelected: false, availableFormats: [] };
-    }
-    return { flow: direct ? `direct:"${direct}"` : null };
+    const direct = await this.clickByText(p, CONFIRM, false);
+    return {
+      flow: direct ? `direct:"${direct}"` : null,
+      confirmed: !!direct,
+      // The default output IS pdf, so an explicit format:"pdf" is satisfied here.
+      ...(format ? { formatSelected: true, availableFormats: [], noFormatDialog: true } : {}),
+    };
   }
 
   /**
@@ -581,10 +666,16 @@ export class ReportDownloadService {
    * partial -- within a short window, bail early (the report is waiting for input).
    * Phase 2: once a download has started, wait up to the full timeoutMs for it to
    * finish writing.
+   *
+   * The start grace applies ONLY when the caller could not confirm the request page
+   * (`confirmed:false`). Once an OK was clicked the report IS rendering server-side,
+   * and a heavy report routinely takes far longer than 15s before Chrome sees the
+   * first byte -- bailing there reported downloaded:false while the file landed
+   * moments later into a temp dir that was then deleted.
    */
-  private async waitForDownload(dir: string, timeoutMs: number): Promise<string | undefined> {
+  private async waitForDownload(dir: string, timeoutMs: number, confirmed: boolean): Promise<string | undefined> {
     const deadline = Date.now() + timeoutMs;
-    const startDeadline = Date.now() + Math.min(timeoutMs, 15000);
+    const startDeadline = Date.now() + (confirmed ? timeoutMs : Math.min(timeoutMs, 15000));
     let started = false;
     while (Date.now() < deadline) {
       const all = readdirSync(dir);
@@ -595,12 +686,22 @@ export class ReportDownloadService {
           return undefined; // nothing began -> report is waiting for parameters
         }
       }
-      const done = all.filter((f) => !f.endsWith('.crdownload'));
+      // Chrome renames <name>.crdownload -> <name> while we are listing, so a file
+      // present in readdirSync can be gone by the statSync a moment later. An ENOENT
+      // here used to reject the whole download even though it had completed.
+      const done = all
+        .filter((f) => !f.endsWith('.crdownload'))
+        .map((f) => {
+          try {
+            return { f, t: statSync(join(dir, f)).mtimeMs };
+          } catch {
+            return null; // renamed/removed mid-scan — it will show up next pass
+          }
+        })
+        .filter((e): e is { f: string; t: number } => e !== null);
       if (done.length > 0) {
         // newest by mtime
-        return done
-          .map((f) => ({ f, t: statSync(join(dir, f)).mtimeMs }))
-          .sort((a, b) => b.t - a.t)[0]!.f;
+        return done.sort((a, b) => b.t - a.t)[0]!.f;
       }
       await sleep(500);
     }

@@ -29,6 +29,14 @@ export interface IBCAuthProvider {
    * SaaS returns the backend tenant id discovered from the WS URL path.
    */
   getTenantIdOverride(): string | null;
+  /**
+   * True when OpenForm-style WS queries must NOT carry `&tenant=` -- SaaS binds
+   * the tenant at session open and rejects the parameter, on-prem requires it.
+   * Optional so any provider that predates this stays valid (treated as false).
+   * `SessionFactory` reads it to configure `BCSession.runReport`, mirroring how
+   * `PageService` learns the mode from the config.
+   */
+  omitsTenantInQueries?(): boolean;
   isAuthenticated(): boolean;
   /** Descarta cookies/CSRF i el flag d'auth per forçar un /SignIn fresc al següent connect (recovery post-publish). */
   invalidate(): void;

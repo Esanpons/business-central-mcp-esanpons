@@ -1,7 +1,7 @@
 import { v4 as uuid } from 'uuid';
 import { ok, err, isOk, isErr, type Result } from '../core/result.js';
 import { ProtocolError, TimeoutError, ModalReconcileError } from '../core/errors.js';
-import type { BCWebSocket } from '../connection/bc-websocket.js';
+import { RPC_TIMEOUT_CODE, type BCWebSocket } from '../connection/bc-websocket.js';
 import type { BCEvent, BCInteraction, EventPredicate } from '../protocol/types.js';
 import { EventDecoder } from '../protocol/event-decoder.js';
 import { InteractionEncoder, type EncodeContext } from '../protocol/interaction-encoder.js';
@@ -12,11 +12,31 @@ import { ModalStack } from './modal-stack.js';
 const DEFAULT_TIMEOUT_MS = 30000;
 const QUIESCENCE_MS = 150; // Trailing window for async Message bursts
 
+// Bounded extra wait when the caller's `expect` predicate has NOT matched by the
+// end of the quiescence window. `expect` reads as a wait-contract, so honour it:
+// keep listening in short slices while events are still arriving, and give up as
+// soon as the stream goes idle. The common case (predicate already satisfied)
+// never enters this loop; the anomalous case costs ~100ms before returning what
+// it has.
+const EXPECT_WAIT_MAX_MS = 500;
+const EXPECT_WAIT_SLICE_MS = 50;
+const EXPECT_WAIT_IDLE_SLICES = 2;
+
+const sleep = (ms: number): Promise<void> => new Promise<void>(resolve => setTimeout(resolve, ms));
+
 export class BCSession {
   private queue: Promise<void> = Promise.resolve();
   private readonly _openFormIds = new Set<string>();
   private readonly modalStack = new ModalStack();
   private dead = false;
+  /**
+   * Stack of active async-event collectors, innermost last. Only the innermost
+   * one receives frames: `invokeUnqueued` subscribes for its whole lifetime, and
+   * the modal-violation retry path runs NESTED `invokeUnqueued` calls inside it,
+   * so a single async `Message` frame used to be decoded by both collectors and
+   * handed to the caller twice (duplicated DataLoaded => duplicated rows).
+   */
+  private readonly asyncSinks: BCEvent[][] = [];
 
   private sessionId = '';
   private sessionKey = '';
@@ -31,6 +51,12 @@ export class BCSession {
     private readonly tenantId: string,
     private readonly timeoutMs: number = DEFAULT_TIMEOUT_MS,
     private readonly profile: string = '',
+    /**
+     * SaaS (AAD) binds the tenant at session open and rejects `&tenant=` in an
+     * OpenForm-style query -- the same rule `PageService.buildOpenFormQuery`
+     * follows. Set by `SessionFactory` from the auth provider.
+     */
+    private readonly omitTenantInQueries: boolean = false,
   ) {}
 
   get openFormIds(): ReadonlySet<string> {
@@ -102,18 +128,26 @@ export class BCSession {
       const licenseDialog = this.findLicenseDialog(events);
       if (licenseDialog) {
         this.logger.info('Auto-dismissing license notification dialog');
-        try {
-          await this.invoke(
-            { type: 'InvokeAction', formId: licenseDialog.formId, controlPath: 'server:', systemAction: 300 }, // Ok=300
-            (e) => e.type === 'InvokeCompleted',
+        // `invoke` returns a Result -- it does NOT throw -- so the old try/catch
+        // never fired and the error was discarded, after which removeOpenForm ran
+        // unconditionally and dropped a dialog BC may well still hold open. Branch
+        // on the Result instead, and KEEP the form tracked when the dismiss failed
+        // so reconcileModalStack can abort it later.
+        const dismissed = await this.invoke(
+          { type: 'InvokeAction', formId: licenseDialog.formId, controlPath: 'server:', systemAction: 300 }, // Ok=300
+          (e) => e.type === 'InvokeCompleted',
+        ).catch((e: unknown) => err(new ProtocolError(e instanceof Error ? e.message : String(e))));
+        if (isErr(dismissed)) {
+          this.logger.warn(
+            `Failed to auto-dismiss license dialog (formId=${licenseDialog.formId}): ${dismissed.error.message}. `
+            + 'Keeping it in the modal stack so the next modal reconcile can close it.',
           );
+        } else {
           // Clear from BOTH openFormIds and the modal stack. Using the raw Set
           // delete alone leaves a stale modalStack entry (the dialog was pushed
           // there by updateFormTracking), which the next modal reconcile would try
           // to Abort even though the form is gone.
           this.removeOpenForm(licenseDialog.formId);
-        } catch {
-          this.logger.warn('Failed to auto-dismiss license dialog, continuing anyway');
         }
       }
 
@@ -161,10 +195,14 @@ export class BCSession {
     // kill a perfectly healthy session. Wrapping withTimeout INSIDE the enqueued
     // task starts the clock only once this task reaches the head of the queue.
     return this.enqueue(async () => {
+      // Re-check: this task may have been queued BEFORE another one killed the
+      // session. Sending anyway means a guaranteed-useless RPC that still burns a
+      // full timeout before failing.
+      if (this.dead) return err(new ProtocolError('Session is dead'));
       try {
         return await this.withTimeout(
-          this.invokeUnqueued(interaction, expect, effectiveTimeout),
-          effectiveTimeout + 5000, // Session-level timeout is 5s longer than RPC timeout
+          (renew) => this.invokeUnqueued(interaction, expect, effectiveTimeout, renew),
+          effectiveTimeout + 5000, // Session-level watchdog, 5s longer than one RPC
           `Invoke(${interaction.type})`,
         );
       } catch (e) {
@@ -176,19 +214,54 @@ export class BCSession {
     });
   }
 
-  private withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  /**
+   * Session-level watchdog around one invoke. It is a NO-PROGRESS timer, not a
+   * total budget: `run` receives a `renew` callback that restarts the clock, and
+   * calls it every time BC actually answers something.
+   *
+   * The fixed budget it replaces could not cover the modal-violation recovery
+   * path, which legitimately runs up to 10 dialogs x 4 answers -- each a full
+   * sendRpc -- plus the retry of the original interaction, all inside one invoke.
+   * With a fixed `timeout + 5s` window that recovery was killed mid-way for
+   * making progress too slowly. A hung BC still trips the timer, because nothing
+   * renews it.
+   */
+  private withTimeout<T>(
+    run: (renew: () => void) => Promise<T>,
+    ms: number,
+    label: string,
+  ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.logger.error(`${label} timed out after ${ms}ms, killing session`);
-        this.markDead();
-        this.ws.close();
+      let finished = false;
+      const fire = () => {
+        this.logger.error(`${label}: no response from BC for ${ms}ms, killing session`);
+        this.kill();
         reject(new TimeoutError(`BC did not respond within ${ms / 1000}s. Session has been killed and will reconnect on next request.`));
-      }, ms);
-      promise.then(
-        (val) => { clearTimeout(timer); resolve(val); },
-        (rejection) => { clearTimeout(timer); reject(rejection); },
+      };
+      let timer: ReturnType<typeof setTimeout> = setTimeout(fire, ms);
+      const renew = () => {
+        if (finished) return;
+        clearTimeout(timer);
+        timer = setTimeout(fire, ms);
+      };
+      run(renew).then(
+        (val) => { finished = true; clearTimeout(timer); resolve(val); },
+        (rejection) => { finished = true; clearTimeout(timer); reject(rejection); },
       );
     });
+  }
+
+  /**
+   * Kill the session for good: mark it dead AND tear the socket down hard, so
+   * `isConnected` stops reporting a zombie as alive and every pending request
+   * fails immediately instead of hanging on a half-open TCP connection.
+   * `forceClose` is optional-guarded so lightweight test doubles keep working.
+   */
+  private kill(): void {
+    this.markDead();
+    const ws = this.ws as unknown as { forceClose?: () => void; close: () => void };
+    if (typeof ws.forceClose === 'function') ws.forceClose();
+    else ws.close();
   }
 
   /**
@@ -207,7 +280,13 @@ export class BCSession {
    * events during their quiescence window.
    */
   private collectAsyncMessages(sink: BCEvent[]): () => void {
-    return this.ws.onMessage((raw) => {
+    this.asyncSinks.push(sink);
+    const off = this.ws.onMessage((raw) => {
+      // Only the INNERMOST active collector consumes a frame. A nested invoke
+      // (modal reconcile, or the license auto-dismiss during initialize) would
+      // otherwise have its events decoded into both its own sink and the enclosing
+      // one, so the caller saw every async event twice.
+      if (this.asyncSinks[this.asyncSinks.length - 1] !== sink) return;
       if (!raw || typeof raw !== 'object') return;
       const msg = raw as Record<string, unknown>;
       // Only process async Message notifications (method: "Message", no id)
@@ -221,12 +300,22 @@ export class BCSession {
         }
       }
     });
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      off();
+      const ix = this.asyncSinks.lastIndexOf(sink);
+      if (ix >= 0) this.asyncSinks.splice(ix, 1);
+    };
   }
 
   private async invokeUnqueued(
     interaction: BCInteraction,
     expect: EventPredicate,
     timeoutMs: number,
+    /** Restarts the enclosing no-progress watchdog; called whenever BC answers. */
+    renew?: () => void,
   ): Promise<Result<BCEvent[], ProtocolError>> {
     const callbackId = uuid();
     const allEvents: BCEvent[] = [];
@@ -259,14 +348,34 @@ export class BCSession {
 
       // Send and wait for synchronous response
       const rpcResult = await this.ws.sendRpc(encoded.method, encoded.params, timeoutMs);
+      renew?.();
       if (isErr(rpcResult)) {
         const msg = rpcResult.error.message;
+        // An RPC that never got an answer is SESSION-FATAL. BC may still be
+        // processing it, and any response that lands afterwards is dropped by
+        // routeMessage (its pending entry is gone) -- so openFormIds and the modal
+        // stack silently drift out of sync with the server. Previously this
+        // returned a plain error and left the desynced session alive, because the
+        // per-RPC deadline fires 5s BEFORE the session-level watchdog that would
+        // have killed it.
+        if (rpcResult.error.code === RPC_TIMEOUT_CODE) {
+          this.logger.error(`Invoke(${interaction.type}) timed out after ${timeoutMs}ms; killing the session (client state can no longer be trusted)`);
+          this.kill();
+          return err(new ProtocolError(
+            `RPC timed out after ${timeoutMs}ms: BC did not answer ${interaction.type}. Session has been killed and will reconnect on next request.`,
+            { interaction: interaction.type },
+            RPC_TIMEOUT_CODE,
+          ));
+        }
         // Match the fatal JSON-RPC code 1 exactly. A naive `includes('"code":1')`
         // substring also matches code 10, 12, 19, 100... -- non-fatal errors that
         // would then wrongly tear down the whole session. The word boundary is
         // the same guard error-translator.ts already uses.
         if (msg.includes('InvalidSessionException') || /"code"\s*:\s*1\b/.test(msg)) {
-          this.markDead();
+          // Close the socket too: marking the session dead without it left
+          // `isConnected` true, so `isAlive` kept reporting a zombie as usable
+          // until something else happened to notice.
+          this.kill();
           return rpcResult;
         }
         if (msg.includes('LogicalModalityViolationException')) {
@@ -281,9 +390,9 @@ export class BCSession {
           // predicate observes them alongside any FormClosed events emitted
           // by the reconcile sub-invokes.
           this.logger.warn(`LogicalModalityViolation detected, reconciling modal stack (size=${this.modalStack.size})`);
-          const reconcile = await this.reconcileModalStack();
+          const reconcile = await this.reconcileModalStack(renew);
           if (isErr(reconcile)) {
-            this.markDead();
+            this.kill();
             return err(new ModalReconcileError(`Modal reconciliation failed: ${reconcile.error.message}`, { originalError: msg }));
           }
           // Surface the reconcile sub-invokes' events (notably FormClosed for the
@@ -308,8 +417,9 @@ export class BCSession {
           };
           const retryEncoded = this.encoder.encode(interaction, retryContext);
           const retryRpc = await this.ws.sendRpc(retryEncoded.method, retryEncoded.params, timeoutMs);
+          renew?.();
           if (isErr(retryRpc)) {
-            this.markDead();
+            this.kill();
             return err(new ModalReconcileError(`Retry after modal reconcile still failed: ${retryRpc.error.message}`, { originalError: msg }));
           }
           if (Array.isArray(retryRpc.value)) {
@@ -328,26 +438,53 @@ export class BCSession {
       }
 
       // Quiescence window — wait for trailing async Messages
-      await new Promise<void>(resolve => setTimeout(resolve, QUIESCENCE_MS));
+      await sleep(QUIESCENCE_MS);
 
-      // Collect async events
-      allEvents.push(...asyncEvents);
+      // Async events are drained incrementally: the expect-wait below may pull in
+      // more of them, and each one must be merged exactly once.
+      let drained = 0;
+      const drain = (): BCEvent[] => {
+        const fresh = asyncEvents.slice(drained);
+        drained = asyncEvents.length;
+        return fresh;
+      };
 
-      // Update form tracking
-      this.updateFormTracking(allEvents);
-
-      // Check completion gates for logging
       let invokeCompletedSeen = false;
       let expectMatched = false;
-      for (const event of allEvents) {
-        if (event.type === 'InvokeCompleted') {
-          if (event.completedInteractions.some(ci => ci.invocationId === callbackId)) {
-            invokeCompletedSeen = true;
+      const consume = (events: BCEvent[]): void => {
+        allEvents.push(...events);
+        this.updateFormTracking(events);
+        for (const event of events) {
+          if (event.type === 'InvokeCompleted') {
+            if (event.completedInteractions.some(ci => ci.invocationId === callbackId)) {
+              invokeCompletedSeen = true;
+            }
+          }
+          if (!expectMatched && expect(event, { callbackId, interactionFormId: interaction.formId, invokeCompletedSeen })) {
+            expectMatched = true;
           }
         }
-        if (!expectMatched && expect(event, { callbackId, interactionFormId: interaction.formId, invokeCompletedSeen })) {
-          expectMatched = true;
-        }
+      };
+
+      // Fold in what the synchronous response already produced plus the async
+      // burst, in one pass (allEvents currently holds only the decoded response).
+      const initial = allEvents.splice(0, allEvents.length);
+      consume(initial);
+      consume(drain());
+
+      // `expect` names a wait-contract, so honour it instead of merely logging
+      // whether it matched: keep listening in short slices while events are still
+      // arriving. Bounded twice over (total budget AND consecutive idle slices),
+      // so a predicate BC will never satisfy costs ~100ms, not the full budget.
+      let waitedMs = 0;
+      let idleSlices = 0;
+      while (!expectMatched && waitedMs < EXPECT_WAIT_MAX_MS && idleSlices < EXPECT_WAIT_IDLE_SLICES) {
+        await sleep(EXPECT_WAIT_SLICE_MS);
+        waitedMs += EXPECT_WAIT_SLICE_MS;
+        const fresh = drain();
+        if (fresh.length === 0) { idleSlices += 1; continue; }
+        idleSlices = 0;
+        consume(fresh);
       }
 
       this.logger.debug('protocol', `Invoke complete: ${interaction.type}`, {
@@ -356,6 +493,7 @@ export class BCSession {
         types: allEvents.map(e => e.type),
         invokeCompletedSeen,
         expectMatched,
+        expectWaitMs: waitedMs,
       });
 
       return ok(allEvents);
@@ -431,7 +569,7 @@ export class BCSession {
    * inspects `LogicalDispatcher.Frames`. SystemAction.Abort=320 closes the
    * topmost frame's ModalForm.
    */
-  async reconcileModalStack(): Promise<Result<BCEvent[], ProtocolError>> {
+  async reconcileModalStack(renew?: () => void): Promise<Result<BCEvent[], ProtocolError>> {
     const collected: BCEvent[] = [];
     const MAX_ATTEMPTS = 10;
     for (let i = 0; i < MAX_ATTEMPTS && this.modalStack.size > 0; i++) {
@@ -456,6 +594,7 @@ export class BCSession {
           attempt.interaction,
           (event) => event.type === 'InvokeCompleted',
           this.timeoutMs,
+          renew,
         );
         if (isErr(result)) {
           // A rejected answer (BC may refuse No on a dialog with no No button) is
@@ -501,7 +640,9 @@ export class BCSession {
    * Verified from decompiled LogicalModalityVerifier.cs / LogicalDispatcher.cs.
    */
   async closeGracefully(): Promise<void> {
-    if (this.dead) { this.ws.close(); return; }
+    // A dead session has nothing to close politely, and its socket is exactly the
+    // one that may be half-open -- tear it down hard.
+    if (this.dead) { this.kill(); return; }
 
     // Close forms iteratively. CloseForm may trigger save-changes dialogs that
     // become new modal forms in _openFormIds. Dismiss them before continuing.
@@ -571,18 +712,30 @@ export class BCSession {
     // Verified from decompiled NavRunReportPropertyBagInvokedAction.cs:
     //   FormPropertyBag maps "report" key to COMMAND=report, ID=reportId
     //   InvokePropertyBagAction calls IService.RunReport(reportId)
+    // SaaS (AAD) binds the tenant at session open and rejects `&tenant=` in the
+    // query -- the same rule PageService.buildOpenFormQuery follows for pages.
+    // Hard-coding it here made every report open on SaaS use a query on-prem
+    // shape.
+    const query = this.omitTenantInQueries
+      ? `report=${reportId}`
+      : `report=${reportId}&tenant=${this.tenantId}`;
     return this.invoke(
       {
         type: 'OpenForm',
-        query: `report=${reportId}&tenant=${this.tenantId}`,
+        query,
       },
       (e) => e.type === 'InvokeCompleted' || e.type === 'DialogOpened' || e.type === 'FormCreated',
     );
   }
 
+  /**
+   * Abrupt teardown (signal handlers, discarding a dead session before recovery).
+   * Uses the hard path: this is called precisely when the socket may be half-open,
+   * and a polite close would leave pending requests hanging and `isConnected`
+   * true for minutes.
+   */
   close(): void {
-    this.dead = true;
-    this.ws.close();
+    this.kill();
   }
 
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {

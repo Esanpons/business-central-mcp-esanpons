@@ -7,6 +7,13 @@ export interface Logger {
   warn(msg: string, context?: Record<string, unknown>): void;
   error(msg: string, context?: Record<string, unknown>): void;
   debug(channel: string, msg: string, context?: Record<string, unknown>): void;
+  /**
+   * Drain and close the log-file streams. Optional so every existing Logger
+   * implementation (and every test double) stays valid. Entry points should
+   * `await logger.flush?.()` before `process.exit`, otherwise buffered lines --
+   * typically the shutdown reason -- are dropped.
+   */
+  flush?(): Promise<void>;
 }
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -50,17 +57,73 @@ export function createLogger(config: LoggingConfig): Logger {
     stream.write(entry + '\n');
   }
 
+  const streams = [serverLog, protocolLog].filter((s): s is WriteStream => s !== null);
+  registerFlushOnExit(streams);
+
   return {
     info(msg, context) { writeStderr('info', msg); writeLog(serverLog, 'info', msg, context); },
     warn(msg, context) { writeStderr('warn', msg); writeLog(serverLog, 'warn', msg, context); },
     error(msg, context) { writeStderr('error', msg); writeLog(serverLog, 'error', msg, context); },
     debug(channel, msg, context) {
+      // LOG_LEVEL=debug used to produce NO stderr output at all: debug() only ever
+      // wrote to the channel files, and only for channels named in LOG_CHANNELS.
+      // Setting the level to debug now does what it says -- the line also reaches
+      // stderr (where a stdio client shows it), while LOG_CHANNELS keeps deciding
+      // which channels are persisted to the log files.
+      writeStderr('debug', `[${channel}] ${msg}`);
       if (enabledChannels.has(channel) || enabledChannels.has('all')) {
         const target = channel === 'protocol' ? protocolLog : serverLog;
         writeLog(target, 'debug', `[${channel}] ${msg}`, context);
       }
     },
+    async flush(): Promise<void> { await flushStreams(streams); },
   };
+}
+
+/**
+ * Wait for every buffered log line to reach the OS, then close the streams.
+ * `WriteStream.write()` is asynchronous: on `process.exit(0)` (and on a fast
+ * SIGINT path) anything still sitting in the stream buffer is silently dropped,
+ * which loses exactly the tail that explains why the process is going away.
+ */
+function flushStreams(streams: WriteStream[]): Promise<void> {
+  return Promise.all(
+    streams.map(
+      (s) => new Promise<void>((resolve) => {
+        if (s.closed || s.destroyed) { resolve(); return; }
+        s.end(() => resolve());
+      }),
+    ),
+  ).then(() => undefined);
+}
+
+/**
+ * Best-effort tail flush on process exit. `process.on('exit')` cannot await, so
+ * this only asks every open log stream to end (which pushes whatever is already
+ * queued at the stream layer down to the fd). It is a safety net for exit paths
+ * that forget to `await logger.flush()` -- entry points should still call
+ * `flush()` explicitly before `process.exit`.
+ *
+ * One shared handler and one shared registry: createLogger may run several times
+ * in a process (tests, scripts) and N listeners would trip Node's
+ * MaxListenersExceededWarning.
+ */
+const openLogStreams = new Set<WriteStream>();
+let exitHookInstalled = false;
+
+function registerFlushOnExit(streams: WriteStream[]): void {
+  if (streams.length === 0) return;
+  for (const s of streams) {
+    openLogStreams.add(s);
+    s.on('close', () => openLogStreams.delete(s));
+  }
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  process.on('exit', () => {
+    for (const s of openLogStreams) {
+      try { s.end(); } catch { /* exiting anyway */ }
+    }
+  });
 }
 
 export function createNullLogger(): Logger {

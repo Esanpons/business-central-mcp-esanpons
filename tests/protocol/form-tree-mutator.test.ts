@@ -78,6 +78,12 @@ describe('applyPropertyChange — RepeaterNode.columns', () => {
             { type: 'rcc', controlPath: 'server:c[0]/co[1]', properties: { caption: 'Name', visible: true } },
           ],
           children: [],
+          headerActions: [
+            {
+              type: 'ac', controlPath: 'server:c[0]/ha[0]', systemAction: 0,
+              properties: { caption: 'Open', enabled: false }, children: [], isLineScoped: true,
+            },
+          ],
         },
       ],
     };

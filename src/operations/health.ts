@@ -3,6 +3,7 @@ import type { ProtocolError } from '../core/errors.js';
 import type { BCSession } from '../session/bc-session.js';
 import type { BCConfig } from '../core/config.js';
 import type { Metrics, MetricsSnapshot } from '../services/metrics.js';
+import { SERVER_VERSION } from '../mcp/version.js';
 
 export interface HealthDeps {
   /** Reads the live session (may be null when BC is unreachable / not yet connected). */
@@ -32,6 +33,11 @@ export interface HealthOutput {
     openForms: number;
     modalDepth: number;
   };
+  /**
+   * Whatever Metrics currently exposes, serialized as-is. Typed as the snapshot
+   * interface rather than a hand-listed set of fields, so a counter added to
+   * Metrics shows up in bc_health with no change here.
+   */
   metrics: MetricsSnapshot;
 }
 
@@ -58,7 +64,10 @@ export class HealthOperation {
 
     const out: HealthOutput = {
       status: s && s.isAlive ? 'connected' : 'disconnected',
-      version: '2.0.0',
+      // Read from package.json (src/mcp/version.ts), never hardcoded: this string,
+      // the MCP serverInfo and the REST surface had each drifted to their own
+      // stale "2.0.0".
+      version: SERVER_VERSION,
       bc: {
         baseUrl: this.deps.bc.baseUrl,
         authMode: this.deps.bc.authMode,

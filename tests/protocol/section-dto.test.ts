@@ -192,6 +192,109 @@ describe('buildSection', () => {
     expect(section!.actions).toHaveLength(2);
     expect(section!.actions![0].name).toBe('New');
   });
+
+  it('lists a disabled action with enabled:false instead of hiding it', () => {
+    // "the action does not exist here" and "it exists but is greyed out" are
+    // different problems for the caller; the DTO must be able to say both.
+    const root = {
+      t: 'lf', ServerId: 'root', PageType: 5, Caption: 'Sales Order',
+      Children: [
+        { t: 'ac', Caption: 'Post', SystemAction: 0, Enabled: false, Visible: true },
+        { t: 'ac', Caption: 'Release', SystemAction: 0, Enabled: true, Visible: true },
+        { t: 'ac', Caption: 'Hidden', SystemAction: 0, Enabled: true, Visible: false },
+      ],
+    };
+    const ctx = makeCtx({
+      rootFormId: 'root',
+      forms: new Map([['root', makeFormState('root', root)]]),
+      sections: new Map([['header', {
+        sectionId: 'header', kind: 'header', caption: 'Sales Order', formId: 'root', valid: true,
+      }]]),
+    });
+    const actions = buildSection(ctx, 'header')!.actions!;
+    expect(actions.map(a => [a.name, a.enabled])).toEqual([['Post', false], ['Release', true]]);
+  });
+
+  it('exposes option choices and the selected one for enum/boolean controls', () => {
+    const root = {
+      t: 'lf', ServerId: 'root', PageType: 0, Caption: 'Checklist',
+      Children: [
+        {
+          t: 'sec', Caption: 'Status', Visible: true, Editable: true, StringValue: 'In Progress',
+          Items: [{ Text: 'Not Started', Value: '0' }, { Text: 'In Progress', Value: '1' }],
+          CurrentIndex: 1,
+        },
+      ],
+    };
+    const ctx = makeCtx({
+      rootFormId: 'root',
+      forms: new Map([['root', makeFormState('root', root)]]),
+      sections: new Map([['header', {
+        sectionId: 'header', kind: 'header', caption: 'Checklist', formId: 'root', valid: true,
+      }]]),
+    });
+    const field = buildSection(ctx, 'header')!.fields!.find(f => f.name === 'Status')!;
+    expect(field.options).toEqual(['Not Started', 'In Progress']);
+    expect(field.selectedOption).toBe('In Progress');
+  });
+});
+
+describe('buildSection tree index agrees with the reference walkers', () => {
+  // buildSection stopped calling findByControlPath / ancestorsOf per field (an
+  // O(n^2) full-tree walk each) and reads a one-pass index instead. The index has
+  // to reproduce nearestGroupCaption and isEffectivelyVisible EXACTLY — this is
+  // the guard against the two drifting apart.
+  const tricky = {
+    t: 'lf', ServerId: 'root', PageType: 9, Caption: 'Sales Quote',
+    Children: [
+      { t: 'gc', Caption: 'General', Visible: true, Children: [
+        { t: 'sc', Caption: 'No.', StringValue: 'SQ1', Visible: true },
+      ] },
+      // BC's Sell-to/Bill-to idiom: an anonymous "Control41" group labelled by a
+      // sibling option selector.
+      { t: 'gc', Caption: 'Control41', Visible: true, Children: [
+        { t: 'sc', Caption: 'Name', StringValue: 'A', Visible: true },
+        { t: 'gc', Caption: 'Control42', Visible: true, Children: [
+          { t: 'sc', Caption: 'Address', StringValue: 'B', Visible: true },
+        ] },
+      ] },
+      { t: 'sec', Caption: 'Bill-to', StringValue: 'Default', Visible: true },
+      // a collapsed group hides its whole subtree
+      { t: 'gc', Caption: 'Hidden Tab', Visible: false, Children: [
+        { t: 'sc', Caption: 'Secret', StringValue: 'C', Visible: true },
+      ] },
+    ],
+  };
+
+  it('matches nearestGroupCaption and isEffectivelyVisible for every field', async () => {
+    const { buildFormTree: build } = await import('../../src/protocol/form-tree-builder.js');
+    const { nearestGroupCaption } = await import('../../src/protocol/form-tree-walk.js');
+    const { isEffectivelyVisible } = await import('../../src/protocol/visibility.js');
+    const { fields: treeFields, groupVisibility } = await import('../../src/protocol/form-views.js');
+
+    const root = build(tricky);
+    const groupVis = groupVisibility(root);
+
+    const ctx = makeCtx({
+      rootFormId: 'root',
+      forms: new Map([['root', { formId: 'root', root, rows: new Map() }]]),
+      sections: new Map([['header', {
+        sectionId: 'header', kind: 'header', caption: 'Sales Quote', formId: 'root', valid: true,
+      }]]),
+    });
+    const built = buildSection(ctx, 'header')!;
+
+    const expected = treeFields(root)
+      .filter(f => f.properties.caption && isEffectivelyVisible(root, f.controlPath, groupVis, null))
+      .map(f => ({ path: f.controlPath, group: nearestGroupCaption(root, f.controlPath) }));
+
+    expect(built.fields!.map(f => f.controlPath)).toEqual(expected.map(e => e.path));
+    expect(built.fields!.map(f => f.group)).toEqual(expected.map(e => e.group));
+    // the collapsed group's field is gone in both
+    expect(built.fields!.some(f => f.name === 'Secret')).toBe(false);
+    // ...and the anonymous groups borrowed the option selector's label
+    expect(built.fields!.find(f => f.name === 'Address')!.group).toBe('Bill-to');
+  });
 });
 
 describe('buildSection duplicate-caption disambiguation (P1/P8 regression)', () => {

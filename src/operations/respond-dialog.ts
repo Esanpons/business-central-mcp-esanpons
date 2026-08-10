@@ -4,6 +4,8 @@ import type { BCSession } from '../session/bc-session.js';
 import type { PageContextRepository } from '../protocol/page-context-repo.js';
 import { SystemAction } from '../protocol/types.js';
 import { detectChangedSections, detectDialogs } from '../protocol/mutation-result.js';
+import { resyncPageRepeaters } from '../services/repeater-sync.js';
+import type { Logger } from '../core/logger.js';
 
 export interface RespondDialogInput {
   pageContextId: string;
@@ -31,6 +33,7 @@ export class RespondDialogOperation {
   constructor(
     private readonly session: BCSession,
     private readonly repo: PageContextRepository,
+    private readonly logger?: Logger,
   ) {}
 
   async execute(input: RespondDialogInput): Promise<Result<RespondDialogOutput, ProtocolError>> {
@@ -82,9 +85,19 @@ export class RespondDialogOperation {
     const events = result.value;
     this.repo.applyToPage(input.pageContextId, events);
 
+    const newDialogs = detectDialogs(events);
+
+    // The answer may have committed a destructive change without BC saying which row
+    // it removed: confirming a line delete deletes the record server-side and sends
+    // nothing that identifies it, so the projection keeps listing a row that no
+    // longer exists (verified live on SaaS — a freshly opened context did not list
+    // it). Re-read the repeaters once the dialog chain is actually finished.
+    if (newDialogs.length === 0) {
+      await resyncPageRepeaters(this.session, this.repo, input.pageContextId, this.logger);
+    }
+
     const updatedCtx = this.repo.get(input.pageContextId);
     const changedSections = updatedCtx ? detectChangedSections(updatedCtx, events) : [];
-    const newDialogs = detectDialogs(events);
 
     // Check for new pages opened (e.g., posting creates a Posted Invoice)
     const openedPages: Array<{ pageContextId: string; caption: string }> = [];

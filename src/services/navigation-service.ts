@@ -81,8 +81,11 @@ export class NavigationService {
     if (isErr(editResult)) return editResult;
 
     const events = editResult.value;
-    // The new page appears as a FormCreated event for a different form than the source
-    const formCreated = events.find(e => e.type === 'FormCreated' && e.formId !== resolved.form.formId);
+    // The new page appears as an OWNERLESS FormCreated for a different form than the
+    // source. `!e.parentFormId` matters: a FormCreated WITH a parent is a part of some
+    // form (a factbox, a lines subform) — adopting one as a page root would build a
+    // page context around a fragment.
+    const formCreated = events.find(e => e.type === 'FormCreated' && !e.parentFormId && e.formId !== resolved.form.formId);
 
     if (!formCreated || formCreated.type !== 'FormCreated') {
       return err(new ProtocolError('No new form opened after drill-down'));
@@ -93,7 +96,10 @@ export class NavigationService {
     this.repo.create(targetPageContextId, formCreated.formId);
     this.repo.applyToPage(targetPageContextId, events);
 
-    // Also apply events to source page (its ownedFormIds need updating)
+    // Also apply events to the source page: it still needs the row/property changes
+    // the drill-down produced. The repository ignores the target page's ownerless
+    // FormCreated for a context that does not own that formId, so this no longer
+    // overwrites the source's caption/pageType with the card's.
     this.repo.applyToPage(pageContextId, events);
 
     // Load data for the drilled-down card page

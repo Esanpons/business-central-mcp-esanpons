@@ -1,9 +1,14 @@
 // tests/unit/bc-web-auth.test.ts
 import { describe, it, expect } from 'vitest';
-import { deepLinkPage, deepLinkReport, parseSetCookie } from '../../src/services/bc-web-auth.js';
+import { deepLinkPage, deepLinkReport, parseSetCookie, waitReady } from '../../src/services/bc-web-auth.js';
 import type { BCConfig } from '../../src/core/config.js';
 
 const config = { baseUrl: 'https://devel1/BC', tenantId: 'default' } as BCConfig;
+
+/** A puppeteer-ish page whose readiness probe answers with a canned state. */
+function fakePage(state: { spinnerVisible: boolean; generic: boolean }): { evaluate: () => Promise<typeof state> } {
+  return { evaluate: () => Promise.resolve(state) };
+}
 
 describe('deepLinkPage', () => {
   it('builds a page deep link with tenant, company and bookmark', () => {
@@ -28,6 +33,28 @@ describe('deepLinkReport', () => {
   });
   it('omits company when not given', () => {
     expect(deepLinkReport(config, '6')).not.toContain('company=');
+  });
+});
+
+describe('waitReady', () => {
+  it('reports ready and settles when the SPA has a real page title and no spinner', async () => {
+    const r = await waitReady(fakePage({ spinnerVisible: false, generic: false }), { timeoutMs: 5000, settleMs: 10 });
+    expect(r).toBe(true);
+  });
+
+  it('does NOT pay the settle wait after a timed-out poll', async () => {
+    // A report request page keeps the generic title forever, so this path is the
+    // common one; the trailing settle used to make every not-ready call slower for
+    // nothing (it was the bulk of a ~97s report download).
+    const t0 = Date.now();
+    const r = await waitReady(fakePage({ spinnerVisible: false, generic: true }), { timeoutMs: 10, settleMs: 4000 });
+    expect(r).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(2500);
+  });
+
+  it('treats a visible spinner as not-ready', async () => {
+    const r = await waitReady(fakePage({ spinnerVisible: true, generic: false }), { timeoutMs: 10, settleMs: 4000 });
+    expect(r).toBe(false);
   });
 });
 
