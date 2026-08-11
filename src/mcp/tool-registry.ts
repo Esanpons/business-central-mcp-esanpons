@@ -94,7 +94,7 @@ Card pages (single-record views like Customer Card=21) return one header (card-s
 
 Typical workflow: bc_open_page -> bc_read_data (refresh / filter / paginate a section) -> bc_write_data (edit fields in any section) -> bc_execute_action (post / release / delete) -> bc_close_page. Always call bc_close_page when done. Do NOT call this if the page is already open -- reuse the existing pageContextId.
 
-Optional bookmark parameter opens a Card page to a specific record. Bookmarks come from list rows in any prior section.
+Optional bookmark parameter opens a Card page to a specific record. Bookmarks come from list rows in any prior section. A bookmark only addresses the TABLE the source list is bound to: passing one from a different list (e.g. a Posted Sales Shipments row into page 132) is refused by BC and comes back as PAGE_OPEN_REJECTED with BC's own message ("cannot use a RecordID from table X with a record from table Y") — not as an empty page. When that happens, either open the page filtered ({ pageId, filters: [{ field: "No.", value: "<doc no>" }] }) or drill into the row from its own list with bc_execute_action { action: "View" | "Edit", rowIndex }.
 
 Large pages: an un-narrowed open of a document or a long list can serialize hundreds of fields and rows and blow the response budget (the server then refuses it with RESPONSE_TOO_LARGE). Narrow it up front: summary:true returns section identity only (best first call on an unfamiliar big page), then pull what you need with sections:["header"], tab, columns and range -- or with bc_read_data section by section.
 
@@ -140,7 +140,7 @@ Write related fields together in one call (e.g., quantity and unit price), but a
 
 Duplicate captions: document headers repeat captions across groups (Sell-to / Bill-to / Ship-to all have "Name", "Address", "City"). Target one unambiguously by using the field's controlPath as the fields key (e.g. { "server:c[4]/c[1]/c[1]/c[0]": "2000008" }), or by passing group: "Bill-to" alongside caption-keyed fields.
 
-For Document page line items (Sales Order lines, Purchase Order lines), specify section: "lines" to write to the lines repeater. Use rowIndex (0-based row position) or bookmark (stable row identifier from bc_read_data results) to target a specific line. Prefer bookmark over rowIndex when rows may have been reordered or inserted since the last read.
+For Document page line items (Sales Order lines, Purchase Order lines), specify section: "lines" to write to the lines repeater. Use rowIndex (0-based row position) or bookmark (stable row identifier from bc_read_data results) to target a specific line. Prefer bookmark over rowIndex when rows may have been reordered or inserted since the last read. A line write is judged on the value BC echoes back for that cell; when BC echoes nothing the verdict falls back to re-reading the row and says so in "hint" (a list that is not in edit mode silently ignores line writes).
 
 Do NOT use this for triggering actions like Post, Delete, or Release -- use bc_execute_action instead. Do NOT use this for navigating to records -- use bc_navigate instead.
 

@@ -1,6 +1,6 @@
 // tests/unit/bc-web-auth.test.ts
 import { describe, it, expect } from 'vitest';
-import { deepLinkPage, deepLinkReport, parseSetCookie, waitReady } from '../../src/services/bc-web-auth.js';
+import { deepLinkPage, deepLinkReport, parseSetCookie, waitReady, detectErrorPage } from '../../src/services/bc-web-auth.js';
 import type { BCConfig } from '../../src/core/config.js';
 
 const config = { baseUrl: 'https://devel1/BC', tenantId: 'default' } as BCConfig;
@@ -22,6 +22,22 @@ describe('deepLinkPage', () => {
   it('never includes runinframe (it hangs the load)', () => {
     expect(deepLinkPage(config, '21')).not.toContain('runinframe');
   });
+
+  // BC reads the query value literally: a company encoded the form way ("CRONUS+ES")
+  // is looked up as a company whose name contains a '+', and every capture came back
+  // as BC's "Could not open the company" page. Nearly every install has a space in a
+  // company name (CRONUS ES, My Company), so this broke captures and manuals wholesale.
+  it('encodes a space in the company name as %20, never as +', () => {
+    const url = deepLinkPage(config, '50002', undefined, 'CRONUS ES');
+    expect(url).toContain('company=CRONUS%20ES');
+    expect(url).not.toContain('+');
+  });
+
+  it('percent-encodes a bookmark without turning its characters into a space', () => {
+    const url = deepLinkPage(config, '132', 'a+b/c=d', 'My Company');
+    expect(url).toContain('bookmark=a%2Bb%2Fc%3Dd');
+    expect(url).toContain('company=My%20Company');
+  });
 });
 
 describe('deepLinkReport', () => {
@@ -33,6 +49,9 @@ describe('deepLinkReport', () => {
   });
   it('omits company when not given', () => {
     expect(deepLinkReport(config, '6')).not.toContain('company=');
+  });
+  it('encodes a space in the company name as %20, never as +', () => {
+    expect(deepLinkReport(config, '6', 'CRONUS ES')).toContain('company=CRONUS%20ES');
   });
 });
 
@@ -55,6 +74,38 @@ describe('waitReady', () => {
   it('treats a visible spinner as not-ready', async () => {
     const r = await waitReady(fakePage({ spinnerVisible: true, generic: false }), { timeoutMs: 10, settleMs: 4000 });
     expect(r).toBe(false);
+  });
+});
+
+describe('detectErrorPage', () => {
+  // Body classes and text captured live from devel1 (page 21 opened with a company
+  // BC cannot resolve): the host frame gets `has-error-in-child`, the frame that
+  // renders the message gets `has-error`.
+  const framePage = (frames: Array<{ cls: string; text: string }>) => ({
+    frames: () => frames.map(f => ({ evaluate: () => Promise.resolve(f) })),
+  });
+
+  it('returns the CHILD frame message, not the host frame placeholder', async () => {
+    const p = framePage([
+      { cls: 'has-error-in-child', text: "We had trouble completing the request. Let's try again.\nRetry" },
+      { cls: 'ms-dyn365-fin chrome mouse has-error', text: "Could not open the company.\nNo se pudo abrir la empresa 'CRONUS ES'.\nGo back home" },
+    ]);
+    expect(await detectErrorPage(p)).toMatch(/Could not open the company/);
+  });
+
+  it('falls back to the host frame when only it reports an error', async () => {
+    const p = framePage([{ cls: 'has-error-in-child', text: 'We had trouble completing the request.' }]);
+    expect(await detectErrorPage(p)).toMatch(/trouble completing/);
+  });
+
+  it('is quiet on a healthy page', async () => {
+    const p = framePage([{ cls: 'ms-dyn365-fin chrome mouse', text: 'Customer Card\nNo.\nName' }]);
+    expect(await detectErrorPage(p)).toBeUndefined();
+  });
+
+  it('does not flag a long page that merely contains the words "go back home"', async () => {
+    const p = framePage([{ cls: 'ms-dyn365-fin', text: `Notes\n${'go back home '.repeat(80)}` }]);
+    expect(await detectErrorPage(p)).toBeUndefined();
   });
 });
 

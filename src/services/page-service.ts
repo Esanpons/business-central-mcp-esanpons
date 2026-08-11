@@ -1,6 +1,6 @@
 import { v4 as uuid } from 'uuid';
 import { ok, err, isOk, type Result } from '../core/result.js';
-import { ProtocolError } from '../core/errors.js';
+import { ProtocolError, PageOpenRejectedError } from '../core/errors.js';
 import type { BCSession } from '../session/bc-session.js';
 import type { PageContextRepository } from '../protocol/page-context-repo.js';
 import type { PageContext, PageOpenMode } from '../protocol/page-context.js';
@@ -65,6 +65,30 @@ function buildWizardState(controlTree: unknown): WizardState | null {
   if (initialIndex < 0) return null;
 
   return { stepPaths: dynamicSteps.map(s => s.controlPath), currentStepIndex: initialIndex };
+}
+
+/**
+ * BC's own message when an OpenForm was answered with an ERROR DIALOG rather
+ * than a form, or undefined when this dialog is a normal one (a wizard, a
+ * request page, a confirmation — all of which ARE the page and must be kept).
+ *
+ * The marker is the wire type `lmd` (logical message dialog) carrying an
+ * `ExceptionType`; `Caption` is just "Error" and `Message` holds the reason.
+ * Captured live on devel1 by opening page 132 with a bookmark from another
+ * table's list:
+ *   { t: 'lmd', Caption: 'Error', ExceptionType: 1, DialogType: 3,
+ *     Message: "No se puede utilizar un RecordID de la tabla 'Sales Shipment
+ *               Header' con un registro de la tabla 'Sales Invoice Header'." }
+ */
+function errorDialogMessage(controlTree: unknown): string | undefined {
+  if (!controlTree || typeof controlTree !== 'object') return undefined;
+  const raw = controlTree as Record<string, unknown>;
+  if (raw.t !== 'lmd') return undefined;
+  if (raw.ExceptionType === undefined || raw.ExceptionType === null) return undefined;
+  const message = typeof raw.Message === 'string' ? raw.Message.trim() : '';
+  if (message) return message;
+  const caption = typeof raw.Caption === 'string' ? raw.Caption.trim() : '';
+  return caption || 'BC returned an error dialog with no message.';
 }
 
 export interface ClosePageResult {
@@ -239,6 +263,31 @@ export class PageService {
       return err(new ProtocolError(`Page ${pageId} did not return a form root. Events: ${events.map(e => e.type).join(', ')}`));
     }
 
+    // BC refused the open and answered with an ERROR DIALOG instead of a form.
+    // Registering it as the page produced an unreadable shell (Unknown/modal/no
+    // fields, caption = raw formId) and threw away the ONE thing that explains the
+    // refusal: BC's message. Surface it, and leave the session clean.
+    if (root.type === 'DialogOpened') {
+      const bcMessage = errorDialogMessage(root.controlTree);
+      if (bcMessage) {
+        await this.dismissDialog(root.formId);
+        return err(new PageOpenRejectedError(
+          `BC refused to open page ${pageId}: ${bcMessage}`,
+          {
+            pageId,
+            bcMessage,
+            query,
+            hint: /bookmark=/.test(query)
+              ? 'A bookmark only addresses the table the page is bound to. Drop it and open the page filtered '
+                + "(bc_open_page { pageId, filters: [{ field: \"No.\", value: \"<doc no>\" }] }), or open the list "
+                + 'page and drill into the row (bc_execute_action { action: "View" | "Edit", rowIndex }), which '
+                + 'returns a pageContextId for the card BC itself considers correct.'
+              : 'Read the message above: BC rejected this open before any page existed.',
+          },
+        ));
+      }
+    }
+
     const formId = root.formId;
     const isModal = root.type === 'DialogOpened';
 
@@ -264,6 +313,29 @@ export class PageService {
 
     this.logger.info(`Page opened: ${pageId} (${pageContextId}, formId: ${formId})`);
     return ok(finalState);
+  }
+
+  /**
+   * Close a dialog BC opened that we are NOT going to hand back to the caller.
+   * Without this the error dialog stays on the session's modal stack and the very
+   * next interaction pays a full modal reconcile (observed live: four extra
+   * round-trips before the following OpenForm went through).
+   *
+   * Ok=300 is what a message dialog accepts; CloseForm is the fallback. The form
+   * is only untracked when BC acknowledged, mirroring the license-dialog path —
+   * dropping a form BC still holds is what leaves the stack lying to us.
+   */
+  private async dismissDialog(formId: string): Promise<void> {
+    const dismissed = await this.session.invoke(
+      { type: 'InvokeAction', formId, controlPath: 'server:', systemAction: 300 },
+      (e) => e.type === 'InvokeCompleted',
+    ).catch(() => err(new ProtocolError('dismiss threw')));
+    if (isOk(dismissed)) { this.session.removeOpenForm(formId); return; }
+
+    const closed = await this.session.invoke({ type: 'CloseForm', formId }, (e) => e.type === 'InvokeCompleted')
+      .catch(() => err(new ProtocolError('close threw')));
+    if (isOk(closed)) this.session.removeOpenForm(formId);
+    else this.logger.warn(`Could not dismiss BC's error dialog (formId=${formId}); the next invoke will reconcile the modal stack.`);
   }
 
   private async discoverAndLoadChildForms(pageContextId: string, openEvents: BCEvent[]): Promise<void> {

@@ -97,6 +97,98 @@ describe('DataService.writeField verification', () => {
     expect(r.value.reason).toBe('not editable');
   });
 
+  it('reports changed:true on a LINE cell that BC echoed, even when the row projection is stale', async () => {
+    // bc-saas F-2: a repeater's rows are rebuilt from DataLoaded batches that arrive
+    // AFTER the SaveValue response, and their cells are keyed by BINDER NAME, never
+    // by caption. Judging the write on the row alone therefore measured '' -> '' and
+    // reported "validation reverted" on writes that had plainly worked.
+    const repo = new PageContextRepository();
+    repo.create('pc:lines', 'sub');
+    repo.applyToPage('pc:lines', [{
+      type: 'FormCreated', formId: 'sub',
+      controlTree: {
+        t: 'lf', ServerId: 'sub', PageType: 1, Caption: 'Rules',
+        Children: [{
+          t: 'rc',
+          Columns: [{ t: 'rcc', Caption: 'Condition type', ColumnBinder: { Name: '1165569367_c6' } }],
+          Children: [{ t: 'dc', Caption: 'Condition type', Visible: true, Editable: true }],
+        }],
+      },
+    } as BCEvent]);
+    repo.applyToPage('pc:lines', [{
+      type: 'DataLoaded', formId: 'sub', controlPath: 'server:c[0]', currentRowOnly: false,
+      rows: [{ DataRowInserted: [0, { bookmark: 'b1', cells: { '1165569367_c6': '' } }] }],
+    } as BCEvent]);
+
+    const svc = makeService(repo, (p) => [
+      { type: 'PropertyChanged', formId: 'sub', controlPath: p, changes: { StringValue: 'Transporte internacional', CurrentIndex: 7 } } as BCEvent,
+    ]);
+
+    const r = await svc.writeField('pc:lines', 'Condition type', 'Transporte internacional', { rowIndex: 0 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.controlPath).toBe('server:c[0]/cr/c[0]');
+    expect(r.value.changed).toBe(true);
+    expect(r.value.newValue).toBe('Transporte internacional');
+    expect(r.value.reason).toBeUndefined();
+  });
+
+  it('still reports a LINE cell BC reverted as changed:false', async () => {
+    const repo = new PageContextRepository();
+    repo.create('pc:lines', 'sub');
+    repo.applyToPage('pc:lines', [{
+      type: 'FormCreated', formId: 'sub',
+      controlTree: {
+        t: 'lf', ServerId: 'sub', PageType: 1, Caption: 'Rules',
+        Children: [{
+          t: 'rc',
+          Columns: [{ t: 'rcc', Caption: 'Quantity', ColumnBinder: { Name: 'x_c1' } }],
+          Children: [{ t: 'dc', Caption: 'Quantity', Visible: true, Editable: true }],
+        }],
+      },
+    } as BCEvent]);
+    repo.applyToPage('pc:lines', [{
+      type: 'DataLoaded', formId: 'sub', controlPath: 'server:c[0]', currentRowOnly: false,
+      rows: [{ DataRowInserted: [0, { bookmark: 'b1', cells: { x_c1: '3' } }] }],
+    } as BCEvent]);
+    const svc = makeService(repo, (p) => [
+      { type: 'PropertyChanged', formId: 'sub', controlPath: p, changes: { StringValue: '3' } } as BCEvent,
+    ]);
+
+    const r = await svc.writeField('pc:lines', 'Quantity', '5', { rowIndex: 0 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.changed).toBe(false);
+    expect(r.value.reason).toBe('validation reverted');
+  });
+
+  it('reports "already set" for a LINE cell that already holds the value', async () => {
+    const repo = new PageContextRepository();
+    repo.create('pc:lines', 'sub');
+    repo.applyToPage('pc:lines', [{
+      type: 'FormCreated', formId: 'sub',
+      controlTree: {
+        t: 'lf', ServerId: 'sub', PageType: 1, Caption: 'Rules',
+        Children: [{
+          t: 'rc',
+          Columns: [{ t: 'rcc', Caption: 'Quantity', ColumnBinder: { Name: 'x_c1' } }],
+          Children: [{ t: 'dc', Caption: 'Quantity', Visible: true, Editable: true }],
+        }],
+      },
+    } as BCEvent]);
+    repo.applyToPage('pc:lines', [{
+      type: 'DataLoaded', formId: 'sub', controlPath: 'server:c[0]', currentRowOnly: false,
+      rows: [{ DataRowInserted: [0, { bookmark: 'b1', cells: { x_c1: '5' } }] }],
+    } as BCEvent]);
+    const svc = makeService(repo, () => []);
+
+    const r = await svc.writeField('pc:lines', 'Quantity', '5', { rowIndex: 0 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.changed).toBe(false);
+    expect(r.value.reason).toBe('already set');
+  });
+
   it('refuses a line-column caption without a row instead of writing to an arbitrary row', async () => {
     const repo = new PageContextRepository();
     repo.create('pc:lines', 'sub');

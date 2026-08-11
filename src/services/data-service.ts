@@ -43,7 +43,7 @@ export interface FieldWriteResult {
    * not editable, or the field ALREADY held the requested value (`reason:
    * 'already set'` — not a failure). Undefined means UNVERIFIED: neither BC's
    * echo nor the projection said anything, so nothing is known either way
-   * (`reason: 'unverified'`), and for line-cell writes, which are not re-read.
+   * (`reason: 'unverified'`). Header and line-cell writes are judged the same way.
    */
   changed?: boolean;
   /**
@@ -90,11 +90,24 @@ export class DataService {
     return this.redactValues ? '<redacted>' : String(value);
   }
 
-  /** A row cell as text, matched on the column caption case-insensitively. */
-  private cellText(row: RepeaterRow, column: string): string | undefined {
-    const cells = row.cells as Record<string, unknown>;
+  /**
+   * A row cell as text, matched on the column CAPTION case-insensitively.
+   *
+   * `FormState.rows` holds the cells exactly as they came off the wire — keyed by
+   * the column's binder name (`1165569367_c2`), never by its caption; only
+   * `readRows` remaps them for output. So a caption lookup against a raw row
+   * matched nothing, and because a miss used to return `''` the caller could not
+   * tell "no such column" from "the cell is empty" — every line write was measured
+   * as `'' -> ''` and reported `changed:false, reason:"validation reverted"` even
+   * when it had plainly worked (bc-saas F-2). Hence: remap through the repeater's
+   * columns first, and return undefined when the column is not there at all.
+   */
+  private cellText(row: RepeaterRow, column: string, repeater?: RepeaterNode): string | undefined {
+    const mapped = repeater ? mapRowCellKeys([row], repeaterColumnsToDto(repeater))[0] : row;
+    const cells = (mapped ?? row).cells as Record<string, unknown>;
     const key = Object.keys(cells).find(k => k.toLowerCase() === column.toLowerCase());
-    const v = key ? cells[key] : undefined;
+    if (key === undefined) return undefined;
+    const v = cells[key];
     return v === null || v === undefined ? '' : String(v);
   }
 
@@ -117,7 +130,7 @@ export class DataService {
     if ('error' in resolved) return undefined;
     const rows = resolved.rows;
     const row = rows.find(r => r.bookmark === bookmark) ?? (rowIndex !== undefined ? rows[rowIndex] : undefined);
-    return row ? this.cellText(row, column) : undefined;
+    return row ? this.cellText(row, column, resolved.repeater ?? undefined) : undefined;
   }
 
   readRows(pageContextId: string, sectionId?: string): Result<RepeaterRow[], ProtocolError> {
@@ -404,7 +417,7 @@ export class DataService {
 
     // Snapshot the cell BEFORE the write so the effect can be measured afterwards.
     const beforeRow = rows.find(r => r.bookmark === bookmark) ?? (rowIndex !== undefined ? rows[rowIndex] : undefined);
-    const beforeValue = beforeRow ? this.cellText(beforeRow, fieldName) : undefined;
+    const beforeValue = beforeRow ? this.cellText(beforeRow, fieldName, repeater) : undefined;
 
     // Step 1: select the row
     const selectInteraction: SetCurrentRowInteraction = {
@@ -452,41 +465,65 @@ export class DataService {
       });
     }
 
-    // Verify the effect against the re-projected row instead of reporting the
+    // Verify the effect against what BC actually said, instead of reporting the
     // requested value back. `changed: undefined` was not a small gap: it made a
     // SUCCESSFUL line write indistinguishable from a silently ignored one, so no
     // caller (our own live battery included) could ever tell whether a line had
-    // been filled in. BC's echo already updated the projection by now.
+    // been filled in.
     //
-    // The bookmark is NOT stable across the write: committing a line turns a
-    // `DraftRecord*` placeholder into a real record with a new bookmark, so the row
-    // is looked up by bookmark first and by its position second.
-    // The row must be identified by its ORIGINAL bookmark for the comparison to
-    // mean anything. Writing into an uncommitted placeholder line COMMITS it, and BC
-    // re-keys it (`DraftRecord6250` -> `23_JQAAAACLA...`) — and the committed row's
-    // data lands in a later batch than this invoke waits for. Judging by row
-    // position in that window reads an empty cell and would report a write that
-    // plainly worked as "validation reverted" (seen live on SaaS: the very next read
-    // showed the item in place). When the row cannot be re-identified we say so
+    // GROUND TRUTH IS THE WIRE ECHO on the cell, exactly as in the header path —
+    // and for the same reason, only more so here. A repeater's row projection is
+    // rebuilt from DataLoaded batches, which BC sends AFTER the SaveValue response
+    // this invoke waits for, so re-reading the row alone reports an empty cell for
+    // a write BC has already confirmed (`changed:false, reason:"validation
+    // reverted", newValue:""` on writes that had plainly worked — bc-saas F-2).
+    // The echo arrives on the current-row viewport path we just wrote to, which is
+    // the row selected in step 1, so it describes exactly this row.
+    //
+    // The projection is the fallback. The bookmark is NOT stable across the write:
+    // committing a line turns a `DraftRecord*` placeholder into a real record with a
+    // new bookmark (`DraftRecord6250` -> `23_JQAAAACLA...`), so a bookmark lookup can
+    // miss the row entirely. When neither source says anything we say "unverified"
     // instead of guessing.
-    const afterValue = this.readRowCell(pageContextId, sectionId, bookmark, undefined, fieldName);
+    const echoed = lastEchoedStringValue(saveResult.value, cellPath);
+    const projected = this.readRowCell(pageContextId, sectionId, bookmark, undefined, fieldName);
+    const observed = echoed ?? projected;
     const norm = (s?: string) => (s ?? '').trim();
-    if (afterValue === undefined) {
+    if (norm(value) === norm(beforeValue) && beforeValue !== undefined) {
+      // Idempotent write: the cell already held this value. Calling that "reverted"
+      // sent callers into retry loops over a state that was already correct.
+      return ok({
+        fieldName, controlPath: cellPath, success: true, requested: value,
+        changed: false, reason: 'already set', newValue: observed ?? beforeValue, events: allEvents,
+      });
+    }
+    if (observed === undefined) {
       return ok({
         fieldName, controlPath: cellPath, success: true, requested: value,
         reason: 'unverified', events: allEvents,
-        hint: 'BC re-keyed or moved the row (writing into a blank placeholder line commits it), so the effect could not be confirmed in place. Re-read the section to see the row as it now stands.',
+        hint: 'BC echoed nothing for the cell and re-keyed or moved the row (writing into a blank placeholder line commits it), so the effect could not be confirmed in place. Re-read the section to see the row as it now stands.',
       });
     }
     // BC may reformat what it stored (a code resolves to a description, a number is
     // localized), so "did it move" is measured against the PRE-write cell, exactly
     // like the header path — not against the requested string.
-    const changed = norm(afterValue) !== norm(beforeValue);
+    const changed = norm(observed) !== norm(beforeValue);
+    // A "reverted" verdict reached WITHOUT an echo rests on the row projection alone.
+    // That is usually right (verified live on devel1: a Sales Order line and a setup
+    // list both refused the write and the re-read confirmed the old value), but the
+    // caller deserves to know which evidence the verdict came from, since the one
+    // thing this report must never do again is assert a revert it did not observe.
+    const projectionOnly = !changed && echoed === undefined;
     return ok({
       fieldName, controlPath: cellPath, success: true, requested: value,
       changed,
       ...(changed ? {} : { reason: 'validation reverted' as const }),
-      newValue: afterValue,
+      ...(projectionOnly ? {
+        hint: 'BC echoed nothing for this cell; the verdict comes from re-reading the row, which still holds '
+          + 'the old value. If the list is not in edit mode BC silently ignores line writes — check that the '
+          + 'page/section is editable, then re-read to confirm.',
+      } : {}),
+      newValue: observed,
       events: allEvents,
     });
   }

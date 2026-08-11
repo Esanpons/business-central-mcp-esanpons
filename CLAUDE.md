@@ -427,6 +427,20 @@ Key empirical findings (all verified live, BC27):
   normalizes to `?company=…&page=…&dc=0&bookmark=…`. The internal `bc_read_data` bookmark IS
   the URL `bookmark=`. `company=` is honored (no cross-session wrong-company surprise).
 - **NEVER send `runinframe=1`** — it hangs a top-level load on "Getting ready…" forever.
+- **The deep link is built with `encodeURIComponent`, NEVER `URLSearchParams.toString()`.** That is
+  form encoding: it writes a space as `+`, and BC reads the query value LITERALLY, so a company named
+  `CRONUS ES` was looked up as `CRONUS+ES` and every capture came back as BC's "Could not open the
+  company" screen. Nearly every install has a space in a company name, so this broke captures and
+  manuals wholesale (bc-saas F-1). `deepLinkQuery()` in `bc-web-auth.ts`; both `deepLinkPage` and
+  `deepLinkReport` go through it.
+- **BC's error screen is detected by BODY CLASS, and a capture that lands on it FAILS.** The frame
+  rendering the message carries `has-error`, its host carries `has-error-in-child` (captured live on
+  devel1); the message itself is half-localised ("Could not open the company." + a Spanish body) and
+  cannot be matched reliably. `detectErrorPage()` (`bc-web-auth.ts`) returns BC's own words, shared by
+  `bc_screenshot` (throws, writes nothing) and `bc_download_report` (retries, then reports). Before
+  this, a failed capture returned `succeeded` plus the path of a PNG of the error page — a failure
+  that ships a file is a failure nobody notices. `waitReady({ bailOnErrorPage: true })` stops the
+  60s readiness poll on that page, since it never becomes "ready".
 - Auth is ASP.NET forms/cookie (POST `/SignIn` → 302). Real cookies `.AspNetCore.Antiforgery.*`,
   `SessionId`, `.AspNetCore.Cookies`, all `path=/BC; secure; samesite=none; httponly`.
 - Page content is inside an iframe — readiness is detected via the document title; highlight
@@ -765,10 +779,42 @@ unaffected.
 ### Document Pages (Multi-Repeater)
 Document pages (Sales Order=42/43, Purchase Order=50/51) have both a header repeater and a lines subpage repeater. The sections ARE distinguishable (`header` / `lines`, verified live on both environments), so always pass `section` explicitly; omitting it resolves whichever repeater comes first. Note that a plain part containing a repeater is now `subpage:<caption>`, NOT `lines` — only a real subform is `lines`.
 
+### An OpenForm BC refuses comes back as an ERROR DIALOG, not as a form
+
+BC answers an `OpenForm` it will not honour with a `DialogOpened` whose control tree is
+`{ t: 'lmd', Caption: 'Error', ExceptionType: 1, DialogType: 3, Message: '<the reason>' }` — a
+logical message dialog, not a page. Treating it as the page root produced an unreadable shell
+(`pageType: "Unknown"`, `isModal: true`, no fields, a caption that changed on every call because it
+was the raw formId) and discarded the only thing that explained the refusal (bc-saas F-3).
+
+`materializePage` now detects it, dismisses the dialog (Ok=300, else CloseForm — otherwise it sits on
+the session's modal stack and the NEXT invoke pays a full modal reconcile: four extra round-trips,
+observed live) and returns `PageOpenRejectedError` (`PAGE_OPEN_REJECTED`) carrying BC's message plus
+a hint. A normal `DialogOpened` — a wizard, a request page, a confirmation — is still THE page and is
+kept; only `lmd` + `ExceptionType` means "refused".
+
+The case that produced it: **a bookmark only addresses the table its list is bound to.** Feeding page
+132 (Posted Sales Invoice) a bookmark from a Posted Sales Shipments row yields *"No se puede utilizar
+un RecordID de la tabla 'Sales Shipment Header' con un registro de la tabla 'Sales Invoice
+Header'."* Open the card filtered instead (`filters: [{ field: 'No.', value: '<doc no>' }]`, verified
+working on the same page) or drill in from the row's own list with `bc_execute_action { action:
+'View' }`.
+
 ### Writes and deletes never report success blindly
 Two rules that the whole write path depends on, both verified live:
 - **BC refuses a value without raising an error.** It completes the interaction and puts the reason in `ValidationResults` on the control. `bc_write_data` surfaces that as `reason: "validation error"` + `validationMessage` (e.g. *"Sale must be equal to 'Yes' in Item: No.=0000001"*). If a write "does not stick", read that message before assuming the code is broken — on `devel1` none of the first 15 items is sellable, which is exactly what it says.
 - **BC can complete a Delete and keep the row** (an uncommitted placeholder line, or a page not opened for editing). `bc_execute_action` re-reads the repeater from the server and reports `deleted: true|false` + a `note`. When the delete opens a confirmation dialog, `deleted` is absent until you answer it — and the post-delete re-sync deliberately waits, because firing it while the modal is open destroys the dialog (`FormNotFoundException` on the answer).
+- **A LINE write is judged on BC's ECHO, not on the row projection** (bc-saas F-2). Two things made
+  `changed:false, reason:"validation reverted", newValue:""` the answer for line writes that had
+  plainly worked: (1) `FormState.rows` holds cells keyed by the column's BINDER NAME
+  (`1165569367_c2`), never by caption — only `readRows` remaps them — so a caption lookup found
+  nothing, and a miss returned `''` instead of undefined, making every comparison `'' -> ''`; (2) the
+  row projection is rebuilt from `DataLoaded` batches BC sends AFTER the SaveValue response the
+  invoke waits for. `writeLineCell` now reads `lastEchoedStringValue(events, cellPath)` first (same
+  ground truth the header path uses), falls back to the row, reports `already set` for an idempotent
+  cell write, and when there is NO echo attaches a `hint` saying the verdict came from the row alone
+  (a list not in edit mode silently ignores line writes — verified on devel1, where a Sales Order
+  line and a setup list both refused the write and BC echoed nothing at all).
 
 ### Session Recovery
 After a session-killing error, BC holds the NTLM slot for ~15 seconds. The SessionManager handles this with exponential backoff (up to `BC_RECONNECT_MAX_RETRIES` = 6 by default). If an invoke hangs indefinitely (confirmed BC bug), the session-level timeout (default 30s) kills the connection and triggers auto-recovery on the next request.

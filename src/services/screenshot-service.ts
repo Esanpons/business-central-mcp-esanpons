@@ -6,7 +6,7 @@ import type { IBCAuthProvider } from '../connection/auth/auth-provider.js';
 import { launchHeadless } from './browser.js';
 import {
   ensureAuthJar, deepLinkPage, onSignIn, waitReady,
-  fallbackFormsProvider, recoverIfOnSignIn,
+  fallbackFormsProvider, recoverIfOnSignIn, detectErrorPage,
 } from './bc-web-auth.js';
 import type { Metrics } from './metrics.js';
 
@@ -195,7 +195,21 @@ export class ScreenshotService {
     // SignIn form (its ReturnUrl is our deep link, so BC redirects right back).
     await recoverIfOnSignIn(p, this.auth(), this.config, this.logger, { tag: 'screenshot' });
 
-    const spaReady = await waitReady(p);
+    const spaReady = await waitReady(p, { bailOnErrorPage: true });
+
+    // BC answered with its error screen (wrong/unknown company, a page id that does
+    // not exist, a bookmark it refuses). Capturing it would return a perfectly
+    // successful-looking result whose PNG is a picture of an error — the single
+    // worst failure mode this tool has, because nobody opens the file to check.
+    // Fail here, with BC's own words.
+    const bcError = await detectErrorPage(p);
+    if (bcError) {
+      throw new Error(
+        `BC returned an error page instead of page ${pageId}: "${bcError}" `
+        + `(url: ${url}). No screenshot was written. If it mentions the company, check the `
+        + `\`company\` argument / the session company (${company ?? 'none'}); otherwise check the page id and bookmark.`,
+      );
+    }
 
     // Explicit reveal: expand all collapsed FastTabs + click all "Show more" up front.
     if (input.expand) {

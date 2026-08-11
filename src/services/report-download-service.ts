@@ -27,7 +27,7 @@ import type { IBCAuthProvider } from '../connection/auth/auth-provider.js';
 import { launchHeadless } from './browser.js';
 import {
   ensureAuthJar, deepLinkReport, onSignIn, waitReady,
-  fallbackFormsProvider, recoverIfOnSignIn,
+  fallbackFormsProvider, recoverIfOnSignIn, detectErrorPage,
 } from './bc-web-auth.js';
 import type { Metrics } from './metrics.js';
 
@@ -204,10 +204,24 @@ export class ReportDownloadService {
       // SaaS: the report deep-link races with BC's SPA routing and intermittently
       // lands on a "Go back home" error page instead of the request page. Detect it
       // and re-navigate a few times. Harmless on-prem (which never hits this page).
-      for (let attempt = 0; attempt < 5 && await this.isErrorPage(p); attempt++) {
-        this.logger.warn(`[report] deep-link landed on an error page; re-navigating (${attempt + 1}/5)`);
+      let bcError = await detectErrorPage(p);
+      for (let attempt = 0; attempt < 5 && bcError; attempt++) {
+        this.logger.warn(`[report] deep-link landed on an error page ("${bcError}"); re-navigating (${attempt + 1}/5)`);
         await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => undefined);
         await waitReady(p, { timeoutMs: 12000, settleMs: 2000 });
+        // Re-check AFTER the last navigation too — otherwise a retry that worked
+        // would still be reported as a failure.
+        bcError = await detectErrorPage(p);
+      }
+      // Still BC's error screen after the retries: driving a request page that isn't
+      // there produces a timed-out download and a mystified caller. Say what BC said.
+      if (bcError) {
+        return {
+          reportId, url, authenticated: !(await onSignIn(p)),
+          downloaded: false, requestPageShown: false, pageTitle: await p.title(),
+          note: `BC returned an error page instead of report ${reportId}'s request page: "${bcError}". `
+            + `Check the report id and the company (${company ?? 'session default'}).`,
+        };
       }
 
       // Set request-page filters (e.g. No. = a document number) BEFORE running, so
@@ -331,28 +345,6 @@ export class ReportDownloadService {
       await browser.close();
       try { rmSync(dlDir, { recursive: true, force: true }); } catch { /* best effort */ }
     }
-  }
-
-  /**
-   * True when the deep link landed on BC's "Go back home" error page instead of
-   * the report request page (a SaaS SPA-routing race). Scans all frames because
-   * the SPA renders inside an iframe.
-   */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async isErrorPage(p: any): Promise<boolean> {
-    for (const f of p.frames()) {
-      try {
-        const hit = await f.evaluate(() => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const doc = (globalThis as any).document;
-          const t = (doc.body?.innerText || '');
-          // Localised variants of BC's not-found page.
-          return /go back home|volver al inicio|torna a l'inici|zur(ü|u)ck zur startseite/i.test(t);
-        });
-        if (hit) return true;
-      } catch { /* cross-origin / detached frame */ }
-    }
-    return false;
   }
 
   /**

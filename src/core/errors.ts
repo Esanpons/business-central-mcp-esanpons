@@ -90,3 +90,20 @@ export class PageNotMaterializedError extends ProtocolError {
     super(message, context, 'PAGE_NOT_MATERIALIZED');
   }
 }
+/**
+ * BC REFUSED to open the page and answered the OpenForm with an error dialog
+ * (a `lmd` message dialog carrying `ExceptionType` + `Message`) instead of a
+ * form. `bcMessage` is BC's own wording, which is the only thing that explains
+ * the refusal — e.g. passing a bookmark that belongs to a different table:
+ * "No se puede utilizar un RecordID de la tabla 'Sales Shipment Header' con un
+ * registro de la tabla 'Sales Invoice Header'." (verified live on devel1).
+ *
+ * Registering that dialog as the page is what produced the mystery shell
+ * (`pageType: "Unknown"`, `isModal: true`, no fields, a caption that changed on
+ * every call because it was the raw formId) reported as bc-saas F-3.
+ */
+export class PageOpenRejectedError extends ProtocolError {
+  constructor(message: string, context: { pageId: string; bcMessage: string; query?: string; hint?: string }) {
+    super(message, context, 'PAGE_OPEN_REJECTED');
+  }
+}

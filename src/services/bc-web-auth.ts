@@ -27,16 +27,31 @@ export type { RawCookie } from '../connection/auth/cookies.js';
 const GENERIC_TITLE = /^(Dynamics 365 Business Central|Welcome to Dynamics 365 Business Central\.?|)$/i;
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Build a deep-link query string.
+ *
+ * NOT `URLSearchParams.toString()`: that is `application/x-www-form-urlencoded`,
+ * which writes a space as `+`. BC reads a query value LITERALLY, so a company
+ * named `CRONUS ES` arrived as `CRONUS+ES` and every capture came back as BC's
+ * "Could not open the company" error page — with a perfectly successful-looking
+ * result carrying the path of a PNG of that error. Almost every BC install has a
+ * space in a company name (`CRONUS ES`, `My Company`), so this hit nearly
+ * everyone. `encodeURIComponent` is the query-VALUE encoding BC expects: space
+ * becomes `%20`, and a literal `+` in a value stays encoded as `%2B`.
+ */
+function deepLinkQuery(params: ReadonlyArray<readonly [string, string]>): string {
+  return params.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+}
+
 /** Deep link to a page/record. */
 export function deepLinkPage(config: BCConfig, pageId: string, bookmark?: string, company?: string): string {
-  const qs = new URLSearchParams();
-  qs.set('page', pageId);
+  const params: Array<[string, string]> = [['page', pageId]];
   // SaaS is tenant-path-based (baseUrl already carries {aadTenantId}/{environment});
   // appending ?tenant= there is wrong. On-prem uses the query tenant.
-  if (config.authMode !== 'AAD') qs.set('tenant', config.tenantId);
-  if (company) qs.set('company', company);
-  if (bookmark) qs.set('bookmark', bookmark);
-  return `${config.baseUrl}/?${qs.toString()}`;
+  if (config.authMode !== 'AAD') params.push(['tenant', config.tenantId]);
+  if (company) params.push(['company', company]);
+  if (bookmark) params.push(['bookmark', bookmark]);
+  return `${config.baseUrl}/?${deepLinkQuery(params)}`;
 }
 
 /**
@@ -45,11 +60,10 @@ export function deepLinkPage(config: BCConfig, pageId: string, bookmark?: string
  * plus optional company for cross-company consistency.
  */
 export function deepLinkReport(config: BCConfig, reportId: string, company?: string): string {
-  const qs = new URLSearchParams();
-  qs.set('report', reportId);
-  if (config.authMode !== 'AAD') qs.set('tenant', config.tenantId);
-  if (company) qs.set('company', company);
-  return `${config.baseUrl}/?${qs.toString()}`;
+  const params: Array<[string, string]> = [['report', reportId]];
+  if (config.authMode !== 'AAD') params.push(['tenant', config.tenantId]);
+  if (company) params.push(['company', company]);
+  return `${config.baseUrl}/?${deepLinkQuery(params)}`;
 }
 
 /**
@@ -127,6 +141,52 @@ export async function inPageLogin(config: BCConfig, p: any): Promise<void> {
 }
 
 /**
+ * BC's client error surface, or undefined when the page is fine. Returns the
+ * error text as BC rendered it (whitespace-collapsed, truncated), so the caller
+ * can put BC's own words in front of the user.
+ *
+ * Detection is on the BODY CLASS, not on text: the client marks the frame that
+ * renders the message with `has-error` and its host frame with
+ * `has-error-in-child`. Verified live on devel1 with a bad company name — the
+ * message itself ("Could not open the company." / "No se pudo abrir la empresa
+ * 'X'.") is half-localised and cannot be matched reliably. The "Go back home"
+ * text is kept as a second signal because the SaaS report deep-link race is
+ * detected by it, and returning the message is the whole point.
+ *
+ * WHY this exists: a capture that landed on this page still produced a perfectly
+ * successful-looking result carrying the path to a PNG of BC's error screen. A
+ * failure that ships a file is a failure nobody notices.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function detectErrorPage(p: any): Promise<string | undefined> {
+  const summarize = (t: string): string => {
+    const s = t.replace(/\s+/g, ' ').trim();
+    return s.length > 300 ? `${s.slice(0, 300)}...` : s;
+  };
+  // The host frame knows something failed but only the CHILD frame carries the
+  // message, so the host is kept as a fallback and the scan continues.
+  let hostOnly: string | undefined;
+  for (const f of p.frames()) {
+    try {
+      const st = await f.evaluate(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const doc = (globalThis as any).document;
+        return { cls: String(doc.body?.className || ''), text: String(doc.body?.innerText || '') };
+      });
+      const inChild = /has-error-in-child/.test(st.cls);
+      const own = /(^|\s)has-error(\s|$)/.test(st.cls);
+      // A short page offering only "go back home" is BC's not-found screen. The
+      // length guard keeps a real page that happens to contain the phrase out of it.
+      const textual = st.text.trim().length < 800
+        && /go back home|volver al inicio|torna a l'inici|zur(ü|u)ck zur startseite/i.test(st.text);
+      if (own || (textual && !inChild)) return summarize(st.text) || 'BC returned an error page (no text).';
+      if (inChild) hostOnly = summarize(st.text) || 'BC returned an error page (no text).';
+    } catch { /* cross-origin / detached frame */ }
+  }
+  return hostOnly;
+}
+
+/**
  * Poll until the SPA settles (no spinner, non-generic title), then a final settle
  * wait. `opts.timeoutMs`/`opts.settleMs` bound the poll and the trailing settle.
  *
@@ -137,10 +197,18 @@ export async function inPageLogin(config: BCConfig, p: any): Promise<void> {
  * (report download) drives the request page right after regardless of the return.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function waitReady(p: any, opts?: { timeoutMs?: number; settleMs?: number }): Promise<boolean> {
+export async function waitReady(
+  p: any,
+  opts?: { timeoutMs?: number; settleMs?: number; bailOnErrorPage?: boolean },
+): Promise<boolean> {
   const deadline = Date.now() + (opts?.timeoutMs ?? 60000);
   let ready = false;
   while (Date.now() < deadline) {
+    // BC's error screen keeps the generic title forever, so without this the poll
+    // burns its whole budget (60s per capture, times every step of a manual) on a
+    // page that will never become ready. The caller re-runs detectErrorPage to get
+    // the message; this only stops the waiting.
+    if (opts?.bailOnErrorPage && await detectErrorPage(p)) return false;
     const st = await p
       .evaluate((generic: string) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
