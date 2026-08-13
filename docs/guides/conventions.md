@@ -27,6 +27,29 @@ A page is a flat, ordered list of `Section`s. Each has `sectionId`, `kind`, `cap
 - **`factbox`** — a CardPart attached as a FactBox. `sectionId` is `factbox:<caption>`.
 - **`subpage`** — any other embedded part. `sectionId` is `subpage:<caption>`.
 - **`requestPage`** — a report's request-page modal.
+- **`dialog`** — a modal dialog currently open **over** the page (BC's `StandardDialog`: a reason,
+  a comment, a posting date). The first one is plainly `dialog`, a second concurrent one is
+  `dialog#2`; it is listed right after `header` and disappears once answered.
+
+### A dialog is a section — that is how you complete one
+
+A dialog is a **different form** from the page it covers, so a write aimed at the page cannot reach
+its controls, not even with the exact `controlPath` the action's own response returned. Treating it
+as a section is what makes the whole ordinary toolkit work on it:
+
+```json
+bc_read_data   { "pageContextId": "...", "section": "dialog" }                       // what is it asking for?
+bc_write_data  { "pageContextId": "...", "section": "dialog", "fields": { "Comentario": "..." } }
+bc_respond_dialog { "pageContextId": "...", "dialogFormId": "...", "response": "ok" } // then answer it
+```
+
+Fill it **before** answering: a dialog with mandatory fields answered empty just makes BC complain.
+Writes into a dialog are verified exactly like any other write (§4). If you name a dialog field
+without a `section`, the error tells you which section to use.
+
+Two BC behaviours worth knowing: BC **never announces that a dialog closed** (no `FormClosed`
+comes back for a dismissed one), so the section is pruned by the tool that answers it; and
+`bc_respond_dialog` speaks only its six responses — it cannot press an arbitrary named button.
 
 Card-shape sections carry **`fields[]`**; list-shape sections carry **`rows[]`** (cells keyed by
 the column binder name, not the caption). Header sections also carry **`actions[]`**. Sections
@@ -84,6 +107,28 @@ is `true` only when every write actually changed.
 **Rule: branch on `changed`, not on `success`.** (BC may legitimately reformat a value — e.g. a
 customer number resolves to the customer name — so the final `newValue` can differ from
 `requested` while still being a real change; that is `changed: true`.)
+
+When BC REFUSES a value it does not raise an error either: it completes the interaction and puts
+the reason in `reason: "validation error"` + **`validationMessage`**, in its own words (*"Sale must
+be equal to 'Yes' in Item: No.=0000001"*). Read it before assuming the write path is broken. Two
+other reasons are not failures: `"already set"` (the field already held that value) and
+`"unverified"` (BC echoed nothing, so the effect is unknown — re-read to confirm).
+
+## 4b. The same rule outside writes
+
+"Never report success without checking" is not a `bc_write_data` quirk — it is how these tools are
+built, because a failure that announces itself as success is one an agent will never re-examine:
+
+- **`bc_execute_action`** on a bookmark-targeted Delete re-reads the repeater and answers
+  `deleted: true|false` + a `note`. BC can complete a Delete and keep the row.
+- **`bc_switch_company`** reports the company **BC granted**, read back from its `OpenSession`
+  response, and FAILS when that is not the one you asked for. (It switches by re-opening the
+  session: BC binds a session to its company at open time, and nothing sent to a live session
+  moves it. Every open page dies with the old session.)
+- **`bc_screenshot`** writes the PNG only after judging the capture good, so a failed capture never
+  overwrites a previous image; it reports every `clickBeforeCapture` outcome in `clicks[]`
+  (`disabled` vs `not found`), flags a modal that opened by itself in `unexpectedDialog`, and
+  fails outright — writing nothing — when the page ends on a sign-in wall or BC's error screen.
 
 ## 5. `editable` is tri-state
 

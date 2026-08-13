@@ -6,6 +6,8 @@
 Sends a response to a modal dialog that BC raised on a page — typically a confirmation ("Do you want to post?"), a yes/no question, a validation warning, or a modal information page. For `ok`, `cancel`, `yes`, `no`, and `abort` it invokes the matching BC `SystemAction` against the dialog form's `server:c[0]` control; for `close` it sends a `CloseForm` against the dialog form id instead. After the dialog clears, it applies the resulting events back to the originating page context, reports which page sections changed, surfaces any chained dialogs that opened in response, and lists any new pages BC created (e.g. a Posted Invoice produced by posting).
 
 ## When to use / when NOT to use
+**A dialog that carries FIELDS must be filled in before it is answered.** Write its values with [bc_write_data](./bc_write_data.md) using `section: "dialog"` — while the dialog is open it is a section of the page like any other, with its fields and `controlPath`s — and only then respond `"ok"` here. Answering a dialog with mandatory fields before filling them simply makes BC complain about the empty field.
+
 Use it when `bc_execute_action` or `bc_write_data` returned a `dialogsOpened` array with `requiresDialogResponse: true` — you must respond before the workflow can continue. If the response triggers another dialog (chained confirmations), call this tool again for each dialog in sequence using the new `dialogFormId`. Do NOT call it when no dialog is pending — there is nothing to respond to unless a prior tool returned `dialogsOpened`. Do NOT guess `dialogFormId`; always pass the exact value from the triggering tool's `dialogsOpened` entry.
 
 ## Parameters
@@ -14,7 +16,7 @@ Use it when `bc_execute_action` or `bc_write_data` returned a `dialogsOpened` ar
 |------|------|----------|-------------|
 | `pageContextId` | `string` (min length 1) | Yes | Page context ID of the page that triggered the dialog. |
 | `dialogFormId` | `string` (min length 1) | Yes | Dialog form ID from the `dialogsOpened` array returned by `bc_execute_action` or `bc_write_data`. |
-| `response` | `enum`: `"ok"` \| `"cancel"` \| `"yes"` \| `"no"` \| `"abort"` \| `"close"` | Yes | `"ok"` confirms, `"cancel"` dismisses, `"yes"`/`"no"` answers a question, `"abort"` force-closes, `"close"` closes a modal info page. |
+| `response` | `enum`: `"ok"` \| `"cancel"` \| `"yes"` \| `"no"` \| `"abort"` \| `"close"` | Yes | `"ok"` confirms, `"cancel"` dismisses, `"yes"`/`"no"` answers a question, `"abort"` force-closes, `"close"` closes a modal info page. **These six are the whole vocabulary**: this tool cannot press an arbitrary named button. If a dialog does publish named buttons as actions, reach them with `bc_execute_action { section: "dialog", action }`. |
 
 ## Output
 Returns a `RespondDialogOutput` object:

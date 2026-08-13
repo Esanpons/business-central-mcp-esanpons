@@ -51,7 +51,7 @@ Returns `HealthOutput` (`src/operations/health.ts`):
 | `errorsByCode` | `Record<string, number>` | Error counts keyed by error code. |
 | `reconnects` | `number` | Number of session reconnects performed. |
 | `sessionsCreated` | `number` | Number of sessions created. |
-| `sessionCreatedAt` | `number \| null` | Epoch ms when the current session was established, or `null`. |
+| `sessionCreatedAt` | `number \| null` | Epoch ms when the current session was established, or `null`. Useful for a question this tool is otherwise bad at answering: **has the server process actually restarted?** If this number is unchanged and `sessionUptimeSeconds` has only grown, it has not — which matters because the capture browser lives inside the process, so a browser-side problem survives anything short of a real restart. |
 | `sessionUptimeSeconds` | `number \| null` | Seconds since the current session was established (rounded), or `null`. |
 | `lastError` | `string \| null` | Message of the last recorded error, or `null`. |
 

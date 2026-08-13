@@ -7,6 +7,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (2026-08-13) — nothing reports success for work Business Central never did
+
+Eight faults found while building real manuals against a customer environment (catalogued as
+F-4..F-11). They looked like eight bugs; they were one habit: writing the expected result into the
+response instead of reading the obtained one. A failure that announces itself as a success is worse
+than a visible one — nobody re-opens a result that said it went fine.
+
+- **A screenshot can no longer destroy a good image.** The PNG is captured to memory and written to
+  disk only after the capture is judged good. It used to be written straight to the destination
+  path, so an expired browser session replaced a finished figure of a manual with a picture of
+  Microsoft's login form — and reported success. A failed capture now writes nothing and leaves
+  whatever was there untouched.
+- **Both sign-in walls are recognised, not just BC's.** `authenticated` was computed as "not on BC's
+  `/SignIn`", so a SaaS capture bounced to `login.microsoftonline.com` answered `authenticated:
+  true` for a photograph of Entra's form. A capture that ends on either wall now fails, saying which
+  one and what to do about it.
+- **The browser session renews itself without dropping the WebSocket.** The two expire
+  independently — captures were broken for an hour while `bc_health` said "connected" — so the
+  repair had to be independent too. New optional `IBCAuthProvider.refreshCookieJar()`: on SaaS it
+  mints a fresh cookie jar from a SEPARATE browser tab (Entra SSO lives in the persistent profile),
+  leaving the tab the WebSocket is attached to alone; on-prem it re-runs `/SignIn`. When renewal
+  needs a human (MFA, expired password) the capture fails telling you to run `npm run login:aad`.
+- **`clickBeforeCapture` reports what happened**: `clicks: [{ target, clicked, reason }]` plus a
+  loud `warning`. BC greys out an action that does not apply to the selected row and clicking it is
+  a silent no-op, so a capture came back looking like the step had been taken. In a list, position
+  the row with `bookmark` first — that is the only way to choose it, and it is now documented.
+- **A modal that opened by itself is surfaced** as `unexpectedDialog` + `warning` (only when the
+  call asked for none), with BC's own text. Usually BC explaining why it refused the deep link.
+- **`crop` clips where it measured.** Crop rects were measured inside BC's content iframe but
+  applied in top-level page coordinates, so the clip landed a strip too high and returned a 3 KB
+  image of a caption with the data missing. The frame's offset is now added to every crop rect.
+  (`highlight` was never affected — its callouts are drawn inside the frame, which is exactly why
+  "highlight without crop" worked as a workaround.) A crop target also climbs from the caption to
+  the field ROW, so label and value are both in frame, and a crop that still comes out tiny says so.
+- **BC's "About this page" callouts are dismissed before capturing** (`dismissTeachingTips`,
+  default `true`). They pop on first visit and a capture browser is always a first visit, so the
+  bubble covered the bottom-left corner of every image in a manual. The close cross has no
+  accessible text, so it is found structurally — inside a teaching/callout container, never loose
+  on the page.
+- **An open dialog is a writable section, `dialog`.** BC gates plenty of actions behind a modal
+  carrying its own fields (a reason, a comment, a posting date), and that modal is a DIFFERENT form
+  from the page: `bc_write_data` answered "Field not found" for a `controlPath` the same response
+  had just handed the caller, so anything behind such a dialog could be opened and cancelled but
+  never completed. Now `bc_read_data { section: "dialog" }`, `bc_write_data { section: "dialog" }`
+  and `bc_execute_action { section: "dialog" }` all work on it, with the usual `changed` / `reason`
+  / `validationMessage` verification, and a write that names a dialog field without a section is
+  told which section to use. BC sends no `FormClosed` for a dismissed dialog, so the section is
+  pruned by the tool that answers it.
+- **`bc_switch_company` actually switches, and proves it.** `InvokeSessionAction(ChangeCompany)` on
+  a live session is answered with a bare `InvokeCompleted` and the data keeps coming from the
+  previous company; the code then wrote the REQUESTED name into the session, so the tool,
+  `bc_health` and every deep link reported a switch that had not happened and later reads silently
+  came from the wrong company. A session is bound to its company at `OpenSession`, so the switch is
+  now a session re-open on that company (what the web client does with `?company=`), confirmed
+  against the `CompanyName` BC returns — and it FAILS instead of returning a tidy-looking result
+  when BC grants something else. Consequences: the call costs a reconnect, and every open page dies
+  with the old session. A pinned company also survives a reconnect by construction, since the
+  recovered session is opened on it.
+
+### Changed (2026-08-13)
+
+- `bc_screenshot` accepts `dismissTeachingTips` and returns `clicks[]` / `unexpectedDialog`;
+  `warning` now aggregates every diagnostic (failed redaction, dead click, unexpected dialog, tiny
+  crop, a page that does not look like BC).
+- `bc_switch_company` returns the company BC granted plus `sessionReopened: true`, and can fail
+  where it previously always succeeded.
+- Sections gained the `dialog` kind, ordered right after `header` (deliberately not first, so
+  callers that read `sections[0]` as the header keep working).
+- Internal: `IBCAuthProvider.refreshCookieJar?()`, `BCSession.changeCompany` returns
+  `{ events, confirmed }`, `SessionFactory.create(company?)`, `SessionManager.switchCompany()`,
+  `recoverIfOnSignIn` -> `recoverIfLoggedOut`, `SwitchCompanyOperation` takes the session-level
+  switch instead of a `BCSession`.
+- `scripts/test-battery.ts` uses the shared harness instead of a second, drifted copy of the
+  service wiring — that copy was why the battery failed on a tool that works.
+
+Verified live on both environments: `tsc` clean, 822 unit tests, integration 110 pass / 6 skip,
+`verify:features docker` 5/0/1, `test-battery docker` 16/1/1 and `saas` 16/1/1 (the two remaining
+failures are pre-existing and unrelated — wizard 1803's missing Cancel on docker, report download on
+SaaS). Three tails are tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md) as **G15** (press a dialog
+button by name), **G17** (verify the teaching-tip dismissal on a page that has one) and **G18**
+(reproduce a genuinely expired browser session).
+
+
 ### Added (2026-08-10) — `bc_build_manual` understands tables and code blocks
 
 - **GFM tables are real tables.** A header row, a `|---|---|` delimiter row (which also sets the

@@ -5,7 +5,7 @@
 Re-reads a single named section of a page that was previously opened with `bc_open_page`, projecting the live form state into one `Section` DTO. Card-shape sections (`header`, `factbox`, `subpage`, `requestPage`) come back with a `fields[]` array; list-shape sections (`lines`, list-bodied subpages) come back with `rows[]` plus `totalRowCount`. Before projecting, it can apply server-side filters (list sections only) and materialize repeater rows up to the requested range by scrolling. The returned section can be further narrowed in-process by `tab`, `group`, `columns`, and `range`.
 
 ## When to use / when NOT to use
-Use it to pull fresh data for one section after a write/action changed it, to filter a list down, to paginate through a large repeater, or to read a FactBox that wasn't fully loaded. It is the read step of the typical loop `bc_open_page -> bc_read_data -> bc_write_data -> bc_execute_action -> bc_close_page`.
+Use it to see what an open modal dialog is asking for (`section: "dialog"` -- its fields and `controlPath`s, which you then fill with `bc_write_data` before answering), to pull fresh data for one section after a write/action changed it, to filter a list down, to paginate through a large repeater, or to read a FactBox that wasn't fully loaded. It is the read step of the typical loop `bc_open_page -> bc_read_data -> bc_write_data -> bc_execute_action -> bc_close_page`.
 
 Do NOT use it to open a page (use `bc_open_page`), to write values (use `bc_write_data`), to trigger actions like Post/Delete/Release (use `bc_execute_action`), or to navigate to / drill into a record (use `bc_navigate`). Filters are ignored for card-shape sections — they only apply to list-shape sections.
 
@@ -13,7 +13,7 @@ Do NOT use it to open a page (use `bc_open_page`), to write values (use `bc_writ
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `pageContextId` | `string` (min length 1) | Yes | Page context ID returned by bc_open_page. |
-| `section` | `string` | No | sectionId to refresh. Defaults to "header". Examples: "lines" (document line items), "factbox:Customer Statistics" (FactBox). Listed in the bc_open_page sections array. |
+| `section` | `string` | No | sectionId to refresh. Defaults to "header". Examples: "lines" (document line items), "factbox:Customer Statistics" (FactBox), "dialog" (the modal currently open over the page). Listed in the bc_open_page sections array. |
 | `tab` | `string` | No | Tab name to filter header fields by (e.g., "General", "Invoice Details", "Shipping and Billing"). Omit to return all header fields. A name that matches no tab is an ERROR listing `availableTabs` — it used to be ignored, which silently returned the full field dump and defeated the point of narrowing. |
 | `group` | `string` | No | Restrict returned card fields to those inside the group with this caption (e.g. "Bill-to", "Ship-to"). Use to disambiguate documents whose Sell-to/Bill-to/Ship-to groups repeat captions like "Name"/"Address"/"City". Each returned field also carries its own "group" and "controlPath". A caption that matches no group is an ERROR listing `availableGroups`, not an empty result. |
 | `filters` | `Array<{ column: string; value: string }>` | No | Server-side filters to apply before reading. Multiple filters combine with AND logic. (`column`: Column caption name to filter on, e.g. "City", "No."; `value`: Filter value — supports exact match "London", ranges "10000..20000", wildcards "\*consulting\*", expressions ">1000".) |

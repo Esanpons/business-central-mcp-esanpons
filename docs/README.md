@@ -16,10 +16,10 @@ cross-cutting conventions, setup, and the roadmap.
 |------|--------------|-----|
 | `bc_open_page` | Open a page by numeric ID; returns its full state as `sections[]` + a `pageContextId`. The entry point for everything else. | [tools/bc_open_page.md](tools/bc_open_page.md) |
 | `bc_read_data` | Refresh/return one section, with filtering, tab/group narrowing, column selection, and row pagination. | [tools/bc_read_data.md](tools/bc_read_data.md) |
-| `bc_write_data` | Write field values (header / card / FactBox / line); reports per-field whether the value actually **changed**. | [tools/bc_write_data.md](tools/bc_write_data.md) |
+| `bc_write_data` | Write field values (header / card / FactBox / line, and an open `dialog`); reports per-field whether the value actually **changed**. | [tools/bc_write_data.md](tools/bc_write_data.md) |
 | `bc_execute_action` | Invoke a named action or drill down on a Role Center cue tile. | [tools/bc_execute_action.md](tools/bc_execute_action.md) |
 | `bc_navigate` | Select a row by bookmark, or drill down into the record's detail page. | [tools/bc_navigate.md](tools/bc_navigate.md) |
-| `bc_respond_dialog` | Confirm / cancel / close a dialog raised by an action or write. | [tools/bc_respond_dialog.md](tools/bc_respond_dialog.md) |
+| `bc_respond_dialog` | Confirm / cancel / close a dialog raised by an action or write. Fill its fields first with `bc_write_data { section: "dialog" }`. | [tools/bc_respond_dialog.md](tools/bc_respond_dialog.md) |
 | `bc_close_page` | Close a page and free its server-side resources. | [tools/bc_close_page.md](tools/bc_close_page.md) |
 
 ### Discovery
@@ -32,7 +32,7 @@ cross-cutting conventions, setup, and the roadmap.
 ### Session & companies
 | Tool | What it does | Doc |
 |------|--------------|-----|
-| `bc_switch_company` | Switch the active company (invalidates open page contexts). | [tools/bc_switch_company.md](tools/bc_switch_company.md) |
+| `bc_switch_company` | Switch the active company by re-opening the session on it, confirmed against BC (invalidates every open page context). | [tools/bc_switch_company.md](tools/bc_switch_company.md) |
 | `bc_list_companies` | List available companies + the active one. | [tools/bc_list_companies.md](tools/bc_list_companies.md) |
 | `bc_health` | Connection/session diagnostics + metrics; answers even when BC is down. | [tools/bc_health.md](tools/bc_health.md) |
 
@@ -53,7 +53,7 @@ cross-cutting conventions, setup, and the roadmap.
 
 | Tool | What it does | Doc |
 |------|--------------|-----|
-| `bc_screenshot` | Capture a real PNG of the BC web client, with highlight/redact/crop and FastTab reveal. | [tools/bc_screenshot.md](tools/bc_screenshot.md) |
+| `bc_screenshot` | Capture a real PNG of the BC web client, with highlight/redact/crop and FastTab reveal. Writes the file only when the capture is good, and reports what went wrong when it is not. | [tools/bc_screenshot.md](tools/bc_screenshot.md) |
 | `bc_build_manual` | Assemble annotated screenshots + prose into a Markdown, printable A4 (Ctrl+P) and/or editable Word user manual — one authoring pass, the same page breaks in all of them. | [tools/bc_build_manual.md](tools/bc_build_manual.md) |
 
 ## Guides & reference
@@ -63,9 +63,11 @@ cross-cutting conventions, setup, and the roadmap.
 - **[Documenting BC](guides/documenting.md)** — which tool and which output format for screenshots
   and manuals (`md` / printable A4 `html` / editable `docx`); the standard recipe, the Markdown
   subset allowed in prose, and what to do when a capture or a highlight fails.
-- **[Conventions](guides/conventions.md)** — `pageContextId` lifecycle, the Section model, field
-  targeting (`controlPath`/`group`), write verification (`changed`/`reason`), the `editable`
-  tri-state, payload control (`summary`/`sections`/`columns`/`range`/`quiet`), and error codes.
+- **[Conventions](guides/conventions.md)** — `pageContextId` lifecycle, the Section model
+  (including the `dialog` section and how to complete a modal), field targeting
+  (`controlPath`/`group`), write verification (`changed`/`reason`) and the same rule outside
+  writes, the `editable` tri-state, payload control
+  (`summary`/`sections`/`columns`/`range`/`quiet`), and error codes.
 - **[Setup (global / per-project install)](SETUP-GLOBAL.md)** — register the server with Claude
   Code / Desktop / VSCode.
 - **[Pending work](ROADMAP.md)** — the SINGLE source of truth for everything not yet done:

@@ -42,6 +42,13 @@ Returns `OpenPageOutput` (`src/operations/open-page.ts`):
 | `sections` | `Section[]` | Every visible page section in canonical order: header, lines, subpages, factboxes, requestPage. |
 | `warnings` | `string[]` (optional) | Narrowing parameters that matched nothing — an unknown `tab`, or `sections` ids that do not exist on this page. These are warnings rather than errors because the page IS already open: erroring would strand the context you would then have to close. Treat a warning as "you did not get the narrowing you asked for". |
 
+**A modal dialog open over the page is a section too, `dialog`.** BC gates many actions behind a
+modal that carries its own fields; while it is open it is listed as `dialog` (a second concurrent one
+as `dialog#2`), right after `header`, with its fields and their `controlPath`s. Read it, fill it with
+`bc_write_data { section: "dialog" }`, then answer it with `bc_respond_dialog`. It disappears from
+the list as soon as it is answered. Note BC never announces that a dialog closed, so the section is
+pruned by the tools that answer one -- not by an event.
+
 **A part that contains a repeater is now `kind: 'subpage'`, not `'lines'`.** Only a real subform (a
 document's line grid) is `lines`, so an ordinary ListPart no longer flips the page to `pageType:
 'Document'`. If something addressed such a part as `section: "lines"`, use its `subpage:<caption>` id.
@@ -51,7 +58,7 @@ Each `Section` (`src/protocol/section-dto.ts`):
 | Field | Type | Description |
 |---|---|---|
 | `sectionId` | string | Stable section identifier (e.g. `"header"`, `"lines"`, `"factbox:Customer Statistics"`). Pass to `bc_read_data` / `bc_write_data` as `section`. |
-| `kind` | `'header' \| 'lines' \| 'factbox' \| 'requestPage' \| 'subpage'` | Section role (`SectionKind`). |
+| `kind` | `'header' \| 'dialog' \| 'lines' \| 'factbox' \| 'requestPage' \| 'subpage'` | Section role (`SectionKind`). |
 | `caption` | string | Section caption. |
 | `fields?` | `SectionField[]` | Present on card-shape sections (header, factbox, requestPage, most subpages). Only visible, captioned fields are included. |
 | `rows?` | `SectionRow[]` | Present on list-shape sections (lines, list-bodied headers, repeater subpages). |

@@ -146,18 +146,18 @@ Restart Claude Desktop.
 |---|---|
 | `bc_open_page` | Open any page by ID -- lists, cards, documents, role centers. Returns the page as `sections[]` with header, lines, factboxes, and Role Center cuegroup tiles. |
 | `bc_read_data` | Refresh a single section: filter, paginate, slice, project tab/columns. Returns the same `Section` shape as `bc_open_page`. |
-| `bc_write_data` | Write field values; BC validates and echoes confirmed values. Section-aware (lines, factboxes, header). |
+| `bc_write_data` | Write field values; BC validates and echoes confirmed values. Section-aware (header, lines, factboxes, and the modal `dialog` open over the page). Reports per field whether the value actually **changed**, and BC's own words when it refused. |
 | `bc_execute_action` | Run header / row / wizard actions, OR drill down on Role Center cue tiles via `cue` input. |
-| `bc_respond_dialog` | Handle confirmation prompts and request pages |
+| `bc_respond_dialog` | Answer a confirmation prompt or request page (ok / cancel / yes / no / abort / close). A dialog carrying FIELDS is filled first with `bc_write_data { section: "dialog" }`. |
 | `bc_navigate` | Select rows, drill down into records, field lookups |
 | `bc_search_pages` | Tell Me search. Returns `{ name, objectType, runTarget, departmentPath, category, score }` per result. |
 | `bc_close_page` | Close a page and free server resources |
-| `bc_switch_company` | Switch to a different company mid-session |
+| `bc_switch_company` | Switch company by **re-opening the session on it** (BC binds a session to its company at open time) and confirming against what BC granted. Fails rather than reporting a switch that did not happen. Every open page dies with the old session. |
 | `bc_list_companies` | Discover available companies |
 | `bc_run_report` | Execute reports and fill request page parameters (over the WebSocket). |
 | `bc_download_report` | Render a report and DOWNLOAD its output (PDF/Excel/Word) to disk via the headless browser (CDP download interception). Output-capture companion to `bc_run_report`; out-of-band. Reports needing parameters return `requestPageShown:true`. |
 | `bc_wizard_navigate` | Drive NavigatePage / wizard flows (back / next / finish / cancel) |
-| `bc_screenshot` | Capture a REAL PNG of the BC web client for a page/record. Annotate with highlight callout boxes (single, auto-numbered badges, arrows), redact fields, and crop to a section -- for manuals and docs. Fields in collapsed FastTabs or behind "Show more" are revealed automatically when highlighted (or pass `expand:true`). Saves to disk and returns the image inline. Out-of-band. |
+| `bc_screenshot` | Capture a REAL PNG of the BC web client for a page/record. Annotate with highlight callout boxes (single, auto-numbered badges, arrows), redact fields, and crop to a section -- for manuals and docs. Fields in collapsed FastTabs or behind "Show more" are revealed automatically when highlighted (or pass `expand:true`). Saves to disk and returns the image inline — and only **after** the capture is judged good, so a failed capture never overwrites a previous image. Reports every pre-capture click, and a dialog that opened by itself. Out-of-band. |
 | `bc_build_manual` | Build a step-by-step user manual with annotated screenshots, either from a list of steps or from an existing `.md` (`source`, validated with `validate:true`). Three outputs from one authoring pass (`formats`): **Markdown** (default), a **printable A4 web page** -- real 210x297mm sheets with cover, index and page numbers, so Ctrl+P prints it or saves it as a paged PDF -- and an **editable Word document** carrying the *same page breaks as the HTML* (measured in the browser and replayed into Word), real Word styles, a live index and live page numbers. The high-level companion to `bc_screenshot`. |
 | `bc_find_object` | Resolve a page/report/table/codeunit by name or keyword to its numeric ID, from a cached object index. Use before `bc_open_page` when you don't know the id. |
 | `bc_refresh_objects` | Refresh the cached object index (reads "All Objects with Caption", page 9174) used by `bc_find_object`. |
