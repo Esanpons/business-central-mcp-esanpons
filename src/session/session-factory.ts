@@ -17,7 +17,13 @@ export class SessionFactory {
     private readonly profile: string = '',
   ) {}
 
-  async create(): Promise<Result<BCSession, ConnectionError>> {
+  /**
+   * @param company  Open the session ON this company instead of BC's default. A BC
+   *   session is bound to its company at OpenSession — asking a live one to move is
+   *   not honoured (see BCSession.changeCompany) — so a company switch is a session
+   *   re-open, exactly as the web client does it with `?company=`.
+   */
+  async create(company?: string): Promise<Result<BCSession, ConnectionError>> {
     const wsResult = await this.connectionFactory.create();
     if (isErr(wsResult)) return wsResult;
 
@@ -41,7 +47,7 @@ export class SessionFactory {
       omitTenantInQueries,
     );
 
-    const initResult = await session.initialize(tenantId);
+    const initResult = await session.initialize(tenantId, company);
     if (isErr(initResult)) {
       session.close();
       return err(new ConnectionError(`Session initialization failed: ${initResult.error.message}`));

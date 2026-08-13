@@ -40,4 +40,19 @@ export interface IBCAuthProvider {
   isAuthenticated(): boolean;
   /** Descarta cookies/CSRF i el flag d'auth per forçar un /SignIn fresc al següent connect (recovery post-publish). */
   invalidate(): void;
+  /**
+   * Mint a FRESH browser cookie jar without disturbing the live WebSocket session.
+   *
+   * This exists because `invalidate()` is too big a hammer for an expired BROWSER
+   * session: in AAD mode it closes the persistent browser, and BC tears down the
+   * per-tab session the WebSocket is attached to — so renewing the capture path
+   * would drop the session every other tool is using. The two sessions expire
+   * independently (bc-saas F-10: captures returned Microsoft's login form while
+   * bc_health still said "connected"), so they must be renewable independently.
+   *
+   * Optional: a provider that cannot do this makes the caller fail loudly instead.
+   * Implementations must THROW with an actionable message when renewal needs a
+   * human (MFA, expired password).
+   */
+  refreshCookieJar?(): Promise<RawCookie[]>;
 }

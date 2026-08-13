@@ -109,7 +109,7 @@ Examples:
       name: 'bc_read_data',
       description: `Refreshes a single section on an already-open page. Returns one Section: { sectionId, kind, caption, fields?, rows?, actions?, totalRowCount? }. Card-shape sections (header, factbox, requestPage) refresh their fields[]; list-shape sections refresh rows[]. Requires a pageContextId from a prior bc_open_page call.
 
-Pass section: "header" (default) to refresh the page's header. Pass section: "lines" to refresh document line items. Pass a factbox sectionId (e.g. "factbox:Customer Statistics", as listed in the bc_open_page response) to refresh the FactBox card.
+Pass section: "header" (default) to refresh the page's header. Pass section: "lines" to refresh document line items. Pass a factbox sectionId (e.g. "factbox:Customer Statistics", as listed in the bc_open_page response) to refresh the FactBox card. While a modal dialog is open over the page it appears as section "dialog" — read it to see the fields BC is waiting for, then fill them with bc_write_data { section: "dialog" } and answer with bc_respond_dialog.
 
 Filtering applies to list-shape sections only. Pass an array of { column, value }; values use BC filter syntax (exact "10000", ranges "10000..20000", wildcards "*consulting*", expressions ">1000"). Multiple filters combine with AND.
 
@@ -139,6 +139,8 @@ Editability is tri-state: a field reported as editable:"unknown" (BC emitted no 
 Write related fields together in one call (e.g., quantity and unit price), but avoid writing unrelated groups together because BC validation cascades may change dependent fields in unexpected order. Check the returned confirmed values to see what BC actually stored -- they may differ from the input due to formatting, auto-completion, or lookups.
 
 Duplicate captions: document headers repeat captions across groups (Sell-to / Bill-to / Ship-to all have "Name", "Address", "City"). Target one unambiguously by using the field's controlPath as the fields key (e.g. { "server:c[4]/c[1]/c[1]/c[0]": "2000008" }), or by passing group: "Bill-to" alongside caption-keyed fields.
+
+A DIALOG WITH FIELDS is written to like any other section: pass section: "dialog". BC opens a modal (PageType StandardDialog) for actions that need input — a reason, a comment, a posting date — and that dialog is a DIFFERENT form from the page, so a write aimed at the page cannot see its controls no matter which key you use. Its fields, with their controlPaths, are listed under the "dialog" section of bc_read_data / bc_open_page as long as it is open. Fill them, then answer with bc_respond_dialog ("ok" to accept). If you address a dialog field without naming the section, the error tells you the section to use.
 
 For Document page line items (Sales Order lines, Purchase Order lines), specify section: "lines" to write to the lines repeater. Use rowIndex (0-based row position) or bookmark (stable row identifier from bc_read_data results) to target a specific line. Prefer bookmark over rowIndex when rows may have been reordered or inserted since the last read. A line write is judged on the value BC echoes back for that cell; when BC echoes nothing the verdict falls back to re-reading the row and says so in "hint" (a list that is not in edit mode silently ignores line writes).
 
@@ -238,6 +240,10 @@ Examples:
 
 The dialogFormId comes from the dialogsOpened array in the triggering tool's response. The response parameter accepts: "ok" (confirm/accept), "cancel" (dismiss/abort), "yes" or "no" (answer a yes/no question), "abort" (force-close), or "close" (close a modal information page). Choose the response that matches the dialog's intent -- confirmation dialogs typically need "yes", acceptance dialogs need "ok".
 
+A dialog CARRYING FIELDS must be filled in BEFORE you answer it: write its values with bc_write_data using section: "dialog" (the dialog's fields and controlPaths are listed there while it is open), then respond "ok" here. Answering a dialog with mandatory fields before filling them just makes BC complain about the empty field.
+
+This tool only answers a dialog; it cannot press an arbitrary named button. Use one of the six responses.
+
 After responding, check the changedSections array in the result to see which page sections were affected. For example, posting a Sales Order may change all sections. If the dialog response triggers another dialog (chained confirmations), the response will include a new dialogsOpened array -- respond to each dialog in sequence.
 
 Do NOT call this without a preceding dialog -- there is no dialog to respond to unless dialogsOpened was returned by bc_execute_action or bc_write_data. Do NOT guess the dialogFormId -- always use the exact value from the dialogsOpened response.
@@ -249,9 +255,11 @@ Example: { "pageContextId": "abc", "dialogFormId": "dialog-123", "response": "ye
     },
     {
       name: 'bc_switch_company',
-      description: `Switch to a different company within the current Business Central session. All currently open pages will be invalidated and their pageContextIds will become unusable -- you must call bc_open_page to re-open any pages you need in the new company context.
+      description: `Switch to a different company in Business Central. The SESSION IS RE-OPENED on that company -- BC binds a session to its company when it opens, so no interaction on a live session can move it. Every open page dies with the old session: their pageContextIds become unusable and you must call bc_open_page again for anything you still need in the new company.
 
-Use bc_list_companies first to see the available company names and verify the target company exists. The companyName must be an exact match. After switching, all subsequent bc_open_page, bc_read_data, bc_write_data, and bc_execute_action calls will operate against the new company's data.
+The result reports the company BUSINESS CENTRAL granted (newCompany), read back from its own OpenSession response -- not the one you asked for. If BC does not grant it, this tool FAILS with an error instead of returning a success-shaped result; a switch that is announced but has not happened means every later read silently comes from the wrong company.
+
+Use bc_list_companies first to get the exact company NAME (the name, not the display name). Matching ignores case and surrounding spaces.
 
 Do NOT switch companies in the middle of a multi-step workflow (e.g., between creating a Sales Order and posting it). Complete all operations in the current company first, then switch.
 

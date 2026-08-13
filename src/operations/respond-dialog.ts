@@ -52,6 +52,7 @@ export class RespondDialogOperation {
       // pruned and section validity is recomputed. Without this, detectChangedSections
       // runs against pre-close state and the context keeps tracking the dead form.
       this.repo.applyToPage(input.pageContextId, closeResult.value);
+      this.repo.removeDialog(input.pageContextId, input.dialogFormId);
 
       const updatedCtx = this.repo.get(input.pageContextId);
       const changedSections = updatedCtx ? detectChangedSections(updatedCtx, closeResult.value) : [];
@@ -86,6 +87,13 @@ export class RespondDialogOperation {
     this.repo.applyToPage(input.pageContextId, events);
 
     const newDialogs = detectDialogs(events);
+
+    // The answered dialog is gone even though BC never says so — no FormClosed comes
+    // back for a dismissed dialog (verified live on devel1). Prune it, unless BC just
+    // re-published a dialog with the SAME formId, which would mean it is still there.
+    if (!newDialogs.some(d => d.formId === input.dialogFormId)) {
+      this.repo.removeDialog(input.pageContextId, input.dialogFormId);
+    }
 
     // The answer may have committed a destructive change without BC saying which row
     // it removed: confirming a line delete deletes the record server-side and sends

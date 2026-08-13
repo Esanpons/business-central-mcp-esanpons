@@ -267,10 +267,38 @@ Reports are opened via `OpenForm` with `query: "report=<id>&tenant=<tenantId>"`.
 
 Reference: `NavRunReportPropertyBagInvokedAction.cs`, `RunReportAction.cs` (decompiled). Verified against live BC28: report 6 (Trial Balance) returns request page dialog.
 
-### Company Switching
-Uses `InvokeSessionAction` with `SystemAction: 500` (ChangeCompany). All server-side page state is reset. The `SessionSettingsChangedHandler` response carries the new company info.
+### Company Switching — a session is BOUND to its company at OpenSession
 
-Reference: `ChangeCompanyAction.cs`, `NavSystemCodeunitSystemActionTriggers.cs` (decompiled). Wire format needs further protocol investigation -- the exact namedParameters may differ from the initial implementation.
+**`InvokeSessionAction { SystemAction: 500 }` on a live session does nothing you can rely on.**
+Measured on `devel1` (BC27): the response is a bare `InvokeCompleted` plus a few unrelated
+`PropertyChanged` — **no `SessionSettingsChanged`, no `CompanyName`** — and the data keeps coming
+from the previous company. The old code sent it, then wrote the REQUESTED name into
+`BCSession.company`, so `bc_switch_company`, `bc_health` and every deep link reported a switch that
+had not happened and later reads silently came from the wrong company (bc-saas F-11).
+
+The mechanism that works is the one the web client uses: **re-enter on the company**. `OpenSession`
+takes `company` and its `OpenForm` query takes `company=<encodeURIComponent(name)>`
+(`encodeOpenSession`); the company BC grants comes back as `CompanyName` in the response and is the
+ONLY server-side statement about a session's company this protocol offers.
+
+So `SessionManager.switchCompany()` closes the session, opens a new one on the target company, and
+compares what BC granted with what was asked (case/space-insensitive) — throwing when they differ
+instead of returning a success-shaped result. Page contexts die with the old session (they always
+did) and `servicesInvalidated` makes the entry points rebuild the graph. `desiredCompany` is also
+passed to `SessionFactory.create()` on every reconnect, so a recovered session comes back on the
+right company by construction rather than by replaying an action that is ignored.
+
+Verified live on `devel1`: Company Information `Name` goes `CRONUS_04` -> `JBC SOLDERING JAPAN CO.,
+LTD.` across the switch (the customer list could NOT show it — every company in that container is a
+copy of the same data, which is exactly how a broken switch passes a careless check). Also verified
+on SaaS (`test-battery saas`).
+
+Files: `src/session/session-manager.ts` (`switchCompany`), `src/session/session-factory.ts`,
+`src/session/bc-session.ts` (`initialize`, `changeCompany` — now reports `confirmed` and never
+writes the company optimistically), `src/protocol/interaction-encoder.ts`,
+`src/operations/switch-company.ts`, `src/mcp/build-operations.ts` (`switchSessionCompany`).
+
+Reference: `ChangeCompanyAction.cs`, `NavSystemCodeunitSystemActionTriggers.cs` (decompiled, upstream).
 
 ### BC27 vs BC28 Wire Compatibility
 Wire format is identical: same handler types, type abbreviations (~50 aliases), compatibility version (15041). Only addition in BC28: `CopilotSettingsChanged` event (ignorable). A single codec handles both.
@@ -447,6 +475,48 @@ Key empirical findings (all verified live, BC27):
   lookup scans all frames.
 - The zero-dep `chrome.exe --headless --screenshot` path is NOT auth-viable (BC session
   cookies are in-memory, a copied on-disk profile loses them).
+- **The PNG is written from memory, only after the capture has been judged good.**
+  `p.screenshot({ path })` writes straight to the destination, so an expired browser session
+  replaced a good figure of a manual with a picture of Microsoft's login form — in a folder outside
+  git — and reported success (F-10). Capture to the buffer, validate, `writeFileSync` last. A
+  failure now leaves whatever was there untouched.
+- **There are TWO login walls and only one used to be recognised.** `onSignIn` matched BC's on-prem
+  `/SignIn` (`#UserName`/`#Password`); a SaaS capture whose injected cookie jar expired bounces to
+  `login.microsoftonline.com` (`input[name=loginfmt]`), which matched nothing — so `authenticated`,
+  computed as `!(await onSignIn(p))`, answered TRUE for a photograph of Microsoft's login form.
+  `detectLoginWall()` returns `'bc-forms' | 'entra' | undefined` and is what `authenticated` and the
+  recovery both read. `looksLikeBusinessCentral()` (client chrome classes `ms-dyn365*` / `ms-nav-*`
+  in any frame) adds a positive check, but only as a WARNING — a BC restyle must not block captures.
+- **In AAD mode the browser session is renewed WITHOUT touching the WebSocket.** The two expire
+  independently (bc_health said "connected" while every capture came back as the login form), so the
+  repair must be independent too — and `provider.invalidate()` is the wrong tool: it closes the
+  kept-alive persistent browser, and BC tears down the per-tab session the WS is attached to.
+  `IBCAuthProvider.refreshCookieJar()` (optional) mints a fresh jar instead: the AAD provider opens a
+  SEPARATE tab in the same browser (Entra SSO lives in the on-disk profile, shared by every tab),
+  reads the cookies and closes it; the forms provider just re-runs `/SignIn`. When renewal needs a
+  human, it throws with `npm run login:aad` in the message and NOTHING is written.
+- **A crop rect measured inside the iframe must be translated to page coordinates.** This was the
+  real cause of "crop returns a 3 KB sliver" (F-8): `getBoundingClientRect` is frame-relative,
+  `page.screenshot({ clip })` clips in top-level coordinates, and the two differ by the whole BC
+  chrome above the iframe. `frameOffset()` (`frame.frameElement().boundingBox()`, already
+  page-absolute) is added to every crop rect. `highlight` was never affected because its callouts
+  are drawn INSIDE the frame — which is exactly why "use highlight without crop" worked as a
+  workaround. A crop target also climbs from the caption to the nearest field-sized ancestor that
+  actually contains a value control (`div.ms-nav-edit-control-container` on BC27), and a crop that
+  still comes out tiny is reported in `warning`.
+- **A click that did nothing is reported, not logged.** `clickBeforeCapture` results come back as
+  `clicks: [{ target, clicked, reason }]` with `reason: 'disabled' | 'not found'`, plus a `warning`.
+  BC greys out an action that does not apply to the SELECTED row and `.click()` on it is a silent
+  no-op, so a capture came out looking like the step had been taken (F-6). In a list, position the
+  row with `bookmark` first — that is not a workaround, it is the only way to choose the row.
+- **A dialog that opened BY ITSELF is reported** (`unexpectedDialog` + `warning`), detected by ARIA
+  role (`dialog` / `alertdialog`), and only when the call carried no `clickBeforeCapture` — a manual
+  documenting a dialog asks for one, BC refusing a bookmark from another table does not (F-9).
+- **`dismissTeachingTips` (default true)** closes BC's "About this page" callouts before capturing:
+  they pop on first visit and a capture browser is ALWAYS a first visit, so the bubble covered the
+  bottom-left corner of every image in a manual (F-7). The close button is found structurally (a
+  close control INSIDE a teaching/callout container), never by caption — the cross has no accessible
+  text, which is why `clickBeforeCapture: ["Cerrar"]` could not reach it.
 
 Config: `BC_SCREENSHOT_DIR` (default `./screenshots`), `BC_SCREENSHOT_CHROME` (browser path
 override; auto-detected otherwise). Requires Chrome/Edge installed. `puppeteer-core` is a
@@ -799,6 +869,36 @@ un RecordID de la tabla 'Sales Shipment Header' con un registro de la tabla 'Sal
 Header'."* Open the card filtered instead (`filters: [{ field: 'No.', value: '<doc no>' }]`, verified
 working on the same page) or drill in from the row's own list with `bc_execute_action { action:
 'View' }`.
+
+### A modal dialog IS a section (`dialog`) — read it, write it, then answer it
+
+BC gates plenty of actions behind a modal that carries its own fields (`PageType =
+StandardDialog`: a reason, a comment, a posting date). That dialog is a DIFFERENT FORM from the
+page. It used to be kept only as a raw entry in `PageContext.dialogs` — no FormState, no section —
+so `bc_write_data`, which resolves everything through sections, answered `Field not found:
+server:c[1]/c[2]` for a controlPath the SAME response had just handed the caller. Anything behind
+such a dialog could be opened and cancelled but never completed, which is what forced a person to
+take over mid-workflow (bc-saas F-4/F-5).
+
+`addDialog` now builds the dialog's control tree into a FormState and mints a section for it
+(`SectionResolver.deriveDialogSection`). The first open dialog is plainly `dialog`; a second
+concurrent one is `dialog#2`. Everything section-shaped works on it — `bc_read_data { section:
+"dialog" }`, `bc_write_data { section: "dialog", fields }` (with the full `changed` / `reason` /
+`validationMessage` verification), `bc_execute_action { section: "dialog" }` — and a write that
+names a dialog field WITHOUT a section now gets an error naming the section to use instead of a
+bare "not found". Verified live on devel1: a report request page opened from a list action came
+back as `dialog`, `Number of Customers` wrote with `changed:true`.
+
+**BC does NOT announce that a dialog closed.** Verified live: dismissing one (Cancel = 310) comes
+back as `InvokeCompleted` + a few PropertyChanged, with NO `FormClosed`, so nothing in the event
+path can prune it. `PageContextRepository.removeDialog()` is called by the operations that answer a
+dialog, which also frees the plain `dialog` id for the next one. `markFormClosed` DELETES a dialog
+section rather than marking it invalid, for the same reason.
+
+Note `bc_respond_dialog` still only answers (`ok` / `cancel` / `yes` / `no` / `abort` / `close`) —
+it cannot press an arbitrary named button. The dialogs measured here (request pages) publish no
+action nodes in their control tree, so there is nothing to name; if a build does publish them,
+`bc_execute_action { section: "dialog", action }` is the path.
 
 ### Writes and deletes never report success blindly
 Two rules that the whole write path depends on, both verified live:

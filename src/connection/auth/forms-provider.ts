@@ -1,5 +1,5 @@
 import * as cheerio from 'cheerio';
-import { ok, err, type Result } from '../../core/result.js';
+import { ok, err, isErr, type Result } from '../../core/result.js';
 import { AuthenticationError } from '../../core/errors.js';
 import type { IBCAuthProvider, AuthResult } from './auth-provider.js';
 import { parseSetCookie, type RawCookie } from './cookies.js';
@@ -188,6 +188,20 @@ export class FormsAuthProvider implements IBCAuthProvider {
 
   isAuthenticated(): boolean {
     return this.authenticated;
+  }
+
+  /**
+   * Re-run /SignIn and hand back the new jar. On-prem this is cheap and safe for
+   * the live WebSocket: that socket is already established and does not re-read
+   * these cookies, so renewing the BROWSER session never disturbs it.
+   */
+  async refreshCookieJar(): Promise<RawCookie[]> {
+    this.invalidate();
+    const r = await this.authenticate();
+    if (isErr(r)) {
+      throw new Error(`Could not renew the BC browser session: ${r.error.message}`);
+    }
+    return this.cookieJar;
   }
 
   invalidate(): void {

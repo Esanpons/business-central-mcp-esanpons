@@ -23,6 +23,8 @@ export interface ManualScreenshotSpec {
   expand?: boolean;
   /** Captions to click before capturing (e.g. ["Lines"]). Same semantics as bc_screenshot. */
   clickBeforeCapture?: string[];
+  /** Close BC's "About this page" callouts before capturing (default true). */
+  dismissTeachingTips?: boolean;
   width?: number;
   height?: number;
   scale?: number;
@@ -246,6 +248,7 @@ export class ManualService {
             crop: s.crop === undefined ? undefined : Array.isArray(s.crop) ? s.crop : [s.crop],
             expand: s.expand,
             clickBeforeCapture: s.clickBeforeCapture,
+            dismissTeachingTips: s.dismissTeachingTips,
             width: s.width,
             height: s.height,
             scale: s.scale,

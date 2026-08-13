@@ -14,6 +14,11 @@ export interface ReconnectOptions {
 
 const DEFAULT_RECONNECT: ReconnectOptions = { maxRetries: 4, baseDelayMs: 1000 };
 
+/** Company names compare case- and whitespace-insensitively, as BC resolves them. */
+function sameCompany(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
 /**
  * Manages the BC session lifecycle including lazy creation and automatic recovery
  * after session death (InvalidSessionException, WebSocket disconnect).
@@ -225,17 +230,89 @@ export class SessionManager {
     return this.desiredCompany;
   }
 
+  /**
+   * Fallback only. The session is now OPENED on `desiredCompany`
+   * (`SessionFactory.create(company)`), which is the mechanism BC actually honours,
+   * so normally there is nothing to re-apply and this returns immediately. It stays
+   * for the case where BC granted a different company than the one asked for: the
+   * live-session action is worth one cheap try before giving up, and its outcome is
+   * now judged on BC's answer instead of being assumed.
+   */
   private async applyDesiredCompany(session: BCSession): Promise<void> {
     const want = this.desiredCompany;
-    if (!want || session.companyName === want) return;
-    this.logger.info(`Re-applying company "${want}" on the new session (was "${session.companyName}")`);
+    if (!want || sameCompany(session.companyName, want)) return;
+    this.logger.info(`Session opened on "${session.companyName}" but "${want}" was requested — trying the live-session switch`);
     const result = await session.changeCompany(want).catch((e: unknown) => {
       this.logger.warn(`Could not re-apply company "${want}": ${e instanceof Error ? e.message : String(e)}`);
       return null;
     });
     if (result && isErr(result)) {
       this.logger.warn(`Could not re-apply company "${want}": ${result.error.message}`);
+    } else if (!sameCompany(session.companyName, want)) {
+      this.logger.warn(`BC did not confirm the company change to "${want}"; the session is on "${session.companyName}"`);
     }
+  }
+
+  /**
+   * Switch the session's company FOR REAL, and confirm it from BC.
+   *
+   * A BC session is bound to its company server-side at OpenSession: asking a live
+   * session to move is answered with a bare InvokeCompleted and the data keeps
+   * coming from the old company (verified live on devel1), which is how
+   * bc_switch_company came to report a switch that had not happened and let a
+   * caller validate one company's setup while reading another's (bc-saas F-11).
+   * The web client does not do that either — it re-enters with `?company=`.
+   *
+   * So: tear the session down, open a new one ON the target company, and check what
+   * BC granted. `CompanyName` in the OpenSession response is the only server-side
+   * statement of a session's company this protocol offers, so it is what the result
+   * is judged on. A mismatch throws instead of returning a tidy-looking result.
+   *
+   * Page contexts are cleared — they belong to the dead session — and services are
+   * marked for rebuild, exactly as in recovery. `firstCreate` is held for the whole
+   * operation so a concurrent getSession() joins this attempt rather than opening a
+   * second session behind it.
+   */
+  async switchCompany(companyName: string): Promise<{
+    previousCompany: string;
+    newCompany: string;
+    invalidatedPageContextIds: string[];
+  }> {
+    const previousCompany = this.session?.companyName ?? '';
+    const impactedIds = this.pageContextRepo.listPageContextIds();
+    this.desiredCompany = companyName;
+
+    if (this.session !== null) {
+      // Polite close: BC keeps the auth slot for ~15s after a session CRASHES, but
+      // an orderly CloseForm/close hands it back, which is what makes the immediate
+      // re-open below reliable.
+      await this.session.closeGracefully().catch(() => this.session?.close());
+      this.session = null;
+    }
+    this.pageContextRepo.clearAll();
+    this.servicesInvalidated = true;
+
+    const attempt = this.createAndPublish();
+    this.firstCreate = attempt;
+    let created: BCSession | null;
+    try {
+      created = await attempt;
+    } finally {
+      this.firstCreate = null;
+    }
+    if (created === null) throw this.createFailedError();
+
+    if (!sameCompany(created.companyName, companyName)) {
+      throw new SessionLostError(
+        `Business Central did not switch to "${companyName}": the new session came back on `
+        + `"${created.companyName}". Check the exact company NAME (bc_list_companies gives it — it is the name, `
+        + 'not the display name). The previous page contexts are gone either way, so re-open any page you need.',
+        impactedIds,
+      );
+    }
+
+    this.logger.info(`Company switched to "${created.companyName}" by re-opening the session (was "${previousCompany}")`);
+    return { previousCompany, newCompany: created.companyName, invalidatedPageContextIds: impactedIds };
   }
 
   private reconnectFailedError(impactedIds: string[]): SessionLostError {
@@ -286,7 +363,10 @@ export class SessionManager {
       // aquí fa que ConnectionFactory.create torni a executar authenticate() (/SignIn nou).
       this.authProvider?.invalidate();
 
-      const result = await this.sessionFactory.create();
+      // Open the session directly ON the pinned company: BC binds a session to its
+      // company at OpenSession, so this is both how a switch is made to stick and
+      // how it survives a reconnect.
+      const result = await this.sessionFactory.create(this.desiredCompany ?? undefined);
 
       if (!isErr(result)) {
         this.lastCreateError = null;

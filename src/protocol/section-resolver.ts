@@ -6,7 +6,7 @@ import type { FormState } from './form-state.js';
 import type { RepeaterRow } from './types.js';
 import type { FormNode, RepeaterNode } from './form-node.js';
 
-export type SectionKind = 'header' | 'lines' | 'factbox' | 'requestPage' | 'subpage';
+export type SectionKind = 'header' | 'lines' | 'factbox' | 'requestPage' | 'subpage' | 'dialog';
 
 export interface SectionDescriptor {
   readonly sectionId: string;
@@ -99,6 +99,33 @@ export class SectionResolver {
     const caption = child.caption || 'FactBox';
     const sectionId = this.uniqueSectionId(parentPageContext, `factbox:${caption}`);
     return { sectionId, kind: 'factbox', caption, formId: child.serverId, valid: true };
+  }
+
+  /**
+   * Descriptor for an open MODAL DIALOG, so it can be read from and written to like
+   * any other part of the page.
+   *
+   * A dialog with fields used to be unreachable: it was kept only as a raw entry in
+   * `PageContext.dialogs`, never built into a form and never given a section, so
+   * bc_write_data — which resolves everything through sections — answered "Field not
+   * found" for a control whose exact controlPath the very same response had just
+   * handed the caller. Anything BC gated behind a dialog with mandatory fields could
+   * be opened and cancelled but never completed, which is what forced a person to
+   * take over mid-workflow (bc-saas F-4/F-5).
+   *
+   * The FIRST open dialog is plainly `dialog`, so a caller can name it without
+   * looking anything up; a second concurrent one gets `dialog#2`. The id is released
+   * when the dialog closes (see markFormClosed), so ids do not creep upwards over a
+   * long-lived page.
+   */
+  deriveDialogSection(ctx: PageContext, dialogFormId: string, caption?: string): SectionDescriptor {
+    return {
+      sectionId: this.uniqueSectionId(ctx, 'dialog'),
+      kind: 'dialog',
+      caption: caption || 'Dialog',
+      formId: dialogFormId,
+      valid: true,
+    };
   }
 
   private uniqueSectionId(ctx: PageContext, base: string): string {

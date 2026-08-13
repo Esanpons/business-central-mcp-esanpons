@@ -84,6 +84,99 @@ describe('PageContextRepository — modal-rooted pages', () => {
     expect(treeActions(ctx.forms.get('rootForm')!.root)).toHaveLength(0);
   });
 
+  // F-4/F-5: a dialog with fields used to be unreachable — it was kept only as a raw
+  // `dialogs` entry, so bc_write_data (which resolves through sections) answered
+  // "Field not found" for a controlPath it had itself just reported. Any BC action
+  // gated behind a dialog with mandatory fields could be opened and cancelled but
+  // never completed.
+  describe('dialogs are a writable section', () => {
+    const openPageWithDialog = (dialogTree: unknown, dialogFormId = 'dialogForm'): PageContextRepository => {
+      const repo = new PageContextRepository();
+      repo.create('pc1', 'rootForm');
+      repo.applyEvents([{
+        type: 'FormCreated', formId: 'rootForm', isReload: false,
+        controlTree: { t: 'lf', Caption: 'Control DeCA', PageType: 1, Children: [] },
+      } as BCEvent]);
+      repo.applyEvents([{
+        type: 'DialogOpened', formId: dialogFormId, ownerFormId: 'rootForm', controlTree: dialogTree,
+      } as BCEvent]);
+      return repo;
+    };
+
+    // Shape of the real case: PageType = StandardDialog with two mandatory fields.
+    const exemptDialog = {
+      t: 'lf', Caption: 'Eximir el envío manualmente', PageType: 8,
+      Children: [{ t: 'gc', Children: [
+        { t: 'sc', Caption: 'Motivo', Editable: true, Visible: true, ColumnBinder: { Name: 'b1' } },
+        { t: 'sc', Caption: 'Comentario', Editable: true, Visible: true, ColumnBinder: { Name: 'b2' } },
+      ] }],
+    };
+
+    it('registers the dialog as form + section so its fields can be resolved', () => {
+      const ctx = openPageWithDialog(exemptDialog).get('pc1')!;
+      const section = ctx.sections.get('dialog');
+      expect(section).toBeDefined();
+      expect(section!.kind).toBe('dialog');
+      expect(section!.formId).toBe('dialogForm');
+      expect(section!.caption).toBe('Eximir el envío manualmente');
+      // The form itself is built, which is what makes a write addressable.
+      expect(ctx.forms.has('dialogForm')).toBe(true);
+    });
+
+    // A dialog controlTree can arrive as a bare object with no `t`.
+    it('builds a dialog tree that arrives without the lf type marker', () => {
+      const ctx = openPageWithDialog({ Caption: 'Confirm', PageType: 8, Children: [] }).get('pc1')!;
+      expect(ctx.sections.get('dialog')).toBeDefined();
+    });
+
+    it('the FIRST dialog is plainly "dialog"; a second concurrent one is "dialog#2"', () => {
+      const repo = openPageWithDialog(exemptDialog);
+      repo.applyEvents([{
+        type: 'DialogOpened', formId: 'dialog2', ownerFormId: 'rootForm',
+        controlTree: { t: 'lf', Caption: 'Second', PageType: 8, Children: [] },
+      } as BCEvent]);
+      const ids = [...repo.get('pc1')!.sections.keys()].filter(k => k.startsWith('dialog'));
+      expect(ids).toEqual(['dialog', 'dialog#2']);
+    });
+
+    // BC sends NO FormClosed for a dismissed dialog (verified live on devel1), so
+    // the operations that answer one prune it explicitly. Without this the section
+    // would outlive the form it points at, and the next dialog could never be
+    // called plainly "dialog" again.
+    it('removeDialog drops the section, the form and the index entry', () => {
+      const repo = openPageWithDialog(exemptDialog);
+      repo.removeDialog('pc1', 'dialogForm');
+      const ctx = repo.get('pc1')!;
+      expect(ctx.sections.has('dialog')).toBe(false);
+      expect(ctx.forms.has('dialogForm')).toBe(false);
+      expect(ctx.dialogs).toHaveLength(0);
+      expect(ctx.ownedFormIds).not.toContain('dialogForm');
+      expect(repo.getByFormId('dialogForm')).toBeUndefined();
+      // And the id is free again for the next one.
+      repo.applyEvents([{
+        type: 'DialogOpened', formId: 'dialog3', ownerFormId: 'rootForm',
+        controlTree: { t: 'lf', Caption: 'Next one', PageType: 8, Children: [] },
+      } as BCEvent]);
+      expect(repo.get('pc1')!.sections.get('dialog')?.formId).toBe('dialog3');
+    });
+
+    it('removeDialog is idempotent and never touches the root form', () => {
+      const repo = openPageWithDialog(exemptDialog);
+      repo.removeDialog('pc1', 'dialogForm');
+      repo.removeDialog('pc1', 'dialogForm');
+      repo.removeDialog('pc1', 'rootForm');
+      const ctx = repo.get('pc1')!;
+      expect(ctx.forms.has('rootForm')).toBe(true);
+      expect(ctx.ownedFormIds).toContain('rootForm');
+    });
+
+    it('a closed dialog form releases its section id via FormClosed too', () => {
+      const repo = openPageWithDialog(exemptDialog);
+      repo.applyEvents([{ type: 'FormClosed', formId: 'dialogForm' } as BCEvent]);
+      expect(repo.get('pc1')!.sections.has('dialog')).toBe(false);
+    });
+  });
+
   it('isModal defaults to false when create() is called without options', () => {
     const repo = new PageContextRepository();
     repo.create('pc1', 'F1');

@@ -47,6 +47,7 @@ async function main() {
     authProvider,
     pageContextRepo,
     onCompanySelected: (c: string) => sessionManager.rememberCompany(c),
+    switchSessionCompany: (c: string) => sessionManager.switchCompany(c),
     metrics,
   };
 

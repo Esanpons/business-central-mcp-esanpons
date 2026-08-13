@@ -249,6 +249,27 @@ export class DataService {
         )];
         ctxInfo.hint = `No field "${fieldName}" found in group "${options.group}". Use one of availableGroups, or pass the exact controlPath as the field key (from bc_open_page / bc_read_data).`;
       }
+      // Is it in an OPEN DIALOG? BC gates plenty of actions behind a dialog with its
+      // own fields, and those live in a different form — a different section — so a
+      // write aimed at the page could never find them. That produced the least
+      // helpful answer this tool can give: "Field not found: server:c[1]/c[2]" for a
+      // controlPath the caller had copied from OUR OWN response two calls earlier
+      // (bc-saas F-4). Say where it is instead.
+      if (!options?.sectionId) {
+        const inDialog = this.findFieldInDialogs(ctx, fieldName, options?.group);
+        if (inDialog) {
+          return err(new ProtocolError(
+            `"${fieldName}" is not on the page — it belongs to the dialog currently open over it `
+            + `("${inDialog.caption}"). Target it with section: "${inDialog.sectionId}".`,
+            {
+              ...ctxInfo,
+              dialogSection: inDialog.sectionId,
+              dialogFormId: inDialog.formId,
+              hint: `bc_write_data { pageContextId, section: "${inDialog.sectionId}", fields: { "${fieldName}": ... } }`,
+            },
+          ));
+        }
+      }
       const where = options?.group ? `${fieldName} (group "${options.group}")` : fieldName;
       return err(new ProtocolError(`Field not found: ${where}`, ctxInfo));
     }
@@ -526,6 +547,23 @@ export class DataService {
       newValue: observed,
       events: allEvents,
     });
+  }
+
+  /** The open dialog section holding `fieldName`, when the page itself does not. */
+  private findFieldInDialogs(
+    ctx: { sections: ReadonlyMap<string, { sectionId: string; kind: string; caption: string; formId: string; valid: boolean }>; forms: ReadonlyMap<string, { root: FormNode }> },
+    fieldName: string,
+    group?: string,
+  ): { sectionId: string; caption: string; formId: string } | undefined {
+    for (const section of ctx.sections.values()) {
+      if (section.kind !== 'dialog' || !section.valid) continue;
+      const form = ctx.forms.get(section.formId);
+      if (!form) continue;
+      if (this.resolveFieldNode(form.root, fieldName, group)) {
+        return { sectionId: section.sectionId, caption: section.caption, formId: section.formId };
+      }
+    }
+    return undefined;
   }
 
   /**

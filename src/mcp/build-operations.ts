@@ -48,6 +48,18 @@ export interface OperationsDeps {
    */
   onCompanySelected: (companyName: string) => void;
   /**
+   * Perform a company switch at SESSION level (tear down, re-open on that company,
+   * confirm from BC's OpenSession response). It lives on the SessionManager because
+   * BC binds a session to its company at OpenSession — no interaction on a live
+   * session moves it — so a switch necessarily replaces the session the whole
+   * service graph is built on.
+   */
+  switchSessionCompany: (companyName: string) => Promise<{
+    previousCompany: string;
+    newCompany: string;
+    invalidatedPageContextIds: string[];
+  }>;
+  /**
    * The same Metrics instance bc_health reports from. The browser-driven services
    * (screenshots, report downloads, manuals) are the slowest and flakiest things this
    * server does, and without this they stay invisible in bc_health: the counters exist
@@ -66,7 +78,7 @@ export interface OperationsDeps {
  * both entrypoints get it.
  */
 export function buildOperations(session: BCSession, deps: OperationsDeps): Operations {
-  const { config, logger, authProvider, pageContextRepo, onCompanySelected, metrics } = deps;
+  const { config, logger, authProvider, pageContextRepo, onCompanySelected, switchSessionCompany, metrics } = deps;
 
   const pageService = new PageService(session, pageContextRepo, logger, { tenantId: config.bc.tenantId, authMode: config.bc.authMode });
   const dataService = new DataService(session, pageContextRepo, logger, config.logging.redactValues);
@@ -86,7 +98,7 @@ export function buildOperations(session: BCSession, deps: OperationsDeps): Opera
     searchPages: new SearchPagesOperation(searchService),
     navigate: new NavigateOperation(navigationService),
     respondDialog: new RespondDialogOperation(session, pageContextRepo, logger),
-    switchCompany: new SwitchCompanyOperation(session, pageContextRepo, logger, onCompanySelected),
+    switchCompany: new SwitchCompanyOperation(switchSessionCompany, logger, onCompanySelected),
     listCompanies: new ListCompaniesOperation(pageService, dataService, () => session.companyName, logger),
     runReport: new RunReportOperation(session),
     downloadReport: new DownloadReportOperation(reportDownloadService),

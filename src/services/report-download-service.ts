@@ -27,7 +27,7 @@ import type { IBCAuthProvider } from '../connection/auth/auth-provider.js';
 import { launchHeadless } from './browser.js';
 import {
   ensureAuthJar, deepLinkReport, onSignIn, waitReady,
-  fallbackFormsProvider, recoverIfOnSignIn, detectErrorPage,
+  fallbackFormsProvider, recoverIfLoggedOut, detectErrorPage,
 } from './bc-web-auth.js';
 import type { Metrics } from './metrics.js';
 
@@ -196,7 +196,16 @@ export class ReportDownloadService {
       // connections, so networkidle2 routinely waits the full timeout for no
       // benefit. waitReady below handles actual readiness.
       await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await recoverIfOnSignIn(p, this.auth(), this.config, this.logger, { tag: 'report', returnTo: url });
+      // Recovers BOTH login walls: BC's own /SignIn on-prem, and the Microsoft Entra
+      // form a SaaS run bounces to once the injected cookie jar expires. On SaaS the
+      // jar is refreshed from the warm profile WITHOUT tearing down the browser that
+      // holds the WebSocket tab; when it cannot be renewed unattended this throws
+      // with what to do, rather than driving a download against a login form.
+      await recoverIfLoggedOut(p, this.auth(), this.config, this.logger, {
+        tag: 'report',
+        returnTo: url,
+        applyCookies: async (jar) => { await p.setCookie(...jar); },
+      });
       // Short readiness budget: a report request page keeps the generic title, so
       // waitReady never trips and would otherwise burn the full 60s default.
       await waitReady(p, { timeoutMs: 12000, settleMs: 1500 });

@@ -137,52 +137,85 @@ export async function createHarness(env: EnvName, options: HarnessOptions = {}):
 
   const sres = await sessionFactory.create();
   if (!isOk(sres)) throw new Error(`session: ${sres.error.message}`);
-  const session = sres.value;
+  // Mutable: a company switch REPLACES the session (BC binds a session to its
+  // company at OpenSession), so the whole graph below is rebuilt on top of the new
+  // one — the same thing SessionManager + buildOperations do in the real server.
+  let session = sres.value;
 
   const metrics = new Metrics();
   const repo = new PageContextRepository();
-  const page = new PageService(session, repo, logger, { tenantId: cfg.bc.tenantId, authMode: cfg.bc.authMode });
-  const data = new DataService(session, repo, logger, false);
-  const action = new ActionService(session, repo, logger);
-  const filter = new FilterService(session, repo, logger, false);
-  const navigation = new NavigationService(session, repo, logger);
-  const search = new SearchService(session, logger);
-  const screenshot = new ScreenshotService(cfg.bc, cfg.screenshotDir, () => session.companyName, logger, auth);
-  const reportDownload = new ReportDownloadService(cfg.bc, cfg.reportDir, () => session.companyName, logger, auth);
-  const manual = new ManualService(screenshot, cfg.manualDir, logger);
-  const objectIndex = new ObjectIndexService(page, cfg.stateDir, cfg.bc.baseUrl, cfg.bc.tenantId, logger);
 
-  return {
+  const buildGraph = (s: typeof session) => {
+    const page = new PageService(s, repo, logger, { tenantId: cfg.bc.tenantId, authMode: cfg.bc.authMode });
+    const data = new DataService(s, repo, logger, false);
+    const action = new ActionService(s, repo, logger);
+    const filter = new FilterService(s, repo, logger, false);
+    const navigation = new NavigationService(s, repo, logger);
+    const search = new SearchService(s, logger);
+    const screenshot = new ScreenshotService(cfg.bc, cfg.screenshotDir, () => session.companyName, logger, auth);
+    const reportDownload = new ReportDownloadService(cfg.bc, cfg.reportDir, () => session.companyName, logger, auth);
+    const manual = new ManualService(screenshot, cfg.manualDir, logger);
+    const objectIndex = new ObjectIndexService(page, cfg.stateDir, cfg.bc.baseUrl, cfg.bc.tenantId, logger);
+    return {
+      services: { page, data, action, filter, navigation, search, screenshot, reportDownload, manual, objectIndex },
+      ops: {
+        openPage: new OpenPageOperation(page),
+        readData: new ReadDataOperation(data, repo, page),
+        writeData: new WriteDataOperation(data, repo),
+        executeAction: new ExecuteActionOperation(action, repo),
+        closePage: new ClosePageOperation(page),
+        searchPages: new SearchPagesOperation(search),
+        navigate: new NavigateOperation(navigation),
+        respondDialog: new RespondDialogOperation(s, repo, logger),
+        switchCompany: new SwitchCompanyOperation(switchSessionCompany, logger),
+        listCompanies: new ListCompaniesOperation(page, data, () => session.companyName, logger),
+        runReport: new RunReportOperation(s),
+        downloadReport: new DownloadReportOperation(reportDownload),
+        screenshot: new ScreenshotOperation(screenshot),
+        buildManual: new BuildManualOperation(manual),
+        findObject: new FindObjectOperation(objectIndex),
+        refreshObjects: new RefreshObjectsOperation(objectIndex),
+        wizardNavigate: new WizardNavigateOperation(action, repo),
+        health: new HealthOperation({ currentSession: () => session, metrics, bc: cfg.bc }),
+      },
+    };
+  };
+
+  /** Re-open the session ON a company and rebuild the graph in place. */
+  async function switchSessionCompany(companyName: string): Promise<{
+    previousCompany: string; newCompany: string; invalidatedPageContextIds: string[];
+  }> {
+    const previousCompany = session.companyName;
+    const invalidatedPageContextIds = repo.listPageContextIds();
+    await session.closeGracefully().catch(() => undefined);
+    repo.clearAll();
+    const res = await sessionFactory.create(companyName);
+    if (!isOk(res)) throw new Error(`could not re-open the session on "${companyName}": ${res.error.message}`);
+    session = res.value;
+    const fresh = buildGraph(session);
+    // Keep the object IDENTITIES a script may already hold, and swap the contents.
+    Object.assign(harness.services, fresh.services);
+    Object.assign(harness.ops, fresh.ops);
+    if (session.companyName.trim().toLowerCase() !== companyName.trim().toLowerCase()) {
+      throw new Error(`BC opened the session on "${session.companyName}" instead of "${companyName}"`);
+    }
+    return { previousCompany, newCompany: session.companyName, invalidatedPageContextIds };
+  }
+
+  const graph = buildGraph(session);
+  const harness: Harness = {
     env,
     cfg,
     logger,
     auth,
-    session,
+    get session() { return session; },
     metrics,
     repo,
-    services: { page, data, action, filter, navigation, search, screenshot, reportDownload, manual, objectIndex },
-    ops: {
-      openPage: new OpenPageOperation(page),
-      readData: new ReadDataOperation(data, repo, page),
-      writeData: new WriteDataOperation(data, repo),
-      executeAction: new ExecuteActionOperation(action, repo),
-      closePage: new ClosePageOperation(page),
-      searchPages: new SearchPagesOperation(search),
-      navigate: new NavigateOperation(navigation),
-      respondDialog: new RespondDialogOperation(session, repo, logger),
-      switchCompany: new SwitchCompanyOperation(session, repo, logger),
-      listCompanies: new ListCompaniesOperation(page, data, () => session.companyName, logger),
-      runReport: new RunReportOperation(session),
-      downloadReport: new DownloadReportOperation(reportDownload),
-      screenshot: new ScreenshotOperation(screenshot),
-      buildManual: new BuildManualOperation(manual),
-      findObject: new FindObjectOperation(objectIndex),
-      refreshObjects: new RefreshObjectsOperation(objectIndex),
-      wizardNavigate: new WizardNavigateOperation(action, repo),
-      health: new HealthOperation({ currentSession: () => session, metrics, bc: cfg.bc }),
-    },
+    services: graph.services,
+    ops: graph.ops,
     dispose: async () => {
       await session.closeGracefully().catch(() => undefined);
     },
   };
+  return harness;
 }

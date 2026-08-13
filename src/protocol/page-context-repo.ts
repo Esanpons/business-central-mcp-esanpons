@@ -386,6 +386,47 @@ export class PageContextRepository {
     });
   }
 
+  /**
+   * Forget a dialog that has been answered: its entry, its form, its section and its
+   * formId index.
+   *
+   * BC does NOT announce it. Verified live on devel1: dismissing a report request
+   * page with Cancel comes back as `InvokeCompleted` + a few PropertyChanged and no
+   * `FormClosed` at all, so nothing in the event path can prune it. Before dialogs
+   * were readable this only leaked memory; now it would leave a `dialog` section
+   * pointing at a form BC has thrown away — and the caller has been told to use that
+   * name — so a later write would go somewhere dead, and the next real dialog would
+   * have to be called `dialog#2`.
+   *
+   * Called by the operations that answer a dialog. Idempotent.
+   */
+  removeDialog(pageContextId: string, dialogFormId: string): void {
+    const page = this.pages.get(pageContextId);
+    if (!page) return;
+    const dialogs = page.dialogs.filter(d => d.formId !== dialogFormId);
+    const sections = new Map(page.sections);
+    let sectionRemoved = false;
+    for (const [sectionId, section] of sections) {
+      if (section.kind === 'dialog' && section.formId === dialogFormId) {
+        sections.delete(sectionId);
+        sectionRemoved = true;
+      }
+    }
+    const hadForm = page.forms.has(dialogFormId) && dialogFormId !== page.rootFormId;
+    if (dialogs.length === page.dialogs.length && !sectionRemoved && !hadForm) return;
+
+    const forms = hadForm
+      ? new Map([...page.forms].filter(([fId]) => fId !== dialogFormId))
+      : page.forms;
+    const ownedFormIds = dialogFormId === page.rootFormId
+      ? page.ownedFormIds
+      : page.ownedFormIds.filter(f => f !== dialogFormId);
+    if (dialogFormId !== page.rootFormId && this.formIdIndex.get(dialogFormId) === pageContextId) {
+      this.formIdIndex.delete(dialogFormId);
+    }
+    this.pages.set(pageContextId, { ...page, dialogs, sections, forms, ownedFormIds });
+  }
+
   /** Mark a section as invalid (no longer surfaced via buildSection / buildAllSections). */
   invalidateSection(pageContextId: string, sectionId: string): void {
     const page = this.pages.get(pageContextId);
@@ -401,11 +442,18 @@ export class PageContextRepository {
     const page = this.pages.get(pcId);
     if (!page) return;
 
-    // Mark any sections that reference this formId as invalid
+    // Mark any sections that reference this formId as invalid. A DIALOG section is
+    // dropped outright instead: dialogs come and go many times on one page, and
+    // keeping a tombstone would push each new one to `dialog#2`, `dialog#3`, ... so
+    // the caller could never rely on the plain name it was just told to use.
     let changed = false;
     const sections = new Map(page.sections);
     for (const [sectionId, section] of sections) {
-      if (section.formId === formId && section.valid) {
+      if (section.formId !== formId) continue;
+      if (section.kind === 'dialog') {
+        sections.delete(sectionId);
+        changed = true;
+      } else if (section.valid) {
         sections.set(sectionId, { ...section, valid: false });
         changed = true;
       }
@@ -456,7 +504,36 @@ export class PageContextRepository {
       ? page.ownedFormIds
       : [...page.ownedFormIds, event.formId];
 
-    this.pages.set(pcId, { ...page, dialogs, ownedFormIds });
+    // Build the dialog's control tree into a real FormState and give it a SECTION.
+    //
+    // Without this a dialog was a dead record: its raw controlTree was kept, but
+    // nothing that resolves through sections — bc_write_data, bc_read_data,
+    // bc_execute_action — could reach it, so a dialog carrying mandatory fields
+    // (BC's StandardDialog) could be opened and cancelled but never filled in
+    // (bc-saas F-4/F-5). The fields were even reported back to the caller with
+    // their controlPaths, which then failed with "Field not found".
+    //
+    // The dialog's tree may arrive as a bare object rather than an `lf` node
+    // (same shape detectDialogs normalises), so give it the `lf` type when absent.
+    const forms = new Map(page.forms);
+    const sections = new Map(page.sections);
+    if (!forms.has(event.formId)) {
+      const raw = event.controlTree as Record<string, unknown> | undefined;
+      const lfNode = raw && raw.t !== 'lf' ? { ...raw, t: 'lf' } : raw;
+      const tree = tryBuildFormTree(lfNode);
+      if (tree) {
+        forms.set(event.formId, {
+          ...this.formProjection.createInitial(event.formId, event.ownerFormId),
+          root: tree,
+        });
+        const section = this.sectionResolver.deriveDialogSection(
+          page, event.formId, isLogicalFormNode(tree) ? tree.properties.caption : undefined,
+        );
+        sections.set(section.sectionId, section);
+      }
+    }
+
+    this.pages.set(pcId, { ...page, dialogs, ownedFormIds, forms, sections });
 
     this.formIdIndex.set(event.formId, pcId);
   }

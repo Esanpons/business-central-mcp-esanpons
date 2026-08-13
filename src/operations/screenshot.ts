@@ -14,6 +14,7 @@ export interface ScreenshotInput {
   crop?: string | string[];
   expand?: boolean;
   clickBeforeCapture?: string[];
+  dismissTeachingTips?: boolean;
   out?: string;
   width?: number;
   height?: number;
@@ -34,6 +35,14 @@ export interface ScreenshotOutput {
    * nothing, so the saved PNG still shows that value. `warning` repeats it loudly.
    */
   redactions?: Array<{ target: string; found: boolean }>;
+  /**
+   * Per-`clickBeforeCapture` outcome. `clicked:false` means the image shows the page
+   * WITHOUT that step: the control was disabled (in a list, usually the wrong row is
+   * selected — position it with `bookmark`) or its caption matched nothing.
+   */
+  clicks?: Array<{ target: string; clicked: boolean; reason?: 'not found' | 'disabled' }>;
+  /** A modal dialog that opened by itself, i.e. BC refusing what was asked. */
+  unexpectedDialog?: string;
   /** Loud alert about the capture (a failed redaction above all). Absent when clean. */
   warning?: string;
   cropped?: boolean;
@@ -66,6 +75,7 @@ export class ScreenshotOperation {
       crop: input.crop === undefined ? undefined : Array.isArray(input.crop) ? input.crop : [input.crop],
       expand: input.expand,
       clickBeforeCapture: input.clickBeforeCapture,
+      dismissTeachingTips: input.dismissTeachingTips,
       out: input.out,
       width: input.width,
       height: input.height,

@@ -160,7 +160,22 @@ export class InteractionEncoder {
    * Profile field; `Microsoft.Dynamics.Nav.Service/NSService.cs:OpenConnection`
    * resolution logic.
    */
-  encodeOpenSession(tenantId: string, spaInstanceId: string, profile?: string): EncodedRpcCall {
+  /**
+   * @param company  Company to open the session ON. This is how the web client
+   *   changes company: it does NOT ask a live session to move — it re-enters with
+   *   `?company=<name>`, because a BC session is bound to its company server-side
+   *   at OpenSession. Sending `InvokeSessionAction(ChangeCompany)` to an open
+   *   session was answered with a bare `InvokeCompleted` (no SessionSettingsChanged,
+   *   verified live on devel1) and the data kept coming from the old company, while
+   *   the tool reported the switch as done (bc-saas F-11). Omit for BC's default.
+   *   The value goes into the query with `encodeURIComponent`, never form encoding:
+   *   BC reads a query value LITERALLY, so `CRONUS ES` sent as `CRONUS+ES` is a
+   *   company that does not exist (the same trap as the screenshot deep links).
+   */
+  encodeOpenSession(tenantId: string, spaInstanceId: string, profile?: string, company?: string): EncodedRpcCall {
+    const query = company
+      ? `tenant=${tenantId}&company=${encodeURIComponent(company)}&runinframe=1`
+      : `tenant=${tenantId}&runinframe=1`;
     return {
       method: 'OpenSession',
       params: [{
@@ -179,13 +194,11 @@ export class InteractionEncoder {
         interactionsToInvoke: [{
           interactionName: 'OpenForm',
           skipExtendingSessionLifetime: false,
-          namedParameters: JSON.stringify({
-            query: `tenant=${tenantId}&runinframe=1`,
-          }),
+          namedParameters: JSON.stringify({ query }),
           callbackId: '0',
         }],
         tenantId,
-        company: null,
+        company: company ?? null,
         telemetryClientSessionId: null,
         features: BC_FEATURES,
         profile: profile ?? '',

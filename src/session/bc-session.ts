@@ -94,8 +94,15 @@ export class BCSession {
     return !this.dead && this.ws.isConnected;
   }
 
-  async initialize(tenantId: string): Promise<Result<BCEvent[], ProtocolError>> {
-    const openSessionCall = this.encoder.encodeOpenSession(tenantId, this.ws.spaInstanceId, this.profile);
+  /**
+   * @param company  Open the session ON this company (see encodeOpenSession). The
+   *   company BC actually granted comes back in the response's `CompanyName` and is
+   *   picked up by extractSessionCredentials below — which makes it the one piece of
+   *   SERVER truth about the session's company that this protocol offers, and hence
+   *   the only honest way to confirm a switch.
+   */
+  async initialize(tenantId: string, company?: string): Promise<Result<BCEvent[], ProtocolError>> {
+    const openSessionCall = this.encoder.encodeOpenSession(tenantId, this.ws.spaInstanceId, this.profile, company);
 
     // Capture async Message bursts (e.g. a late license/evaluation dialog that
     // BC pushes as a notification rather than in the synchronous OpenSession
@@ -680,15 +687,26 @@ export class BCSession {
   }
 
   /**
-   * Switch the session's company (SystemAction.ChangeCompany = 500) and reflect the
-   * result on this session, so `companyName` — and everything derived from it
-   * (bc_health, screenshot/report deep-links) — stops reporting the old company.
+   * Ask a LIVE session to change company (SystemAction.ChangeCompany = 500).
    *
-   * Lives here rather than in the operation because SessionManager must replay it
-   * after a reconnect (B2: a recovered session came back on the server-default
-   * company and nothing re-applied the user's choice).
+   * Kept as a best-effort attempt, NOT as the mechanism: verified live on devel1,
+   * BC answers this with a bare `InvokeCompleted` (plus unrelated PropertyChanged)
+   * — no SessionSettingsChanged, no CompanyName, nothing that says it did anything.
+   * A session is bound to its company at OpenSession, which is why the web client
+   * changes company by re-entering with `?company=`. `SessionManager.switchCompany`
+   * does the same and is the real path; this one is only tried first because it is
+   * cheap and, where a build does honour it, avoids a reconnect.
+   *
+   * IT NO LONGER WRITES THE REQUESTED COMPANY INTO THE SESSION. Doing that meant
+   * `companyName`, bc_health and every deep link repeated back the company that had
+   * been ASKED FOR while BC kept serving the old one's data — a silent wrong-company
+   * read, which is worse than an error (bc-saas F-11). The company is now only ever
+   * set from what BC itself reports.
+   *
+   * Returns whether BC confirmed, so the caller can decide what to do next.
    */
-  async changeCompany(companyName: string): Promise<Result<BCEvent[], ProtocolError>> {
+  async changeCompany(companyName: string): Promise<Result<{ events: BCEvent[]; confirmed: boolean }, ProtocolError>> {
+    const before = this.company;
     const result = await this.invoke(
       {
         type: 'SessionAction',
@@ -698,11 +716,12 @@ export class BCSession {
       (e) => e.type === 'InvokeCompleted',
     );
     if (!isOk(result)) return result;
-    this.setCompany(companyName);
-    // Refine with the server-confirmed company when the response carried a
-    // SessionSettingsChanged handler.
+    // The ONLY thing that may move `company`: a SessionSettingsChanged / SessionInit
+    // handler in BC's own response.
     this.applySessionInfo(result.value);
-    return result;
+    const norm = (s: string): string => s.trim().toLowerCase();
+    const confirmed = norm(this.company) === norm(companyName) && norm(before) !== norm(this.company);
+    return ok({ events: result.value, confirmed });
   }
 
   async runReport(reportId: number): Promise<Result<BCEvent[], ProtocolError>> {

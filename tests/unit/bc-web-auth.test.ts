@@ -1,6 +1,9 @@
 // tests/unit/bc-web-auth.test.ts
 import { describe, it, expect } from 'vitest';
-import { deepLinkPage, deepLinkReport, parseSetCookie, waitReady, detectErrorPage } from '../../src/services/bc-web-auth.js';
+import {
+  deepLinkPage, deepLinkReport, parseSetCookie, waitReady, detectErrorPage,
+  detectLoginWall, looksLikeBusinessCentral, detectModalDialog,
+} from '../../src/services/bc-web-auth.js';
 import type { BCConfig } from '../../src/core/config.js';
 
 const config = { baseUrl: 'https://devel1/BC', tenantId: 'default' } as BCConfig;
@@ -106,6 +109,77 @@ describe('detectErrorPage', () => {
   it('does not flag a long page that merely contains the words "go back home"', async () => {
     const p = framePage([{ cls: 'ms-dyn365-fin', text: `Notes\n${'go back home '.repeat(80)}` }]);
     expect(await detectErrorPage(p)).toBeUndefined();
+  });
+});
+
+describe('detectLoginWall', () => {
+  // F-10: only BC's own /SignIn was recognised, so an expired SaaS browser session
+  // landed on Microsoft Entra, was judged "not a login page", and the capture came
+  // back successful — with `authenticated: true` — showing Microsoft's login form.
+  const page = (url: string, dom: 'entra' | 'bc-forms' | null = null) => ({
+    url: () => url,
+    evaluate: () => Promise.resolve(dom),
+  });
+
+  it('recognises the Microsoft Entra sign-in host', async () => {
+    const p = page('https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=...');
+    expect(await detectLoginWall(p)).toBe('entra');
+  });
+
+  it('recognises Entra by its account field when the URL says nothing', async () => {
+    expect(await detectLoginWall(page('https://businesscentral.dynamics.com/', 'entra'))).toBe('entra');
+  });
+
+  it('still recognises BC on-prem forms login', async () => {
+    expect(await detectLoginWall(page('https://devel1/BC/SignIn?ReturnUrl=%2FBC'))).toBe('bc-forms');
+    expect(await detectLoginWall(page('https://devel1/BC/', 'bc-forms'))).toBe('bc-forms');
+  });
+
+  it('reads Entra first when a BC ReturnUrl carrying "SignIn" is inside the Entra URL', async () => {
+    const p = page('https://login.microsoftonline.com/x/oauth2/authorize?redirect_uri=https%3A%2F%2Fdevel1%2FBC%2FSignIn');
+    expect(await detectLoginWall(p)).toBe('entra');
+  });
+
+  it('is quiet on a real BC page', async () => {
+    expect(await detectLoginWall(page('https://devel1/BC/?page=21&tenant=default'))).toBeUndefined();
+  });
+});
+
+describe('looksLikeBusinessCentral', () => {
+  const framePage = (frames: boolean[]) => ({
+    frames: () => frames.map(hit => ({ evaluate: () => Promise.resolve(hit) })),
+  });
+
+  it('is true when any frame carries the client chrome classes', async () => {
+    expect(await looksLikeBusinessCentral(framePage([false, true]))).toBe(true);
+  });
+
+  it('is false when no frame does (a login form, an error host page)', async () => {
+    expect(await looksLikeBusinessCentral(framePage([false, false]))).toBe(false);
+  });
+});
+
+describe('detectModalDialog', () => {
+  // F-9: a bookmark from another table makes BC answer with a modal explaining the
+  // refusal. The capture photographed that modal and reported success.
+  const framePage = (frames: Array<string | null>) => ({
+    frames: () => frames.map(text => ({ evaluate: () => Promise.resolve(text) })),
+  });
+
+  it('returns the dialog text', async () => {
+    const msg = "No se puede utilizar un RecordID de la tabla 'Histórico cab. albarán venta'...";
+    expect(await detectModalDialog(framePage([null, msg]))).toBe(msg);
+  });
+
+  it('is quiet when no dialog is on screen', async () => {
+    expect(await detectModalDialog(framePage([null, null]))).toBeUndefined();
+  });
+
+  it('truncates a very long dialog', async () => {
+    const long = 'x'.repeat(500);
+    const r = await detectModalDialog(framePage([long]));
+    expect(r).toHaveLength(303);
+    expect(r?.endsWith('...')).toBe(true);
   });
 });
 

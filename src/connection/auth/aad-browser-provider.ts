@@ -1,4 +1,4 @@
-import { ok, err, type Result } from '../../core/result.js';
+import { ok, err, isErr, type Result } from '../../core/result.js';
 import { AuthenticationError } from '../../core/errors.js';
 import type { IBCAuthProvider, AuthResult } from './auth-provider.js';
 import type { RawCookie } from './cookies.js';
@@ -24,6 +24,24 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 // CDP cookie shape (Network.getAllCookies).
 interface CdpCookie { name: string; value: string; domain: string; path: string; secure: boolean; httpOnly: boolean; sameSite?: string; }
+
+/** CDP cookies -> the attributed jar the headless browser injection expects. */
+function toRawCookies(cookies: CdpCookie[]): RawCookie[] {
+  return cookies.map((c) => ({
+    name: c.name,
+    value: c.value,
+    domain: c.domain.replace(/^\./, ''),
+    path: c.path || '/',
+    secure: c.secure,
+    httpOnly: c.httpOnly,
+    sameSite: c.sameSite === 'None' ? 'None' : c.sameSite === 'Strict' ? 'Strict' : 'Lax',
+  }));
+}
+
+/** All cookies BC's front door and its backend hosts issued. */
+function bcCookies(cookies: CdpCookie[]): CdpCookie[] {
+  return cookies.filter((c) => c.domain.replace(/^\./, '').endsWith('businesscentral.dynamics.com'));
+}
 
 /**
  * BC Online (SaaS) auth via a real Entra (Azure AD) browser login.
@@ -175,7 +193,7 @@ export class AADBrowserAuthProvider implements IBCAuthProvider {
       // by the tab path and de-dupe by name. The attributed jar (browser injection
       // for screenshots/reports) keeps the whole BC set (front door + backend).
       const all = await cdp.send('Network.getAllCookies') as { cookies: CdpCookie[] };
-      const bcAll = all.cookies.filter((c) => c.domain.replace(/^\./, '').endsWith('businesscentral.dynamics.com'));
+      const bcAll = bcCookies(all.cookies);
       const tabCookies = bcAll.filter((c) =>
         c.domain.replace(/^\./, '') === backendHost &&
         (c.path === tabPath || tabPath.startsWith(c.path.replace(/\/$/, '') + '/') || c.path === '/'),
@@ -188,15 +206,7 @@ export class AADBrowserAuthProvider implements IBCAuthProvider {
         return err(new AuthenticationError(`AAD login succeeded but no backend-host cookies were found for ${backendHost} (tab ${tabPath}).`, { baseUrl: this.config.baseUrl }));
       }
       this.wsCookieHeader = backendCookies.map((c) => `${c.name}=${c.value}`).join('; ');
-      this.cookieJar = bcAll.map((c) => ({
-        name: c.name,
-        value: c.value,
-        domain: c.domain.replace(/^\./, ''),
-        path: c.path || '/',
-        secure: c.secure,
-        httpOnly: c.httpOnly,
-        sameSite: c.sameSite === 'None' ? 'None' : c.sameSite === 'Strict' ? 'Strict' : 'Lax',
-      }));
+      this.cookieJar = toRawCookies(bcAll);
 
       // Match the browser's User-Agent on the WS upgrade — the backend gateway
       // 500s on a non-browser UA / missing Origin (it enforces NAVAllowedAncestor).
@@ -224,16 +234,21 @@ export class AADBrowserAuthProvider implements IBCAuthProvider {
   /**
    * Poll-driven Entra login. Idempotent per iteration: fills whatever field is
    * currently visible, so it walks email -> password -> TOTP -> "stay signed in"
-   * across Entra's multi-page flow without hard-coding the transitions. Returns
-   * true once the BC SPA is loaded (or the WS was already observed).
+   * across Entra's multi-page flow without hard-coding the transitions.
+   *
+   * `done` is the CALLER's definition of success, because the two callers need
+   * different ones: opening a session waits for the SPA's WebSocket URL, while
+   * refreshing the cookie jar only needs BC's front-door session ticket (the SPA
+   * readiness probe never trips in that second tab). It may be async so the check
+   * can query the browser.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async driveLogin(page: any, headless: boolean, wsSeen: () => boolean): Promise<boolean> {
+  private async driveLogin(page: any, headless: boolean, done: () => boolean | Promise<boolean>): Promise<boolean> {
     const deadline = Date.now() + (headless ? this.config.loginTimeoutMs : Math.max(this.config.loginTimeoutMs, 300000));
     let totp: ((secret: string) => string) | null = null;
 
     while (Date.now() < deadline) {
-      if (wsSeen()) return true;
+      if (await done()) return true;
       const url: string = page.url();
       const onBC = /businesscentral\.dynamics\.com/i.test(url);
       const onEntra = /login\.(microsoftonline|live|windows)\.(com|net)/i.test(url) || /microsoftonline/i.test(url);
@@ -255,7 +270,7 @@ export class AADBrowserAuthProvider implements IBCAuthProvider {
 
       await sleep(1500);
     }
-    return wsSeen();
+    return done();
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -353,6 +368,79 @@ export class AADBrowserAuthProvider implements IBCAuthProvider {
 
   isAuthenticated(): boolean {
     return this.authenticated;
+  }
+
+  /**
+   * Mint a fresh browser cookie jar WITHOUT disturbing the WebSocket.
+   *
+   * The two sessions expire independently: the injected jar a capture uses is a
+   * set of cookies with their own lifetime, while the WS is an already-established
+   * socket attached to a specific BC tab. When the jar expires, captures bounce to
+   * Entra while every WS tool keeps working (bc-saas F-10) — so the repair must be
+   * equally independent.
+   *
+   * The obvious repair, `invalidate()` + `authenticate()`, is exactly the wrong
+   * one: it closes the kept-alive browser, BC tears down that tab's session
+   * server-side, and the live WS dies. So this opens a SEPARATE tab in the same
+   * browser instead. The Entra SSO state lives in the on-disk profile, shared by
+   * every tab, so the new tab re-authenticates silently and its cookies are the
+   * fresh front-door ones a capture needs. The tab is closed afterwards; the tab
+   * holding the WS is never touched.
+   */
+  async refreshCookieJar(): Promise<RawCookie[]> {
+    if (!this.browser) {
+      // Nothing kept alive (bootstrap-only run, or never authenticated): a full
+      // authenticate() is fine precisely because there is no live tab to lose.
+      const r = await this.authenticate();
+      if (isErr(r)) throw new Error(`Could not renew the BC browser session: ${r.error.message}`);
+      return this.cookieJar;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let page: any;
+    try {
+      page = await this.browser.newPage();
+      const cdp = await page.target().createCDPSession();
+      await cdp.send('Network.enable').catch(() => undefined);
+      this.logger.info('[aad] refreshing the browser cookie jar in a separate tab (WS tab untouched)');
+      await page.goto(this.config.baseUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => undefined);
+
+      // Success here is "we are through BC's front door and it has issued a session
+      // ticket" — NOT the SPA being fully up. `spaReady` is the wrong bar for this
+      // tab: measured on the live sandbox, a second tab never tripped it and the
+      // refresh burned the whole 120s login budget and then failed, on an
+      // environment that was perfectly healthy. The ticket is also exactly what the
+      // capture browser needs, since it opens its own deep link afterwards.
+      let jar: RawCookie[] = [];
+      // Two CONSECUTIVE good polls, not one. A dead ticket usually redirects to Entra
+      // during the goto, but the SPA can also decide to bounce a moment later — and a
+      // single poll landing in that window would accept the stale cookies and hand
+      // back a jar that fails exactly the same way it did before. The polls are
+      // 1.5s apart (driveLogin's own cadence), which is enough to see the bounce.
+      let goodPolls = 0;
+      const reached = await this.driveLogin(page, true, async () => {
+        if (!/businesscentral\.dynamics\.com/i.test(String(page.url()))) { goodPolls = 0; return false; }
+        const all = await cdp.send('Network.getAllCookies').catch(() => null) as { cookies: CdpCookie[] } | null;
+        if (!all) { goodPolls = 0; return false; }
+        const bc = bcCookies(all.cookies);
+        if (!bc.some((c) => c.name === '.AspNetCore.Cookies')) { goodPolls = 0; return false; }
+        jar = toRawCookies(bc);
+        return ++goodPolls >= 2;
+      });
+      if (!reached || jar.length === 0) {
+        throw new Error(
+          'the Entra sign-in did not complete unattended. Run `npm run login:aad` once (it opens a real window '
+          + 'so you can pass MFA) to warm the persistent profile, then retry.',
+        );
+      }
+      this.cookieJar = jar;
+      this.logger.info(`[aad] cookie jar refreshed (${jar.length} cookies)`);
+      return jar;
+    } catch (e) {
+      throw new Error(`Could not renew the BC browser session: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      await page?.close().catch(() => undefined);
+    }
   }
 
   invalidate(): void {

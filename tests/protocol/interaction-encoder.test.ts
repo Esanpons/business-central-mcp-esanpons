@@ -180,6 +180,38 @@ describe('InteractionEncoder', () => {
     expect(tz.dstPeriodStart === null || typeof tz.dstPeriodStart === 'string').toBe(true);
   });
 
+  // F-11: a BC session is bound to its company at OpenSession. Asking a live
+  // session to change company is answered with a bare InvokeCompleted and the data
+  // keeps coming from the old company (verified live on devel1), so the switch has
+  // to be made HERE — which is also what the web client's `?company=` does.
+  describe('encodeOpenSession company', () => {
+    const openForm = (call: ReturnType<InteractionEncoder['encodeOpenSession']>): string => {
+      const params = call.params[0] as Record<string, unknown>;
+      const inv = (params.interactionsToInvoke as Record<string, unknown>[])[0]!;
+      return (JSON.parse(inv.namedParameters as string) as { query: string }).query;
+    };
+
+    it('opens on BC\'s default company when none is given', () => {
+      const call = encoder.encodeOpenSession('default', 'spa-1');
+      expect((call.params[0] as Record<string, unknown>).company).toBeNull();
+      expect(openForm(call)).toBe('tenant=default&runinframe=1');
+    });
+
+    it('binds the session to the requested company, in the param AND the query', () => {
+      const call = encoder.encodeOpenSession('default', 'spa-1', '', 'JBC JAPAN');
+      expect((call.params[0] as Record<string, unknown>).company).toBe('JBC JAPAN');
+      expect(openForm(call)).toBe('tenant=default&company=JBC%20JAPAN&runinframe=1');
+    });
+
+    // Same trap as the screenshot deep links: BC reads a query value LITERALLY, so
+    // form encoding would look up a company called "CRONUS+ES", which does not exist.
+    it('encodes a space as %20, never as +', () => {
+      const q = openForm(encoder.encodeOpenSession('default', 'spa-1', '', 'CRONUS ES'));
+      expect(q).toContain('company=CRONUS%20ES');
+      expect(q).not.toContain('+');
+    });
+  });
+
   describe('encodeOpenSession profile', () => {
     it('emits empty profile by default', () => {
       const enc = new InteractionEncoder('27.0.0.0');

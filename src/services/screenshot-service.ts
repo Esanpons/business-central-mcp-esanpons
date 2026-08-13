@@ -1,12 +1,13 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import type { BCConfig } from '../core/config.js';
 import type { Logger } from '../core/logger.js';
 import type { IBCAuthProvider } from '../connection/auth/auth-provider.js';
+import type { RawCookie } from '../connection/auth/cookies.js';
 import { launchHeadless } from './browser.js';
 import {
-  ensureAuthJar, deepLinkPage, onSignIn, waitReady,
-  fallbackFormsProvider, recoverIfOnSignIn, detectErrorPage,
+  ensureAuthJar, deepLinkPage, waitReady, detectLoginWall, looksLikeBusinessCentral,
+  fallbackFormsProvider, recoverIfLoggedOut, detectErrorPage, detectModalDialog,
 } from './bc-web-auth.js';
 import type { Metrics } from './metrics.js';
 
@@ -65,6 +66,15 @@ export interface CaptureInput {
    * or aria-label, exact first then prefix, across every frame.
    */
   clickBeforeCapture?: string[];
+  /**
+   * Close BC's "About this page" teaching tips before capturing (default true).
+   * Pages with AboutTitle/AboutText pop their blue callout on first visit, and a
+   * capture browser is ALWAYS a first visit (the session never records that it was
+   * seen), so it covered the bottom-left corner of every image in a manual — in
+   * one case hiding the very field the step was about (F-7). Set false to keep it,
+   * e.g. when documenting the tip itself.
+   */
+  dismissTeachingTips?: boolean;
   out?: string;
   width?: number;
   height?: number;
@@ -86,6 +96,20 @@ export interface CaptureResult {
    * is reported separately from `annotations` and also raised in `warning`.
    */
   redactions?: Array<{ target: string; found: boolean }>;
+  /**
+   * Per-`clickBeforeCapture` outcome, in the order requested. A click that found
+   * nothing — or landed on a DISABLED control — used to be written to the log and
+   * dropped, so the capture came back "successful" showing a screen where the
+   * action never happened (F-6: the row BC had selected was already exempt, so the
+   * button was greyed out and the dialog never opened).
+   */
+  clicks?: Array<{ target: string; clicked: boolean; reason?: 'not found' | 'disabled' }>;
+  /**
+   * Text of a modal dialog that appeared WITHOUT being asked for (i.e. no
+   * clickBeforeCapture). Usually BC explaining why it refused what the deep link
+   * asked for, in which case the PNG shows that message instead of the page.
+   */
+  unexpectedDialog?: string;
   /** Loud, human-readable alert when something is wrong with the capture (redaction misses first). */
   warning?: string;
   cropped?: boolean;
@@ -191,9 +215,16 @@ export class ScreenshotService {
     await p.setCookie(...cookies);
     await p.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
 
-    // Fallback: if cookie injection didn't take, log in once via the bounced
-    // SignIn form (its ReturnUrl is our deep link, so BC redirects right back).
-    await recoverIfOnSignIn(p, this.auth(), this.config, this.logger, { tag: 'screenshot' });
+    // The browser session has its OWN lifetime, independent of the WebSocket's:
+    // on-prem the injected jar may not have taken, on SaaS it simply expires after
+    // an hour and the deep link bounces to Microsoft Entra. Recover both cases —
+    // and when it cannot be recovered unattended, this THROWS with what to do,
+    // instead of letting us photograph a login form and call it a success (F-10).
+    await recoverIfLoggedOut(p, this.auth(), this.config, this.logger, {
+      tag: 'screenshot',
+      returnTo: url,
+      applyCookies: async (jar: RawCookie[]) => { await p.setCookie(...jar); },
+    });
 
     const spaReady = await waitReady(p, { bailOnErrorPage: true });
 
@@ -211,6 +242,17 @@ export class ScreenshotService {
       );
     }
 
+    // F-7: close the "About this page" callout before anything is measured or
+    // clicked — it floats over the bottom-left corner and would otherwise cover
+    // page content in every image of a manual.
+    if (input.dismissTeachingTips !== false) {
+      const dismissed = await this.dismissTeachingTips(p);
+      if (dismissed) {
+        this.logger.info(`[screenshot] dismissed ${dismissed} teaching tip(s)`);
+        await sleep(400);
+      }
+    }
+
     // Explicit reveal: expand all collapsed FastTabs + click all "Show more" up front.
     if (input.expand) {
       await this.revealAll(p);
@@ -220,10 +262,17 @@ export class ScreenshotService {
     // G6: explicit toggles. They run after the `expand` reveal pass (so a caption
     // that pass already opened is not toggled shut again) but BEFORE the automatic
     // reveal-when-needed retry below, which only fires if a target is still missing.
+    let clicks: CaptureResult['clicks'];
     if (input.clickBeforeCapture?.length) {
+      clicks = [];
       for (const caption of input.clickBeforeCapture) {
         const hit = await this.clickByCaption(p, caption);
-        this.logger.info(`[screenshot] clickBeforeCapture "${caption}" -> ${hit ? 'clicked' : 'NOT FOUND'}`);
+        this.logger.info(`[screenshot] clickBeforeCapture "${caption}" -> ${hit}`);
+        clicks.push({
+          target: caption,
+          clicked: hit === 'clicked',
+          ...(hit === 'clicked' ? {} : { reason: hit }),
+        });
         await sleep(600);
       }
     }
@@ -237,6 +286,13 @@ export class ScreenshotService {
       ...redactTargets.map((t) => ({ target: t, style: 'blur' as const })),
     ];
     const cropTargets = input.crop ?? [];
+
+    // F-9: a dialog that appeared on its own. Checked BEFORE the annotation pass,
+    // which can legitimately open things, and only meaningful when the caller did
+    // NOT ask for one: a manual documenting a dialog passes clickBeforeCapture.
+    const unexpectedDialog = input.clickBeforeCapture?.length
+      ? undefined
+      : await detectModalDialog(p);
 
     let annotations: CaptureResult['annotations'];
     let redactions: CaptureResult['redactions'];
@@ -265,22 +321,78 @@ export class ScreenshotService {
       await sleep(300); // let any scroll-into-view settle before the capture
     }
 
-    const file = this.resolveOut(input.out, pageId);
+    // Capture to MEMORY, not to the destination file.
+    //
+    // `p.screenshot({ path })` writes straight to the final path, so by the time
+    // anything could be checked the previous image was already gone. That is what
+    // turned an expired browser session into destroyed work: re-taking one figure
+    // of a manual replaced the good PNG with a picture of Microsoft's login form,
+    // in a folder outside git, and reported success (F-10). The file is now written
+    // only once the capture has been judged good.
     const buf: Uint8Array = await p.screenshot({
-      path: file,
       ...(clip ? { clip: { x: clip.x, y: clip.y, width: clip.w, height: clip.h } } : { fullPage: input.fullPage ?? false }),
     });
     const pageTitle = await p.title();
-    const authenticated = !(await onSignIn(p));
 
-    const missedRedactions = (redactions ?? []).filter((r) => !r.found).map((r) => r.target);
-    let warning: string | undefined;
-    if (missedRedactions.length) {
-      warning = `REDACTION FAILED: [${missedRedactions.join(', ')}] matched no control, so ${file} may still `
-        + 'SHOW those values. Do not share this image. Check the caption exactly as the page renders it '
-        + '(locale-dependent), or crop the area out.';
-      this.logger.error(`[screenshot] ${warning}`);
+    // A login wall reached at the END means the session died mid-capture (or the
+    // recovery above silently bounced). Never write that image.
+    const wall = await detectLoginWall(p);
+    if (wall) {
+      throw new Error(
+        `The browser session expired while capturing page ${pageId}: the page ended on the `
+        + `${wall === 'entra' ? 'Microsoft Entra' : 'Business Central'} sign-in form (title: "${pageTitle}"). `
+        + 'Nothing was written, so any previous image at that path is intact. '
+        + (wall === 'entra' ? 'Run `npm run login:aad` once and retry.' : 'Check BC_USERNAME / BC_PASSWORD and retry.'),
+      );
     }
+    const authenticated = true; // no login wall: past every sign-in form.
+
+    const file = this.resolveOut(input.out, pageId);
+
+    // Warnings, most damaging first. Everything here is a fact about the image that
+    // the caller cannot see from `path` alone — which is the whole lesson of F-9/F-10:
+    // a result that looks clean is taken at face value and written into a manual.
+    const warnings: string[] = [];
+    const missedRedactions = (redactions ?? []).filter((r) => !r.found).map((r) => r.target);
+    if (missedRedactions.length) {
+      warnings.push(
+        `REDACTION FAILED: [${missedRedactions.join(', ')}] matched no control, so ${file} may still `
+        + 'SHOW those values. Do not share this image. Check the caption exactly as the page renders it '
+        + '(locale-dependent), or crop the area out.',
+      );
+    }
+    const failedClicks = (clicks ?? []).filter((c) => !c.clicked);
+    if (failedClicks.length) {
+      warnings.push(
+        `CLICK DID NOTHING: ${failedClicks.map((c) => `"${c.target}" (${c.reason})`).join(', ')}. `
+        + 'The image shows the page WITHOUT that step applied. A "disabled" control usually means the action does '
+        + 'not apply to the row BC has selected — in a list, position it first with `bookmark`. A "not found" one '
+        + 'means the caption does not match what the page renders (it is locale-dependent).',
+      );
+    }
+    if (unexpectedDialog) {
+      warnings.push(
+        `A DIALOG NOBODY ASKED FOR is on screen, so the image shows it instead of the page: "${unexpectedDialog}". `
+        + 'This is usually BC explaining why it refused the deep link — a bookmark from another table is the common '
+        + 'case (a bookmark only addresses the table its own list is bound to).',
+      );
+    }
+    if (clip && (clip.w < 80 || clip.h < 40)) {
+      warnings.push(
+        `The crop is tiny (${Math.round(clip.w)}x${Math.round(clip.h)}px): the captions matched a label but little `
+        + 'or none of its value. Use `highlight` without `crop`, or crop to a group/FastTab caption instead.',
+      );
+    }
+    if (!(await looksLikeBusinessCentral(p))) {
+      warnings.push(
+        `The captured page does not look like the Business Central web client (title: "${pageTitle}"). `
+        + 'Open the PNG before using it.',
+      );
+    }
+    const warning = warnings.length ? warnings.join(' | ') : undefined;
+    if (warning) this.logger.error(`[screenshot] ${warning}`);
+
+    writeFileSync(file, buf);
 
     return {
       path: file,
@@ -290,6 +402,8 @@ export class ScreenshotService {
       spaReady,
       annotations,
       redactions,
+      ...(clicks ? { clicks } : {}),
+      ...(unexpectedDialog ? { unexpectedDialog } : {}),
       ...(warning ? { warning } : {}),
       cropped: !!clip,
       width,
@@ -394,6 +508,18 @@ export class ScreenshotService {
         return { found: true, rect: { x: r.left, y: r.top, w: r.width, h: r.height } };
       });
 
+      // A crop must enclose the FIELD, not its label.
+      //
+      // Matching a caption finds the element whose text IS that caption — the
+      // label. Its box is exactly as wide as the words, and the value sits in a
+      // sibling, so cropping to it produced a 3 KB image of the label with the
+      // data missing (F-8). `highlight` gets away with the same rect because it
+      // only draws on top; a crop makes that rect the entire picture.
+      //
+      // So climb from the label to the nearest ancestor that also contains an
+      // input/value element, bounded by a size guard so it never swallows the
+      // whole form. `.map` with an inline arrow only — no named nested functions
+      // (tsx/esbuild wraps those in an undefined `__name` helper).
       const crops = spec.cropTargets.map((t) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         let el: any = null;
@@ -406,7 +532,28 @@ export class ScreenshotService {
           if (all[i].childElementCount === 0 && tc && tc.trim() === t) { el = all[i].closest('[class]') || all[i]; break; }
         }
         if (!el) return null;
-        const r = el.getBoundingClientRect();
+        const vw = doc.documentElement.clientWidth || 1600;
+        const vh = doc.documentElement.clientHeight || 1000;
+        // Already a control that holds its own value (an aria-labelled input, a
+        // group): nothing to climb to.
+        const VALUE_SEL = 'input,textarea,select,[role="textbox"],[role="combobox"],[role="checkbox"],[class*="value"]';
+        let box = el;
+        if (!el.querySelector || !el.querySelector(VALUE_SEL)) {
+          // Climb only to an ancestor that ACTUALLY holds a value control, and only
+          // if it is still field-sized. A caption with no value next to it — a list
+          // COLUMN HEADER, a group title — has no such ancestor, and climbing anyway
+          // returned a full-width strip of the toolbar. In that case the label's own
+          // box is the honest answer, and the "crop is tiny" warning tells the caller
+          // to crop to something else.
+          let up = el.parentElement;
+          for (let step = 0; step < 4 && up; step++) {
+            const ur = up.getBoundingClientRect();
+            if (ur.width > vw * 0.7 || ur.height > vh * 0.5) break;
+            if (up.querySelector(VALUE_SEL)) { box = up; break; }
+            up = up.parentElement;
+          }
+        }
+        const r = box.getBoundingClientRect();
         return r.width && r.height ? { x: r.left, y: r.top, w: r.width, h: r.height } : null;
       });
 
@@ -416,7 +563,24 @@ export class ScreenshotService {
     const perFrame: Array<{ drawn: Array<{ found: boolean; rect: Rect | null }>; crops: Array<Rect | null> }> = [];
     for (const f of p.frames()) {
       try {
-        perFrame.push(await f.evaluate(inFrame, { annotations, cropTargets, scrollTarget }));
+        const res = await f.evaluate(inFrame, { annotations, cropTargets, scrollTarget });
+        // Translate the crop rects out of the FRAME's coordinate system into the
+        // page's.
+        //
+        // This is what actually broke `crop` (F-8). BC renders its content inside an
+        // iframe, so getBoundingClientRect returns coordinates relative to that
+        // frame, while `page.screenshot({ clip })` clips in TOP-LEVEL coordinates —
+        // the two differ by wherever the iframe sits, i.e. the whole BC chrome at
+        // the top of the window. The clip therefore landed a strip too high, which
+        // is exactly what was reported: a 3 KB PNG showing a caption and half of the
+        // badge below it. `highlight` was unaffected because its callouts are drawn
+        // INSIDE the frame, in the same coordinates it measured — which is why the
+        // suggested workaround (highlight without crop) worked.
+        const off = await this.frameOffset(p, f);
+        perFrame.push({
+          drawn: res.drawn,
+          crops: res.crops.map((r: Rect | null) => (r ? { x: r.x + off.x, y: r.y + off.y, w: r.w, h: r.h } : null)),
+        });
       } catch (e) {
         // Cross-origin / empty frames are expected — keep this at debug level.
         this.logger.debug('screenshot', `annotate frame skipped: ${e instanceof Error ? e.message : String(e)}`);
@@ -446,6 +610,25 @@ export class ScreenshotService {
     return { annotations: annResults, clip };
   }
 
+  /**
+   * Where a frame sits in the top-level page, so a rect measured inside it can be
+   * used as a screenshot clip. The main frame is the origin. `boundingBox()` on the
+   * frame's own <iframe> element is already page-absolute, so nested frames need no
+   * accumulation. Returns {0,0} if the frame is detached mid-capture.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async frameOffset(p: any, f: any): Promise<{ x: number; y: number }> {
+    try {
+      if (f === p.mainFrame()) return { x: 0, y: 0 };
+      const el = await f.frameElement();
+      if (!el) return { x: 0, y: 0 };
+      const box = await el.boundingBox();
+      return box ? { x: box.x, y: box.y } : { x: 0, y: 0 };
+    } catch {
+      return { x: 0, y: 0 };
+    }
+  }
+
   // ---------- reveal hidden content (collapsed FastTabs + "Show more") ----------
   // Verified live against BC27 (devel1):
   //  - A collapsible FastTab/group header is `span.ms-nav-columns-caption[aria-expanded]`
@@ -461,39 +644,109 @@ export class ScreenshotService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   /**
    * G6: click the first VISIBLE control whose visible text or aria-label matches
-   * `caption` (exact, then prefix), across every frame. Returns true when something
-   * was clicked. The in-browser callback holds NO named nested functions — tsx/esbuild
-   * wraps those in a `__name` helper that does not exist in the page.
+   * `caption` (exact, then prefix), across every frame.
+   *
+   * Returns WHAT HAPPENED, not just true/false. A disabled control has to be told
+   * apart from a missing one: BC greys out an action that does not apply to the
+   * selected row, `.click()` on it does nothing, no error is raised, and the capture
+   * came out looking like the step had been taken (F-6). Now the caller reports it.
+   *
+   * The in-browser callback holds NO named nested functions — tsx/esbuild wraps
+   * those in a `__name` helper that does not exist in the page.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async clickByCaption(p: any, caption: string): Promise<boolean> {
+  private async clickByCaption(p: any, caption: string): Promise<'clicked' | 'disabled' | 'not found'> {
+    let sawDisabled = false;
     for (const f of p.frames()) {
       try {
-        const hit: boolean = await f.evaluate((want: string) => {
+        const hit: string = await f.evaluate((want: string) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const doc = (globalThis as any).document;
           const els = doc.querySelectorAll('button,[role="button"],a,[aria-expanded],[class*="caption"],[class*="header"],summary');
           const norm = (s: string): string => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
           const target = norm(want);
-          let prefixHit: { click: () => void } | null = null;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          let prefixHit: any = null;
+          let disabled = false;
           for (let i = 0; i < els.length; i++) {
             const el = els[i];
             const visible = el.offsetParent !== null || (el.getClientRects && el.getClientRects().length > 0);
             if (!visible) continue;
             const text = norm(el.textContent || '');
             const label = norm(el.getAttribute('aria-label') || '');
-            if (text === target || label === target) { el.click(); return true; }
-            if (!prefixHit && (text.indexOf(target) === 0 || label.indexOf(target) === 0)) prefixHit = el;
+            const exact = text === target || label === target;
+            const prefix = text.indexOf(target) === 0 || label.indexOf(target) === 0;
+            if (!exact && !prefix) continue;
+            // BC marks an inapplicable action with aria-disabled (and/or the
+            // native attribute on a <button>); its class also carries "disabled".
+            const off = el.getAttribute('aria-disabled') === 'true'
+              || el.hasAttribute('disabled')
+              || /(^|[\s-])disabled([\s-]|$)/i.test(String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className || ''));
+            if (off) { disabled = true; continue; }
+            if (exact) { el.click(); return 'clicked'; }
+            if (!prefixHit) prefixHit = el;
           }
-          if (prefixHit) { prefixHit.click(); return true; }
-          return false;
+          if (prefixHit) { prefixHit.click(); return 'clicked'; }
+          return disabled ? 'disabled' : 'not found';
         }, caption);
-        if (hit) return true;
+        if (hit === 'clicked') return 'clicked';
+        if (hit === 'disabled') sawDisabled = true;
       } catch {
         // cross-origin / detached frame
       }
     }
-    return false;
+    return sawDisabled ? 'disabled' : 'not found';
+  }
+
+  /**
+   * F-7: close BC's "About this page" callouts.
+   *
+   * Pages with AboutTitle/AboutText show a blue teaching bubble on first visit, and
+   * a capture browser is always a first visit, so it appeared in EVERY image and
+   * covered the bottom-left corner (in one manual it hid the section title and a
+   * field the step was about). It cannot be closed with clickBeforeCapture: the
+   * cross carries no accessible caption to match.
+   *
+   * The close button is therefore found structurally — a close-ish control INSIDE a
+   * teaching/callout container — never by text, which would be locale-bound, and
+   * never loose on the page, which could close something the capture needs.
+   * Returns how many were dismissed.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async dismissTeachingTips(p: any): Promise<number> {
+    let total = 0;
+    for (const f of p.frames()) {
+      try {
+        total += await f.evaluate(() => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const doc = (globalThis as any).document;
+          const containers = doc.querySelectorAll(
+            '[class*="teaching"],[class*="coachmark"],[class*="callout"],[class*="about"],[class*="Teaching"],[class*="Callout"]',
+          );
+          let n = 0;
+          for (let i = 0; i < containers.length; i++) {
+            const box = containers[i];
+            const visible = box.offsetParent !== null || (box.getClientRects && box.getClientRects().length > 0);
+            if (!visible) continue;
+            const closers = box.querySelectorAll(
+              'button[class*="close"],button[class*="Close"],[class*="close"][role="button"],[aria-label*="lose"],[aria-label*="errar"],[aria-label*="ancar"],[title*="lose"]',
+            );
+            for (let k = 0; k < closers.length; k++) {
+              const c = closers[k];
+              const cv = c.offsetParent !== null || (c.getClientRects && c.getClientRects().length > 0);
+              if (!cv) continue;
+              c.click();
+              n++;
+              break;
+            }
+          }
+          return n;
+        });
+      } catch {
+        // cross-origin / detached frame
+      }
+    }
+    return total;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -13,9 +13,12 @@ function mockSession(company = 'CRONUS', alive = true) {
     isInitialized: true,
     companyName: company,
     close: vi.fn(),
+    closeGracefully: vi.fn(async () => undefined),
     invoke: vi.fn(),
     openFormIds: new Set<string>(),
-    changeCompany: vi.fn(async (name: string) => { s.companyName = name; return ok([]); }),
+    // The live-session action is now a FALLBACK and reports whether BC confirmed;
+    // the real switch happens at OpenSession (see the switchCompany tests below).
+    changeCompany: vi.fn(async (name: string) => { s.companyName = name; return ok({ events: [], confirmed: true }); }),
   };
   return s;
 }
@@ -60,7 +63,12 @@ describe('SessionManager recovery', () => {
     await expect(mgr.getSession()).rejects.toThrow(SessionLostError);
 
     // The recreated session must be put back on the chosen company, not left on
-    // whatever the server defaults to.
+    // whatever the server defaults to — and it is now OPENED on it, because that is
+    // the only mechanism BC honours.
+    expect(factory.create).toHaveBeenLastCalledWith('CRONUS ES');
+    // The mock factory ignores the argument, so the fallback still runs here. That
+    // is the point of keeping it: a build that opens on a different company gets one
+    // cheap attempt before the switch is declared failed.
     expect(fresh.changeCompany).toHaveBeenCalledWith('CRONUS ES');
     expect(mgr.currentSession?.companyName).toBe('CRONUS ES');
   });
@@ -146,6 +154,60 @@ describe('SessionManager recovery', () => {
     expect(await recovering).toBeInstanceOf(SessionLostError);
     expect(mgr.currentSession).toBe(fresh);
     expect(mgr.currentSession?.companyName).toBe('CRONUS ES');
+  });
+
+  // F-11. bc_switch_company used to send the live-session ChangeCompany action,
+  // write the REQUESTED name into the session and report that back. BC answers that
+  // action with a bare InvokeCompleted (verified live on devel1) and goes on serving
+  // the old company's data, so the tool announced a switch that never happened.
+  describe('switchCompany', () => {
+    it('re-opens the session ON the company and reports what BC granted', async () => {
+      const first = mockSession('CRONUS_04', true);
+      const second = mockSession('JBC JAPAN', true);
+      let handed = 0;
+      const factory = { create: vi.fn(async () => ok(handed++ === 0 ? first : second)) };
+      const repo = mockRepo();
+      const mgr = new TestSessionManager(factory as never, repo as never, silentLogger as never);
+
+      await mgr.getSession();
+      const r = await mgr.switchCompany('JBC JAPAN');
+
+      expect(factory.create).toHaveBeenLastCalledWith('JBC JAPAN');
+      expect(first.closeGracefully).toHaveBeenCalled();      // the old session is gone
+      expect(repo.clearAll).toHaveBeenCalled();              // its page contexts too
+      expect(mgr.needsServiceRebuild).toBe(true);            // services point at a dead session
+      expect(r).toEqual({
+        previousCompany: 'CRONUS_04',
+        newCompany: 'JBC JAPAN',
+        invalidatedPageContextIds: ['ctx:1', 'ctx:2'],
+      });
+      expect(mgr.currentSession).toBe(second);
+    });
+
+    it('throws when BC grants a DIFFERENT company instead of reporting success', async () => {
+      const first = mockSession('CRONUS_04', true);
+      // BC ignored the request and opened on the default company.
+      const second = mockSession('CRONUS_04', true);
+      second.changeCompany = vi.fn(async () => ok({ events: [], confirmed: false }));
+      let handed = 0;
+      const factory = { create: vi.fn(async () => ok(handed++ === 0 ? first : second)) };
+      const mgr = new TestSessionManager(factory as never, mockRepo() as never, silentLogger as never);
+
+      await mgr.getSession();
+      await expect(mgr.switchCompany('NoSuchCompany')).rejects.toThrow(/did not switch to "NoSuchCompany"/);
+    });
+
+    it('matches the company name case- and whitespace-insensitively, as BC does', async () => {
+      const first = mockSession('CRONUS_04', true);
+      const second = mockSession('JBC Japan', true);
+      let handed = 0;
+      const factory = { create: vi.fn(async () => ok(handed++ === 0 ? first : second)) };
+      const mgr = new TestSessionManager(factory as never, mockRepo() as never, silentLogger as never);
+
+      await mgr.getSession();
+      const r = await mgr.switchCompany('  jbc japan ');
+      expect(r.newCompany).toBe('JBC Japan');
+    });
   });
 
   it('first-connect failure surfaces the underlying reason, not a bare Error', async () => {

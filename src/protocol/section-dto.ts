@@ -362,10 +362,14 @@ export function buildSection(ctx: PageContext, sectionId: string): Section | nul
 
 const SECTION_KIND_ORDER: Record<SectionKind, number> = {
   header: 0,
-  lines: 1,
-  subpage: 2,
-  factbox: 3,
-  requestPage: 4,
+  // Right after the header: while a dialog is open it is the only thing BC will
+  // accept input on, so it belongs near the top — but NOT at position 0, because
+  // existing callers read sections[0] as "the header" and a dialog is transient.
+  dialog: 1,
+  lines: 2,
+  subpage: 3,
+  factbox: 4,
+  requestPage: 5,
 };
 
 /**

@@ -97,36 +97,144 @@ export function fallbackFormsProvider(config: BCConfig, logger: Logger): IBCAuth
 }
 
 /**
- * Shared SignIn-bounce recovery: when cookie injection lands on the login page,
- * the injected jar is stale server-side. Drop it (so the next capture AND the
- * next WS reconnect, if the provider is shared, re-authenticate), log in once
- * in-page, and optionally re-navigate to the original deep link. Returns true
- * when a bounce was detected and recovered.
+ * Which login wall the browser is sitting on, or undefined when it is past them.
+ *
+ * TWO walls exist and only one used to be recognised. `bc-forms` is BC's own
+ * on-prem `/SignIn` page; `entra` is Microsoft's `login.microsoftonline.com`,
+ * which is what a SaaS capture bounces to when the injected cookie jar has
+ * expired. Matching only the first one is what made an expired SaaS session
+ * capture a PNG of Microsoft's login form and report it as a success, with
+ * `authenticated: true`, on top of the good image (bc-saas F-10).
+ */
+export type LoginWall = 'bc-forms' | 'entra';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function detectLoginWall(p: any): Promise<LoginWall | undefined> {
+  const url = String(p.url?.() ?? '');
+  // Entra's hosts and its OAuth/OIDC endpoints. Checked BEFORE the BC one because
+  // an Entra return URL can carry the BC deep link (SignIn included) inside it.
+  if (/login\.(microsoftonline|live|windows|microsoft)\.(com|net)|\/oauth2\/|\/common\/login/i.test(url)) return 'entra';
+  if (url.includes('SignIn')) return 'bc-forms';
+  const inDom = await p
+    .evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const doc = (globalThis as any).document;
+      // `loginfmt` is the Entra account field; `#idSIButton9` its Next/Sign-in
+      // button. Both survive Entra's redesigns and neither exists on a BC page.
+      if (doc.querySelector('input[name=loginfmt],#idSIButton9,#idA_PWD_ForgotPassword')) return 'entra';
+      if (doc.querySelector('#UserName,#Password')) return 'bc-forms';
+      return null;
+    })
+    .catch(() => null);
+  return inDom === 'entra' || inDom === 'bc-forms' ? inDom : undefined;
+}
+
+/**
+ * True when the page is past every login wall. Kept under its old name because
+ * both callers use it for their `authenticated` field — which is exactly why it
+ * had to learn about Entra: it was computed as `!(await onSignIn(p))` and so
+ * answered "authenticated" for a page that was Microsoft's login form.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function recoverIfOnSignIn(
+export async function onSignIn(p: any): Promise<boolean> {
+  return (await detectLoginWall(p)) !== undefined;
+}
+
+/**
+ * Positive check that what is on screen is the BC web client, rather than the
+ * absence of a login form. Looks for the client's own root classes (`ms-dyn365-*`
+ * on the body, `ms-nav-*` on its chrome) in ANY frame, since page content lives
+ * in an iframe. Captured live from devel1: `class="ms-dyn365-fin chrome mouse"`.
+ *
+ * Used to WARN, never to fail: a future BC restyle would otherwise block every
+ * capture. The certain signal (a login wall) is what fails a capture.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function looksLikeBusinessCentral(p: any): Promise<boolean> {
+  for (const f of p.frames()) {
+    try {
+      const hit = await f.evaluate(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const doc = (globalThis as any).document;
+        const cls = String(doc.body?.className || '');
+        return /ms-dyn365|ms-nav-/.test(cls) || !!doc.querySelector('[class*="ms-nav-"]');
+      });
+      if (hit) return true;
+    } catch { /* cross-origin / detached frame */ }
+  }
+  return false;
+}
+
+/**
+ * Shared logged-out recovery, for BOTH walls.
+ *
+ * `bc-forms` (on-prem): the injected jar is stale server-side. Drop it (so the
+ * next capture AND the next WS reconnect re-authenticate) and log in once
+ * in-page — BC's SignIn carries our deep link as its ReturnUrl.
+ *
+ * `entra` (SaaS): there is no in-page form to fill, and the fix must NOT be
+ * `provider.invalidate()`. That tears down the kept-alive persistent browser,
+ * and with it the BC tab the WebSocket session is attached to — repairing the
+ * capture path by killing the working one. Instead ask the provider for a FRESH
+ * cookie jar, which it mints from the warm Entra profile without touching the
+ * tab, re-inject it and re-navigate.
+ *
+ * When neither can be recovered this THROWS with what the operator has to do,
+ * instead of letting the caller photograph the login form (F-10).
+ *
+ * Returns true when a wall was detected and recovered, false when there was none.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function recoverIfLoggedOut(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   p: any,
   provider: IBCAuthProvider,
   config: BCConfig,
   logger: Logger,
-  opts?: { tag?: string; returnTo?: string },
+  opts?: {
+    tag?: string;
+    returnTo?: string;
+    /** Re-inject a refreshed jar into the browser (the caller owns the page). */
+    applyCookies?: (cookies: RawCookie[]) => Promise<void>;
+  },
 ): Promise<boolean> {
-  if (!(await onSignIn(p))) return false;
-  logger.warn(`[${opts?.tag ?? 'bc-web'}] cookie injection landed on SignIn — logging in in-page`);
-  provider.invalidate();
-  await inPageLogin(config, p);
-  if (opts?.returnTo) {
-    await p.goto(opts.returnTo, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => undefined);
-  }
-  return true;
-}
+  const wall = await detectLoginWall(p);
+  if (!wall) return false;
+  const tag = opts?.tag ?? 'bc-web';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function onSignIn(p: any): Promise<boolean> {
-  if (p.url().includes('SignIn')) return true;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return p.evaluate(() => !!(globalThis as any).document.querySelector('#UserName,#Password')).catch(() => false);
+  if (wall === 'bc-forms' && config.authMode !== 'AAD') {
+    logger.warn(`[${tag}] cookie injection landed on BC SignIn — logging in in-page`);
+    provider.invalidate();
+    await inPageLogin(config, p);
+  } else {
+    logger.warn(`[${tag}] the browser session expired (${wall}) — refreshing the cookie jar`);
+    if (!provider.refreshCookieJar) {
+      throw new Error(
+        `The browser session expired and landed on the ${wall === 'entra' ? 'Microsoft Entra' : 'BC'} sign-in page, `
+        + 'and this auth provider cannot refresh it. Nothing was written. Restart the MCP server to start a fresh browser session.',
+      );
+    }
+    const jar = await provider.refreshCookieJar();
+    if (opts?.applyCookies && jar.length) await opts.applyCookies(jar);
+  }
+
+  if (opts?.returnTo) {
+    await p.goto(opts.returnTo, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => undefined);
+  }
+
+  const still = await detectLoginWall(p);
+  if (still) {
+    throw new Error(
+      `The browser session has expired and could not be renewed unattended: the page is still on the `
+      + `${still === 'entra' ? 'Microsoft Entra sign-in form' : 'Business Central sign-in form'}. Nothing was written. `
+      + (still === 'entra'
+        ? 'Sign in once interactively with `npm run login:aad` (it warms the persistent profile), then retry. '
+          + 'This is a browser-session failure only — the WebSocket tools keep working, which is why bc_health still reports "connected".'
+        : 'Check BC_USERNAME / BC_PASSWORD, then retry.'),
+    );
+  }
+  logger.info(`[${tag}] browser session recovered`);
+  return true;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -184,6 +292,43 @@ export async function detectErrorPage(p: any): Promise<string | undefined> {
     } catch { /* cross-origin / detached frame */ }
   }
   return hostOnly;
+}
+
+/**
+ * The text of a modal dialog currently on screen, or undefined when there is none.
+ *
+ * A capture that lands on an in-app dialog is not necessarily wrong — a manual may
+ * be documenting that very dialog. What makes it a problem is a dialog NOBODY
+ * ASKED FOR: BC refusing a bookmark from another table, for instance, returns its
+ * explanation in a modal, and the capture came back as a "successful" PNG of an
+ * error message (bc-saas F-9). The caller decides: it knows whether it requested
+ * one (via clickBeforeCapture) and can raise the unrequested case as a warning.
+ *
+ * Matching is on the ARIA role, not on BC classes: `dialog` / `alertdialog` are
+ * what BC's client publishes for its modals, and they do not shift between
+ * versions or locales the way class names do.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function detectModalDialog(p: any): Promise<string | undefined> {
+  for (const f of p.frames()) {
+    try {
+      const text: string | null = await f.evaluate(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const doc = (globalThis as any).document;
+        const nodes = doc.querySelectorAll('[role="dialog"],[role="alertdialog"]');
+        for (let i = 0; i < nodes.length; i++) {
+          const el = nodes[i];
+          const visible = el.offsetParent !== null || (el.getClientRects && el.getClientRects().length > 0);
+          if (!visible) continue;
+          const t = String(el.innerText || '').replace(/\s+/g, ' ').trim();
+          if (t) return t;
+        }
+        return null;
+      });
+      if (text) return text.length > 300 ? `${text.slice(0, 300)}...` : text;
+    } catch { /* cross-origin / detached frame */ }
+  }
+  return undefined;
 }
 
 /**
