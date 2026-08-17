@@ -66,6 +66,35 @@ than a visible one — nobody re-opens a result that said it went fine.
   with the old session. A pinned company also survives a reconnect by construction, since the
   recovered session is opened on it.
 
+### Fixed (2026-08-17) — a locked SaaS browser profile now says so, immediately
+
+Found live: three MCP server processes running at once, one of them holding the AAD browser profile
+since it started, the other two failing to open a session every few seconds for ten minutes. Every
+tool answered `disconnected` and nothing said why.
+
+- **Why it happens at all.** In AAD mode the provider keeps its headless browser alive on purpose (BC
+  binds the WebSocket to a specific tab and tears the session down if the browser closes), and Chrome
+  locks its profile directory. So exactly ONE process can hold `BC_AAD_PROFILE_DIR` — and an MCP
+  client that leaves an older server process behind (closed window, reload, crash) blocks every new
+  instance.
+- **The error explains itself now.** It used to surface Chrome's raw *"The browser is already running
+  for …"* after seven reconnect attempts. It is now recognised for what it is: not a credentials
+  problem, with the commands to fix it and the note that two side-by-side SaaS servers each need
+  their own `BC_AAD_PROFILE_DIR`.
+- **And it fails immediately.** A profile lock cannot be cleared by retrying, so the session-create
+  backoff stops at the first attempt instead of burning ~2 minutes and burying the message
+  (`context.reason: 'profile-locked'`, propagated from the auth error through `ConnectionError`).
+  Measured: 0s instead of seven attempts.
+- **New: `npm run aad:unlock`.** Shows which processes hold the profile (pid, kind, start time) and
+  changes nothing; `npm run aad:unlock -- --kill` frees it. It only touches processes whose command
+  line names that profile directory — it cannot disturb your own Chrome or another project's server —
+  kills browsers before their servers (a server killed first orphans its browser, which keeps the
+  lock), clears leftover `Singleton*` lock files, and reports what it actually stopped versus what was
+  already gone.
+- Documented in [`docs/guides/saas-vs-docker.md`](docs/guides/saas-vs-docker.md) §0 of the profile
+  section, and in `bc_health`'s `sessionCreatedAt` note (`null` + `sessionsCreated: 0` on SaaS is
+  usually this).
+
 ### Changed (2026-08-13)
 
 - `bc_screenshot` accepts `dismissTeachingTips` and returns `clicks[]` / `unexpectedDialog`;

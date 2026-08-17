@@ -29,7 +29,14 @@ export class ConnectionFactory {
     if (!this.authProvider.isAuthenticated()) {
       const authResult = await this.authProvider.authenticate();
       if (isErr(authResult)) {
-        return err(new ConnectionError(`Authentication failed: ${authResult.error.message}`));
+        // Carry the auth error's context through. Without it, a reason the caller
+        // could ACT on (`profile-locked`: another process holds the browser profile,
+        // which no retry can clear) arrived as an opaque string and the reconnect
+        // backoff burned seven attempts on it.
+        return err(new ConnectionError(
+          `Authentication failed: ${authResult.error.message}`,
+          authResult.error.context,
+        ));
       }
     }
 

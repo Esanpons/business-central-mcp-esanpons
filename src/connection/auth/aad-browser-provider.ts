@@ -222,8 +222,30 @@ export class AADBrowserAuthProvider implements IBCAuthProvider {
       }
       return ok({ cookies: this.wsCookieHeader, csrfToken: this.csrfToken, cookieJar: this.cookieJar });
     } catch (e) {
+      const raw = e instanceof Error ? e.message : String(e);
+      // The profile-lock collision deserves its own message. It is not an auth
+      // failure at all: the persistent profile is a directory Chrome LOCKS, and this
+      // provider keeps its browser alive on purpose (BC binds the WebSocket to a
+      // specific tab), so exactly ONE process can hold it. When an MCP client leaves
+      // an older server process behind — a closed window, a reload, a crash — every
+      // new instance dies here, the session-create backoff retries and dies the same
+      // way, and bc_health just says `disconnected` with no route out. Verified live:
+      // three server processes running, one holding the profile since 17:55, the
+      // other two failing in a loop for ten minutes.
+      if (/already running for|ProcessSingleton|profile appears to be in use/i.test(raw)) {
+        return err(new AuthenticationError(
+          'Another process is holding the Business Central browser profile, so this server cannot open a SaaS session. '
+          + 'This is NOT a credentials problem and retrying will not clear it: only one process can use '
+          + `"${this.config.profileDir}" at a time, and something else has it — usually an older MCP server process `
+          + 'left behind by the client (a closed window, a reload, a crash). '
+          + 'Run `npm run aad:unlock` to see which process holds it, then `npm run aad:unlock -- --kill` to free it; '
+          + 'the next call opens a fresh session. To run two SaaS servers side by side instead, give each one its own '
+          + '`BC_AAD_PROFILE_DIR` (each needs its own `npm run login:aad`).',
+          { baseUrl: this.config.baseUrl, profileDir: this.config.profileDir, reason: 'profile-locked', underlying: raw },
+        ));
+      }
       return err(new AuthenticationError(
-        `AAD authentication failed: ${e instanceof Error ? e.message : String(e)}`,
+        `AAD authentication failed: ${raw}`,
         { baseUrl: this.config.baseUrl, username: this.config.username },
       ));
     } finally {

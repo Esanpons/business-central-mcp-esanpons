@@ -118,6 +118,44 @@ La sesión de SaaS se sostiene sobre un **perfil de navegador persistente** (la 
 `BC_AAD_PROFILE_DIR`, por defecto `./.state/aad-profile`). Ahí viven las cookies SSO de Entra.
 Todo lo de abajo gira alrededor de ese perfil.
 
+### 0. Solo UN proceso puede tener el perfil (el bloqueo más habitual)
+
+En modo AAD el proveedor **mantiene su navegador abierto a propósito**: BC ata la sesión de
+WebSocket a una pestaña concreta y la destruye si el navegador se cierra. Y Chrome, por su parte,
+**bloquea la carpeta del perfil**. Juntando las dos cosas: **solo un proceso puede usar ese perfil a
+la vez.**
+
+Así que un segundo servidor SaaS —o, mucho más frecuente, **un proceso viejo que el cliente MCP dejó
+atrás** al cerrar una ventana, recargar o colgarse— no puede abrir sesión en absoluto. Síntoma:
+`bc_health` responde `disconnected` con `sessionsCreated: 0`, y cualquier operación devuelve:
+
+```text
+Another process is holding the Business Central browser profile, so this server cannot open a
+SaaS session. ... Run `npm run aad:unlock` ...
+```
+
+No es un problema de credenciales y **ningún reintento lo arregla**, así que el servidor falla al
+instante en vez de gastar su backoff de reconexión. Para resolverlo:
+
+```bash
+npm run aad:unlock            # dice QUIÉN lo tiene, sin tocar nada
+npm run aad:unlock -- --kill  # lo libera; la siguiente llamada abre sesión nueva
+```
+
+`aad:unlock` solo toca procesos cuya línea de comandos nombra ESE perfil, así que no puede cerrar tu
+Chrome ni el servidor de otro proyecto, y distingue lo que ha parado de lo que ya estaba muerto.
+
+> **Antes de liberarlo:** si uno de esos procesos es la instancia que estás usando, pararlo termina
+> su sesión de BC (el cliente MCP abrirá otra en la siguiente llamada). Ejecuta primero el comando
+> sin `--kill` y mira las horas de arranque: el proceso viejo es el sospechoso.
+
+Para tener **dos servidores SaaS a la vez** (dos entornos, o dos clientes abiertos), dale a cada uno
+su propio `BC_AAD_PROFILE_DIR` y ejecuta `npm run login:aad` una vez por perfil — ver la Opción 1 de
+la sección B. Compartir un perfil no es posible.
+
+En Docker/on-prem nada de esto aplica: la autenticación por formulario no necesita perfil
+persistente, así que pueden convivir tantas instancias como quieras.
+
 ### A. Volver a iniciar sesión (la sesión de Entra caducó)
 
 Síntoma: una operación falla y `bc_health`/el log dice algo tipo *“interaction required”* o

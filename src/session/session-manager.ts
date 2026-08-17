@@ -376,6 +376,17 @@ export class SessionManager {
       const errorMsg = result.error.message;
       this.lastCreateError = errorMsg;
 
+      // Some failures are not transient and no amount of backoff clears them: the
+      // SaaS browser profile being held by ANOTHER process is the one that bit us
+      // live. Retrying it seven times over several minutes only buried the one
+      // message that said what to do, and left every tool answering
+      // "disconnected" in the meantime. Stop at the first attempt and surface it.
+      const reason = (result.error.context as { reason?: unknown } | undefined)?.reason;
+      if (reason === 'profile-locked') {
+        this.logger.error(errorMsg);
+        return null;
+      }
+
       if (errorMsg.includes('LogicalModalityViolation')) {
         // Mid-session violations are reconciled in BCSession.invokeUnqueued.
         // Reaching this branch means the violation surfaced during *initial*

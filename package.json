@@ -32,6 +32,7 @@
     "capture:report": "tsx scripts/capture-report-requestpage.ts",
     "capture:saas": "tsx scripts/capture-saas-handshake.ts",
     "login:aad": "tsx scripts/aad-login.ts",
+    "aad:unlock": "tsx scripts/aad-unlock.ts",
     "objects:refresh": "tsx scripts/refresh-objects.ts",
     "test-battery": "tsx scripts/test-battery.ts",
     "verify:features": "tsx scripts/verify-features.ts"
