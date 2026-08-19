@@ -52,6 +52,25 @@ export class ActionService {
     private readonly logger: Logger,
   ) {}
 
+  /**
+   * Child-form discovery, borrowed from PageService.
+   *
+   * A page opened by an ACTION (`Nuevo` on a list, a drill-down) needs exactly the
+   * same treatment as one opened by `bc_open_page`: its subpages and FactBoxes have
+   * to be discovered and loaded, or the resulting context is a bare header. On a
+   * document that is what left the creation context with no `lines` section, so the
+   * first line of a new document could not be written at all (bc-saas F-39).
+   *
+   * Injected via a setter rather than the constructor because PageService and
+   * ActionService are built side by side in the same graph; a constructor argument
+   * would make that a cycle.
+   */
+  private discoverChildForms?: (pageContextId: string, events: BCEvent[]) => Promise<void>;
+
+  setChildFormDiscovery(fn: (pageContextId: string, events: BCEvent[]) => Promise<void>): void {
+    this.discoverChildForms = fn;
+  }
+
   async executeAction(
     pageContextId: string,
     actionName: string,
@@ -410,6 +429,7 @@ export class ActionService {
     // applyEvent treats ownerless FormCreated as "update existing form", so
     // without this the new page never gets a pageContextId -- it is unreachable
     // and uncloseable via MCP, and the source context's form map gets polluted.
+    const spawned: string[] = [];
     for (const event of events) {
       if (event.type !== 'FormCreated') continue;
       if (event.parentFormId) continue;
@@ -418,6 +438,18 @@ export class ActionService {
       const newPcId = `session:page:${spawnPrefix}:${uuid().substring(0, 8)}`;
       this.repo.create(newPcId, event.formId);
       this.repo.applyToPage(newPcId, events);
+      spawned.push(newPcId);
+    }
+
+    // Give a spawned page its subpages and FactBoxes, exactly as bc_open_page does.
+    // Without this the context is a header and nothing else: a document opened with
+    // `Nuevo` had no `lines` section, so its first line was unwritable.
+    if (this.discoverChildForms) {
+      for (const pcId of spawned) {
+        await this.discoverChildForms(pcId, events).catch((e: unknown) => {
+          this.logger.warn(`Child-form discovery failed for ${pcId}: ${e instanceof Error ? e.message : String(e)}`);
+        });
+      }
     }
 
     // Check for dialog

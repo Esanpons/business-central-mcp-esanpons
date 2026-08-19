@@ -83,6 +83,7 @@ export const WriteDataSchema = z.object({
   group: z.string().optional().describe('Disambiguate duplicate captions: resolve every caption-keyed field inside the group with this caption (e.g. "Bill-to"). Ignored for keys given as an explicit controlPath. IMPORTANT: always check each result\'s "changed" flag — "success" only means the interaction completed, not that the value stuck.'),
   rowIndex: z.number().optional().describe('0-based row position in the repeater to write to. Use for line items. Prefer bookmark for stability.'),
   bookmark: z.string().optional().describe('Stable row identifier from bc_read_data results. Preferred over rowIndex when rows may be reordered.'),
+  newLine: z.boolean().optional().describe('Create a NEW line in the section and write these fields into it. This is how you add the FIRST line to a freshly created document, whose lines are empty by definition: without it there is no row to target and the write falls through to the header, where line columns like Quantity do not exist. Requires section (e.g. "lines"); cannot be combined with rowIndex or bookmark. For an existing line use rowIndex/bookmark instead.'),
 });
 
 // action/cue are each individually optional; the .refine() enforces "exactly one".
@@ -123,6 +124,7 @@ export const RespondDialogSchema = z.object({
   pageContextId: z.string().min(1).describe('Page context ID of the page that triggered the dialog.'),
   dialogFormId: z.string().min(1).describe('Dialog form ID from the dialogsOpened array returned by bc_execute_action or bc_write_data.'),
   response: z.enum(['ok', 'cancel', 'yes', 'no', 'abort', 'close']).describe('"ok" confirms, "cancel" dismisses, "yes"/"no" answers a question, "abort" force-closes, "close" closes a modal info page.'),
+  fields: z.record(z.string(), WriteValue).optional().describe('Values to write INTO the dialog before answering it, keyed by the caption (or controlPath) of each dialog field. Use this for a dialog that carries parameters -- a request page, a "Copy lines" selector, a posting date prompt. Each write is verified exactly as bc_write_data does: the result reports fieldResults with changed/reason per field, and a field that did not take makes the whole call FAIL WITHOUT answering the dialog, so BC never executes it with values other than the ones you asked for. Only valid with response "ok" or "yes" -- a dialog being cancelled takes no values.'),
 });
 
 export const SwitchCompanySchema = z.object({
@@ -151,6 +153,8 @@ export const DownloadReportSchema = z.object({
 export const ListCompaniesSchema = z.object({});
 
 export const HealthSchema = z.object({});
+
+export const ResetSessionSchema = z.object({});
 
 export const FindObjectSchema = z.object({
   query: z.string().min(1).describe('Name/caption keyword or numeric ID to look up (e.g. "Customer List", "client", "22"). Matches Object Name and the localized Object Caption.'),

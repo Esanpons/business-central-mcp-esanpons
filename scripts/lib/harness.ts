@@ -156,6 +156,8 @@ export async function createHarness(env: EnvName, options: HarnessOptions = {}):
     const reportDownload = new ReportDownloadService(cfg.bc, cfg.reportDir, () => session.companyName, logger, auth);
     const manual = new ManualService(screenshot, cfg.manualDir, logger);
     const objectIndex = new ObjectIndexService(page, cfg.stateDir, cfg.bc.baseUrl, cfg.bc.tenantId, logger);
+    // Same wiring as the real server: an action-opened page gets its subpages.
+    action.setChildFormDiscovery((pcId, events) => page.discoverAndLoadChildForms(pcId, events));
     return {
       services: { page, data, action, filter, navigation, search, screenshot, reportDownload, manual, objectIndex },
       ops: {

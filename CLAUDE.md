@@ -72,7 +72,7 @@ npm run test:integration             # Integration tests against real BC (devel1
 npm start                            # HTTP server on port 3000
 npm run start:stdio-direct           # Direct stdio for Claude Desktop
 
-npm run test-battery docker          # Full 18-tool functional battery vs devel1
+npm run test-battery docker          # Full 19-tool functional battery vs devel1
 npm run test-battery saas            # Same battery vs BC Online (needs the AAD profile)
 npm run objects:refresh -- saas --all # Rebuild .state/object-index.json (bc_find_object's index)
 npm run login:aad                    # One-time interactive Entra sign-in for SaaS
@@ -816,7 +816,7 @@ actionable error (run `npm run login:aad`) is surfaced in the `SessionLostError`
 
 **Scripts.** `npm run capture:saas` (headed spike, re-runnable diagnostic — captures WS URL,
 OpenSession frame, cookies, OIDC chain to `src/protocol/captures/`), `npm run login:aad`
-(interactive profile bootstrap), `npm run test-battery <docker|saas>` (full 18-tool functional
+(interactive profile bootstrap), `npm run test-battery <docker|saas>` (full 19-tool functional
 battery — the live end-to-end check for either environment).
 
 **SaaS verified live (2026-08-08), battery 15/18 PASS — parity with Docker**
@@ -895,10 +895,54 @@ path can prune it. `PageContextRepository.removeDialog()` is called by the opera
 dialog, which also frees the plain `dialog` id for the next one. `markFormClosed` DELETES a dialog
 section rather than marking it invalid, for the same reason.
 
+**`bc_respond_dialog` fills the dialog itself (`fields`), and REFUSES to answer one it could
+not fill.** The schema had no `fields` key at all, so a caller that sent them had them stripped by
+Zod and BC ran the dialog on its DEFAULT values while the result said `success: true`. On a "Copy
+document lines" dialog that copied the wrong document and put ~50 wrong lines into an order
+(bc-saas F-39 §5) — the F-36/F-38 pattern: success reported for work nobody asked for. Now
+`fields` is a real parameter, written through `DataService.writeFields` — the SAME verified path
+`bc_write_data` uses, so echo, `changed` and `validationMessage` all apply — and:
+
+- The dialog is located by its **formId**, never by section name: the first open dialog is
+  `dialog`, a second concurrent one `dialog#2`, so a hardcoded name fills the wrong one.
+- **A field that did not change aborts the whole call.** The dialog stays open, untouched and
+  still answerable, and the error carries the per-field reasons. Answering anyway and reporting
+  the failures alongside is what made the original bug destructive: by the time anyone reads
+  `fieldResults` the wrong lines are already in the document. `changed: undefined` (unverified)
+  is NOT a failure and passes through.
+- `fields` with `cancel` / `abort` / `close` is an error — a dialog being dismissed takes no values.
+
+Writing them separately with `bc_write_data { section: "dialog", fields }` and then answering
+still works; it is the same code underneath.
+
 Note `bc_respond_dialog` still only answers (`ok` / `cancel` / `yes` / `no` / `abort` / `close`) —
 it cannot press an arbitrary named button. The dialogs measured here (request pages) publish no
 action nodes in their control tree, so there is nothing to name; if a build does publish them,
 `bc_execute_action { section: "dialog", action }` is the path.
+
+### `bc_reset_session` — the only way back to a clean session
+
+Open forms and the modal stack are **per-SESSION** state, so nothing sent over a live session
+clears them. `bc_close_page` closes ONE page, takes no `all`, and cannot lower `modalDepth` — it was
+measured RAISING it (2 -> 3) while closing pages, because closing a page with unsaved changes makes
+BC put up another modal. So a session that accumulated modals got progressively less usable and the
+only remedy was a PERSON restarting the server process (bc-saas F-39 §4 ter), which also made every
+doubtful failure unanswerable: "maybe it is the session" could not be tested.
+
+`bc_reset_session` closes the session (gracefully, falling back to abrupt — a wedged session must
+not be able to refuse) and opens a fresh one, so `openForms` and `modalDepth` are zero by
+construction. Every page context dies and is reported in `invalidatedPageContextIds`; the result
+also carries `droppedOpenForms` / `droppedModalDepth` so the caller can see what it discarded. The
+**pinned company is preserved** — a reset is never a silent company change; `bc_switch_company` is
+that, and it is the same mechanism minus the company.
+
+It is registered OUTSIDE the `ensureSession()` gate, exactly like `bc_health`: the gate calls
+`SessionManager.getSession()`, which THROWS `SessionLostError` on a dead session, so routing the
+reset through it would make the tool unavailable in precisely the situation it exists for.
+
+Files: `src/session/session-manager.ts` (`resetSession`), `src/operations/reset-session.ts`,
+`src/mcp/tool-registry.ts` (`buildResetSessionTool`), `src/stdio-server.ts` / `src/server.ts`.
+Tests: `tests/unit/session-reset.test.ts`.
 
 ### Writes and deletes never report success blindly
 Two rules that the whole write path depends on, both verified live:

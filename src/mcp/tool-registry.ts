@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { Logger } from '../core/logger.js';
 import {
   OpenPageSchema,
   ReadDataSchema,
@@ -16,6 +17,7 @@ import {
   ScreenshotSchema,
   BuildManualSchema,
   HealthSchema,
+  ResetSessionSchema,
   FindObjectSchema,
   RefreshObjectsSchema,
   toMcpJsonSchema,
@@ -32,6 +34,7 @@ import type { SearchPagesOperation } from '../operations/search-pages.js';
 import type { NavigateOperation } from '../operations/navigate.js';
 import type { RespondDialogOperation } from '../operations/respond-dialog.js';
 import type { SwitchCompanyOperation } from '../operations/switch-company.js';
+import { ResetSessionOperation } from '../operations/reset-session.js';
 import type { ListCompaniesOperation } from '../operations/list-companies.js';
 import type { RunReportOperation } from '../operations/run-report.js';
 import type { DownloadReportOperation } from '../operations/download-report.js';
@@ -513,5 +516,35 @@ Do NOT use this for business data — it returns server/session status only.`,
     inputSchema: toMcpJsonSchema(HealthSchema),
     zodSchema: HealthSchema,
     execute: () => op.execute(),
+  };
+}
+
+/**
+ * bc_reset_session is built OUTSIDE buildToolRegistry for the same reason bc_health is:
+ * it must not go through the ensureSession() gate. The gate calls
+ * SessionManager.getSession(), which THROWS SessionLostError when the session is dead —
+ * so routing the reset through it would make the tool unavailable in exactly the
+ * situation it exists for. It reaches the SessionManager directly instead.
+ */
+export function buildResetSessionTool(resetBCSession: () => Promise<{
+  previousCompany: string;
+  newCompany: string;
+  invalidatedPageContextIds: string[];
+  previousOpenForms: number;
+  previousModalDepth: number;
+}>, logger: Logger): ToolDefinition {
+  const op = new ResetSessionOperation(resetBCSession, logger);
+  return {
+    name: 'bc_reset_session',
+    description: `Throw the current Business Central session away and start a CLEAN one on the same company. Use this when the session has gone bad and you want a known-good starting point: pages you can no longer close, a modal dialog BC is still holding (bc_health shows modalDepth above 0 and it will not come down), a long session with many open forms, or any failure you want to re-test without the doubt of "maybe it is the session".
+
+This is the ONLY way to clear open forms and modal depth. bc_close_page closes ONE page, does not accept "all", and cannot lower modalDepth -- closing a page with unsaved changes makes BC put up ANOTHER modal, so cleaning up page by page can leave you worse off than you started. Open forms and the modal stack are per-SESSION state, so they only reach zero when the session is replaced. Before this tool existed the only remedy was a person restarting the MCP server process.
+
+EVERY open page dies. All existing pageContextIds become unusable and the result lists them in invalidatedPageContextIds -- re-open with bc_open_page anything you still need. Unsaved changes in open pages are LOST, exactly as if the client had been closed; commit or post anything you care about first. The company is preserved (a reset never doubles as a company change) -- use bc_switch_company for that.
+
+Takes no parameters. Do NOT use it as a refresh: to re-read data use bc_read_data, and to reload one page close and re-open it. This is for recovering a wedged session, not for routine work.`,
+    inputSchema: toMcpJsonSchema(ResetSessionSchema),
+    zodSchema: ResetSessionSchema,
+    execute: (input: unknown) => op.execute(input as Parameters<typeof op.execute>[0]),
   };
 }

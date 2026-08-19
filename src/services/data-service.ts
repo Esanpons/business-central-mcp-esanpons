@@ -2,7 +2,8 @@ import { ok, err, isErr, type Result } from '../core/result.js';
 import { ProtocolError } from '../core/errors.js';
 import type { BCSession } from '../session/bc-session.js';
 import type { PageContextRepository } from '../protocol/page-context-repo.js';
-import type { BCEvent, RepeaterRow, ControlField, TabGroup, SaveValueInteraction, SetCurrentRowInteraction, ScrollRepeaterInteraction } from '../protocol/types.js';
+import type { BCEvent, RepeaterRow, ControlField, TabGroup, SaveValueInteraction, SetCurrentRowInteraction, ScrollRepeaterInteraction, InvokeActionInteraction } from '../protocol/types.js';
+import { SystemAction } from '../protocol/types.js';
 import type { Logger } from '../core/logger.js';
 import { resolveSection } from '../protocol/section-resolver.js';
 import { fields as treeFields, tabs as treeTabs } from '../protocol/form-views.js';
@@ -215,7 +216,7 @@ export class DataService {
     pageContextId: string,
     fieldName: string,
     value: string,
-    options?: { sectionId?: string; bookmark?: string; rowIndex?: number; group?: string },
+    options?: { sectionId?: string; bookmark?: string; rowIndex?: number; group?: string; targetCurrentRow?: boolean },
   ): Promise<Result<FieldWriteResult, ProtocolError>> {
     const ctx = this.repo.get(pageContextId);
     if (!ctx) return err(this.repo.notFoundError(pageContextId));
@@ -225,7 +226,7 @@ export class DataService {
     const { form } = resolved;
 
     // Line cell write: when targeting a specific row in a repeater section
-    if (resolved.repeater && (options?.bookmark !== undefined || options?.rowIndex !== undefined)) {
+    if (resolved.repeater && (options?.bookmark !== undefined || options?.rowIndex !== undefined || options?.targetCurrentRow)) {
       // Line interactions use the CHILD form's formId (the subpage form).
       // BC sends DataLoaded with root formId but SetCurrentRow/SaveValue use child formId.
       // Verified: SetCurrentRow with root formId -> InvalidBookmarkException;
@@ -376,15 +377,124 @@ export class DataService {
     });
   }
 
+  /**
+   * Create a NEW row in a repeater section and leave BC's cursor on it, so the
+   * caller's field writes land in that row.
+   *
+   * This is the missing half of line editing. Everything else needed a row that was
+   * already there (`bookmark` / `rowIndex`), so a document you had just created --
+   * whose lines are empty by definition -- could not be given its first line at all:
+   * the write fell through to the header path and answered "Field not found:
+   * Cantidad" for a line column, which reads like a BC fault and was reported as one
+   * (bc-saas F-39). The list page's own New action is what the web client uses; on a
+   * repeater it resolves through the current-row viewport, `{repeater}/cr/c[0]`.
+   *
+   * An empty repeater has no current row, and BC accepts New anyway: it appends a
+   * blank line and selects it. That is exactly the state a first-line write needs.
+   */
+  async createLine(
+    pageContextId: string,
+    sectionId?: string,
+  ): Promise<Result<{ events: BCEvent[]; rowCountBefore: number; rowCountAfter: number }, ProtocolError>> {
+    const ctx = this.repo.get(pageContextId);
+    if (!ctx) return err(this.repo.notFoundError(pageContextId));
+    const resolved = resolveSection(ctx, sectionId);
+    if ('error' in resolved) return err(new ProtocolError(resolved.error, { availableSections: resolved.availableSections }));
+    if (!resolved.repeater) {
+      return err(new ProtocolError(
+        `Section '${resolved.section.sectionId}' has no repeater, so it has no lines to create. `
+        + `newLine only applies to a list-shape section: a document's "lines", or a list-bodied subpage.`,
+        { availableSections: Array.from(ctx.sections.keys()) },
+      ));
+    }
+
+    const rowCountBefore = resolved.rows.length;
+    const interaction: InvokeActionInteraction = {
+      type: 'InvokeAction',
+      formId: resolved.form.formId,
+      controlPath: `${resolved.repeater.controlPath}/cr/c[0]`,
+      systemAction: SystemAction.New,
+    };
+    this.logger.info(`createLine: New on ${resolved.repeater.controlPath} (section '${resolved.section.sectionId}', formId=${resolved.form.formId})`);
+    const result = await this.session.invoke(
+      interaction,
+      (event) => event.type === 'InvokeCompleted' || event.type === 'DataLoaded' || event.type === 'DialogOpened',
+    );
+    if (isErr(result)) return result;
+    this.repo.applyToPage(pageContextId, result.value);
+
+    const after = this.repo.get(pageContextId);
+    const reAfter = after ? resolveSection(after, sectionId) : undefined;
+    const rowCountAfter = reAfter && !('error' in reAfter) ? reAfter.rows.length : rowCountBefore;
+    return ok({ events: result.value, rowCountBefore, rowCountAfter });
+  }
+
   async writeFields(
     pageContextId: string,
     fields: Record<string, string>,
-    options?: { sectionId?: string; bookmark?: string; rowIndex?: number; group?: string },
+    options?: { sectionId?: string; bookmark?: string; rowIndex?: number; group?: string; newLine?: boolean; targetCurrentRow?: boolean },
   ): Promise<Result<WriteFieldsResult, ProtocolError>> {
     const results: FieldWriteResult[] = [];
     const allEvents: BCEvent[] = [];
-    for (const [name, value] of Object.entries(fields)) {
-      const result = await this.writeField(pageContextId, name, value, options);
+    let effectiveOptions = options;
+
+    // newLine: append a blank row and target it. The row is created ONCE, before any
+    // field is written, and every field then goes to that row.
+    if (options?.newLine) {
+      if (options.bookmark !== undefined || options.rowIndex !== undefined) {
+        return err(new ProtocolError(
+          'newLine cannot be combined with bookmark or rowIndex: one asks for a NEW row, the others name an existing one. '
+          + 'Drop newLine to edit an existing line, or drop bookmark/rowIndex to create one.',
+        ));
+      }
+      const created = await this.createLine(pageContextId, options.sectionId);
+      if (isErr(created)) return created;
+      allEvents.push(...created.value.events);
+      // BC selects the row it just appended, and the new row is the last one. Target
+      // it by POSITION, not by bookmark: an uncommitted line carries a placeholder
+      // bookmark (`DraftRecord…`) that BC re-keys the moment the line commits.
+      const ctxAfter = this.repo.get(pageContextId);
+      const re = ctxAfter ? resolveSection(ctxAfter, options.sectionId) : undefined;
+      if (!re || 'error' in re || !re.repeater) {
+        return err(new ProtocolError('The lines section became unavailable after creating the row; nothing was written.'));
+      }
+      if (re.rows.length === 0) {
+        return err(new ProtocolError(
+          'Business Central accepted the New action but the section still reports no rows, so there is no line to write into. '
+          + 'Check that the document is editable (its header may need a customer/vendor first) and that the page is not read-only.',
+          { section: re.section.sectionId, rowCountBefore: created.value.rowCountBefore },
+        ));
+      }
+      // Write into the row BC ITSELF selected, without naming a position.
+      //
+      // Do NOT try to work out which row that is. A document's lines repeater comes
+      // padded with blank placeholder rows (15 on a fresh BC28 sales order) and the
+      // appended line is neither the last nor the first blank one: measured live, it
+      // landed at index 14 of 15. BC already has its cursor on the right row after
+      // New, and `{repeater}/cr/c[N]` -- the current-row viewport -- means exactly
+      // "whatever row is selected", so the write needs no index at all.
+      effectiveOptions = { ...options, newLine: false, targetCurrentRow: true };
+    }
+    // On a NEW line, write the identifying columns before the quantitative ones.
+    //
+    // BC re-runs the line's validation when Type/No. lands, and that recalculation
+    // RESETS quantities: measured live, a line written in caller order came out with
+    // the item resolved (description, unit, price) but Quantity back to 0 -- reported
+    // as changed:true, because it really did change before BC undid it. Anything not
+    // named here keeps the caller's order, which is what a document header needs.
+    const NEW_LINE_ORDER = ['tipo', 'type', 'nº', 'n.º', 'no.', 'number', 'código', 'code'];
+    const rank = (caption: string): number => {
+      const c = caption.trim().toLowerCase();
+      const i = NEW_LINE_ORDER.findIndex(k => c === k);
+      return i >= 0 ? i : NEW_LINE_ORDER.length;
+    };
+    const entries = Object.entries(fields);
+    const ordered = options?.newLine
+      ? entries.map((e, i) => ({ e, i })).sort((a, b) => (rank(a.e[0]) - rank(b.e[0])) || (a.i - b.i)).map(x => x.e)
+      : entries;
+
+    for (const [name, value] of ordered) {
+      const result = await this.writeField(pageContextId, name, value, effectiveOptions);
       if (isErr(result)) {
         const notFound = /not found/i.test(result.error.message);
         // Preserve the diagnostic context (availableGroups / hint) that
@@ -410,7 +520,62 @@ export class DataService {
         if (result.value.events) allEvents.push(...result.value.events);
       }
     }
+
+    // On a new line, re-assert the values BC undid while resolving the item.
+    //
+    // Writing Type/No. makes BC re-run the line's validation, and that recalculation
+    // RESETS the quantitative columns -- measured live on BC28: Quantity was written
+    // (BC echoed "2", changed:true) and came back 0 once the item resolved, so the
+    // line ended up with the right product and no quantity. Ordering alone cannot fix
+    // it: the reset happens after the last write, whatever the order. So: re-read the
+    // row, and write again only the fields that do not hold what was asked for. One
+    // extra pass, and only for fields that actually drifted.
+    if (options?.newLine && results.some(r => r.success)) {
+      for (let i = 0; i < results.length; i++) {
+        const r = results[i]!;
+        if (!r.success || r.requested === undefined) continue;
+        const current = this.readCurrentRowCell(pageContextId, options.sectionId, r.fieldName);
+        const norm = (v?: string): string => (v ?? '').trim();
+        // Only chase a real drift: undefined means we could not read it back (say
+        // nothing), and an equal value means BC kept it.
+        if (current === undefined || norm(current) === norm(r.requested)) continue;
+        // BC reformats legitimately (a code becomes a name, 2 becomes "2,00"), so a
+        // numeric comparison decides for numbers before we call it a drift.
+        const asNum = (v: string): number => Number(v.replace(/s/g, '').replace(/.(?=d{3})/g, '').replace(',', '.'));
+        const a = asNum(current); const b = asNum(r.requested);
+        if (Number.isFinite(a) && Number.isFinite(b) && a === b) continue;
+        const retry = await this.writeField(pageContextId, r.fieldName, r.requested, effectiveOptions);
+        if (isErr(retry)) continue;
+        results[i] = { ...retry.value, hint: 'Re-written after Business Central reset it while resolving the line.' };
+        if (retry.value.events) allEvents.push(...retry.value.events);
+      }
+    }
+
     return ok({ results, events: allEvents });
+  }
+
+  /**
+   * One cell of the repeater's CURRENT row, by column caption.
+   *
+   * Used to check whether BC kept what was just written into a line it is still
+   * resolving. Reads the row BC has selected -- the only way to address a line that
+   * has no stable bookmark yet.
+   */
+  private readCurrentRowCell(pageContextId: string, sectionId: string | undefined, column: string): string | undefined {
+    const ctx = this.repo.get(pageContextId);
+    if (!ctx) return undefined;
+    const resolved = resolveSection(ctx, sectionId);
+    if ('error' in resolved || !resolved.repeater) return undefined;
+    // The row carrying data is the one just written; a fresh document's repeater is
+    // otherwise all blanks.
+    for (const row of resolved.rows) {
+      const cells = row.cells as Record<string, unknown>;
+      const hasData = Object.values(cells).some(v => v !== null && v !== undefined && v !== '' && v !== 0);
+      if (!hasData) continue;
+      const v = this.cellText(row, column, resolved.repeater);
+      if (v !== undefined) return v;
+    }
+    return undefined;
   }
 
   private async writeLineCell(
@@ -420,7 +585,7 @@ export class DataService {
     rows: readonly RepeaterRow[],
     fieldName: string,
     value: string,
-    options: { bookmark?: string; rowIndex?: number },
+    options: { bookmark?: string; rowIndex?: number; targetCurrentRow?: boolean },
     sectionId?: string,
   ): Promise<Result<FieldWriteResult, ProtocolError>> {
     let bookmark = options.bookmark;
@@ -434,22 +599,35 @@ export class DataService {
       const i = rows.findIndex(r => r.bookmark === bookmark);
       if (i >= 0) rowIndex = i;
     }
-    if (!bookmark) return err(new ProtocolError('No bookmark or rowIndex provided for line cell write'));
+    // targetCurrentRow: write into whatever row BC has selected, with no SetCurrentRow.
+    // Used right after creating a line -- BC put the cursor on the row it appended, and
+    // that row cannot be addressed by position (the repeater is padded with blanks and
+    // the new row is not the last) nor by bookmark (an uncommitted line carries a
+    // placeholder BC re-keys on commit).
+    if (!bookmark && !options.targetCurrentRow) {
+      return err(new ProtocolError('No bookmark or rowIndex provided for line cell write'));
+    }
 
     // Snapshot the cell BEFORE the write so the effect can be measured afterwards.
     const beforeRow = rows.find(r => r.bookmark === bookmark) ?? (rowIndex !== undefined ? rows[rowIndex] : undefined);
     const beforeValue = beforeRow ? this.cellText(beforeRow, fieldName, repeater) : undefined;
 
-    // Step 1: select the row
-    const selectInteraction: SetCurrentRowInteraction = {
-      type: 'SetCurrentRow', formId, controlPath: repeater.controlPath, key: bookmark,
-    };
-    const selectResult = await this.session.invoke(
-      selectInteraction,
-      (event) => event.type === 'InvokeCompleted' || event.type === 'BookmarkChanged',
-    );
-    if (isErr(selectResult)) return selectResult;
-    this.repo.applyToPage(pageContextId, selectResult.value);
+    // Step 1: select the row -- SKIPPED when writing into BC's current row, which is
+    // the case right after creating a line: there is no stable key to select it by,
+    // and BC is already positioned on it.
+    let selectEvents: BCEvent[] = [];
+    if (bookmark !== undefined) {
+      const selectInteraction: SetCurrentRowInteraction = {
+        type: 'SetCurrentRow', formId, controlPath: repeater.controlPath, key: bookmark,
+      };
+      const selectResult = await this.session.invoke(
+        selectInteraction,
+        (event) => event.type === 'InvokeCompleted' || event.type === 'BookmarkChanged',
+      );
+      if (isErr(selectResult)) return selectResult;
+      this.repo.applyToPage(pageContextId, selectResult.value);
+      selectEvents = selectResult.value;
+    }
 
     // Step 2: find column by caption
     const col = repeater.columns.find(c => (c.properties.caption ?? '').toLowerCase() === fieldName.toLowerCase());
@@ -471,7 +649,7 @@ export class DataService {
       (event) => event.type === 'InvokeCompleted' || event.type === 'PropertyChanged',
     );
     if (isErr(saveResult)) return saveResult;
-    const allEvents = [...selectResult.value, ...saveResult.value];
+    const allEvents = [...selectEvents, ...saveResult.value];
     this.repo.applyToPage(pageContextId, saveResult.value);
 
     // BC reports a refused value in ValidationResults on the cell, not as an error:
@@ -507,7 +685,9 @@ export class DataService {
     // miss the row entirely. When neither source says anything we say "unverified"
     // instead of guessing.
     const echoed = lastEchoedStringValue(saveResult.value, cellPath);
-    const projected = this.readRowCell(pageContextId, sectionId, bookmark, undefined, fieldName);
+    const projected = bookmark !== undefined
+      ? this.readRowCell(pageContextId, sectionId, bookmark, undefined, fieldName)
+      : undefined;
     const observed = echoed ?? projected;
     const norm = (s?: string) => (s ?? '').trim();
     if (norm(value) === norm(beforeValue) && beforeValue !== undefined) {

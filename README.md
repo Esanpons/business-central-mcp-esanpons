@@ -19,15 +19,15 @@
 
 ## Overview
 
-| Property | Value |
-|----------|-------|
-| Language | TypeScript / Node 20+ |
-| npm package | `business-central-mcp-esanpons` (AESVA fork) |
-| BC versions | BC27, BC28 (wire-compatible) |
-| Auth | NavUserPassword (on-prem) + AAD/Entra browser login (BC Online / SaaS) |
-| Tools | 18 |
-| Tests | 742 unit/protocol + integration |
-| License | MIT |
+| Property    | Value                                                                  |
+| ----------- | ---------------------------------------------------------------------- |
+| Language    | TypeScript / Node 20+                                                  |
+| npm package | `business-central-mcp-esanpons` (AESVA fork)                           |
+| BC versions | BC27, BC28 (wire-compatible)                                           |
+| Auth        | NavUserPassword (on-prem) + AAD/Entra browser login (BC Online / SaaS) |
+| Tools       | 18                                                                     |
+| Tests       | 742 unit/protocol + integration                                        |
+| License     | MIT                                                                    |
 
 ## Install
 
@@ -115,53 +115,53 @@ Restart Claude Desktop.
 
 ## Configuration
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `BC_AUTH` | No | `UserPassword` | Auth mode. `UserPassword` = on-prem forms `/SignIn` (unchanged). `AAD` = BC Online / SaaS via Entra browser login (see [SaaS setup](docs/SETUP-GLOBAL.md#bc-online-saas--bc_authaad)). |
-| `BC_BASE_URL` | Yes | — | BC base URL. On-prem: `http://your-bc-server/BC`. SaaS: `https://businesscentral.dynamics.com/<aadTenantId>/<environment>`. |
-| `BC_USERNAME` | On-prem | — | NavUserPassword username (optional in AAD mode: used for headless Entra login). |
-| `BC_PASSWORD` | On-prem | — | NavUserPassword password (optional in AAD mode). |
-| `BC_AAD_PROFILE_DIR` | No | `./.state/aad-profile` | AAD only: persistent browser profile holding the Entra SSO session. Use an absolute path when registering globally. |
-| `BC_AAD_TOTP_SECRET` | No | — | AAD only: base32 TOTP secret for unattended MFA. Empty = bootstrap interactively with `npm run login:aad`. |
-| `BC_AAD_LOGIN_TIMEOUT` | No | `120000` | AAD only: ms budget for the OIDC login dance. |
-| `BC_PROFILE` | No | server default | Profile id, e.g. `BUSINESS MANAGER`. Affects which Role Center loads and which pages Tell Me indexes. |
-| `BC_TENANT_ID` | No | `default` | Multi-tenant deployments only. |
-| `BC_CLIENT_VERSION` | No | `27.0.0.0` | Version reported to BC during session open. |
-| `BC_APPLICATION_ID` | No | `NAV` | `navigationContext.applicationId` sent in OpenSession. BC 27 expects `NAV`; `FIN` triggers `NavCancelCredentialPromptException`. Override only for other builds. |
-| `PORT` | No | `3000` | HTTP transport port (stdio transport ignores this). |
-| `LOG_LEVEL` | No | `info` | `debug` / `info` / `warn` / `error`. |
-| `LOG_DIR` | No | `./logs` | Directory for log files. |
-| `STATE_DIR` | No | `./.state` | Directory for session state. |
-| `BC_INVOKE_TIMEOUT` | No | `30000` | Per-invoke timeout in ms. Kills hung sessions. |
-| `BC_RECONNECT_MAX_RETRIES` | No | `4` | Reconnect attempts after session death. |
-| `BC_RECONNECT_BASE_DELAY` | No | `1000` | Base delay (ms) for exponential reconnect backoff. |
-| `BC_SCREENSHOT_DIR` | No | `./screenshots` | Folder where `bc_screenshot` writes PNGs (relative paths resolve against the server's working dir). |
-| `BC_SCREENSHOT_CHROME` | No | auto-detect | Path to a Chrome/Edge executable for `bc_screenshot` / `bc_build_manual`. Auto-detected on Windows/macOS/Linux if omitted. |
-| `BC_MANUAL_DIR` | No | `./manuals` | Folder where `bc_build_manual` writes the generated Markdown / printable A4 HTML / Word document and their images. |
-| `BC_REPORT_DIR` | No | `.arxius/reports` | Folder where `bc_download_report` writes downloaded report files (PDF/Excel/Word). Relative to the server's working directory. |
+| Variable                   | Required | Default                | Description                                                                                                                                                                            |
+| -------------------------- | -------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BC_AUTH`                  | No       | `UserPassword`         | Auth mode. `UserPassword` = on-prem forms `/SignIn` (unchanged). `AAD` = BC Online / SaaS via Entra browser login (see [SaaS setup](docs/SETUP-GLOBAL.md#bc-online-saas--bc_authaad)). |
+| `BC_BASE_URL`              | Yes      | —                      | BC base URL. On-prem: `http://your-bc-server/BC`. SaaS: `https://businesscentral.dynamics.com/<aadTenantId>/<environment>`.                                                            |
+| `BC_USERNAME`              | On-prem  | —                      | NavUserPassword username (optional in AAD mode: used for headless Entra login).                                                                                                        |
+| `BC_PASSWORD`              | On-prem  | —                      | NavUserPassword password (optional in AAD mode).                                                                                                                                       |
+| `BC_AAD_PROFILE_DIR`       | No       | `./.state/aad-profile` | AAD only: persistent browser profile holding the Entra SSO session. Use an absolute path when registering globally.                                                                    |
+| `BC_AAD_TOTP_SECRET`       | No       | —                      | AAD only: base32 TOTP secret for unattended MFA. Empty = bootstrap interactively with `npm run login:aad`.                                                                             |
+| `BC_AAD_LOGIN_TIMEOUT`     | No       | `120000`               | AAD only: ms budget for the OIDC login dance.                                                                                                                                          |
+| `BC_PROFILE`               | No       | server default         | Profile id, e.g. `BUSINESS MANAGER`. Affects which Role Center loads and which pages Tell Me indexes.                                                                                  |
+| `BC_TENANT_ID`             | No       | `default`              | Multi-tenant deployments only.                                                                                                                                                         |
+| `BC_CLIENT_VERSION`        | No       | `27.0.0.0`             | Version reported to BC during session open.                                                                                                                                            |
+| `BC_APPLICATION_ID`        | No       | `NAV`                  | `navigationContext.applicationId` sent in OpenSession. BC 27 expects `NAV`; `FIN` triggers `NavCancelCredentialPromptException`. Override only for other builds.                       |
+| `PORT`                     | No       | `3000`                 | HTTP transport port (stdio transport ignores this).                                                                                                                                    |
+| `LOG_LEVEL`                | No       | `info`                 | `debug` / `info` / `warn` / `error`.                                                                                                                                                   |
+| `LOG_DIR`                  | No       | `./logs`               | Directory for log files.                                                                                                                                                               |
+| `STATE_DIR`                | No       | `./.state`             | Directory for session state.                                                                                                                                                           |
+| `BC_INVOKE_TIMEOUT`        | No       | `30000`                | Per-invoke timeout in ms. Kills hung sessions.                                                                                                                                         |
+| `BC_RECONNECT_MAX_RETRIES` | No       | `4`                    | Reconnect attempts after session death.                                                                                                                                                |
+| `BC_RECONNECT_BASE_DELAY`  | No       | `1000`                 | Base delay (ms) for exponential reconnect backoff.                                                                                                                                     |
+| `BC_SCREENSHOT_DIR`        | No       | `./screenshots`        | Folder where `bc_screenshot` writes PNGs (relative paths resolve against the server's working dir).                                                                                    |
+| `BC_SCREENSHOT_CHROME`     | No       | auto-detect            | Path to a Chrome/Edge executable for `bc_screenshot` / `bc_build_manual`. Auto-detected on Windows/macOS/Linux if omitted.                                                             |
+| `BC_MANUAL_DIR`            | No       | `./manuals`            | Folder where `bc_build_manual` writes the generated Markdown / printable A4 HTML / Word document and their images.                                                                     |
+| `BC_REPORT_DIR`            | No       | `.arxius/reports`      | Folder where `bc_download_report` writes downloaded report files (PDF/Excel/Word). Relative to the server's working directory.                                                         |
 
 ## What can it do?
 
-| Tool | What it does |
-|---|---|
-| `bc_open_page` | Open any page by ID -- lists, cards, documents, role centers. Returns the page as `sections[]` with header, lines, factboxes, and Role Center cuegroup tiles. |
-| `bc_read_data` | Refresh a single section: filter, paginate, slice, project tab/columns. Returns the same `Section` shape as `bc_open_page`. |
-| `bc_write_data` | Write field values; BC validates and echoes confirmed values. Section-aware (header, lines, factboxes, and the modal `dialog` open over the page). Reports per field whether the value actually **changed**, and BC's own words when it refused. |
-| `bc_execute_action` | Run header / row / wizard actions, OR drill down on Role Center cue tiles via `cue` input. |
-| `bc_respond_dialog` | Answer a confirmation prompt or request page (ok / cancel / yes / no / abort / close). A dialog carrying FIELDS is filled first with `bc_write_data { section: "dialog" }`. |
-| `bc_navigate` | Select rows, drill down into records, field lookups |
-| `bc_search_pages` | Tell Me search. Returns `{ name, objectType, runTarget, departmentPath, category, score }` per result. |
-| `bc_close_page` | Close a page and free server resources |
-| `bc_switch_company` | Switch company by **re-opening the session on it** (BC binds a session to its company at open time) and confirming against what BC granted. Fails rather than reporting a switch that did not happen. Every open page dies with the old session. |
-| `bc_list_companies` | Discover available companies |
-| `bc_run_report` | Execute reports and fill request page parameters (over the WebSocket). |
-| `bc_download_report` | Render a report and DOWNLOAD its output (PDF/Excel/Word) to disk via the headless browser (CDP download interception). Output-capture companion to `bc_run_report`; out-of-band. Reports needing parameters return `requestPageShown:true`. |
-| `bc_wizard_navigate` | Drive NavigatePage / wizard flows (back / next / finish / cancel) |
-| `bc_screenshot` | Capture a REAL PNG of the BC web client for a page/record. Annotate with highlight callout boxes (single, auto-numbered badges, arrows), redact fields, and crop to a section -- for manuals and docs. Fields in collapsed FastTabs or behind "Show more" are revealed automatically when highlighted (or pass `expand:true`). Saves to disk and returns the image inline — and only **after** the capture is judged good, so a failed capture never overwrites a previous image. Reports every pre-capture click, and a dialog that opened by itself. Out-of-band. |
-| `bc_build_manual` | Build a step-by-step user manual with annotated screenshots, either from a list of steps or from an existing `.md` (`source`, validated with `validate:true`). Three outputs from one authoring pass (`formats`): **Markdown** (default), a **printable A4 web page** -- real 210x297mm sheets with cover, index and page numbers, so Ctrl+P prints it or saves it as a paged PDF -- and an **editable Word document** carrying the *same page breaks as the HTML* (measured in the browser and replayed into Word), real Word styles, a live index and live page numbers. The high-level companion to `bc_screenshot`. |
-| `bc_find_object` | Resolve a page/report/table/codeunit by name or keyword to its numeric ID, from a cached object index. Use before `bc_open_page` when you don't know the id. |
-| `bc_refresh_objects` | Refresh the cached object index (reads "All Objects with Caption", page 9174) used by `bc_find_object`. |
-| `bc_health` | Server/session diagnostics: connected?, active company, open forms, modal depth, and metrics (invokes, errors, reconnects, uptime). Answers even when BC is down. |
+| Tool                 | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bc_open_page`       | Open any page by ID -- lists, cards, documents, role centers. Returns the page as `sections[]` with header, lines, factboxes, and Role Center cuegroup tiles.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `bc_read_data`       | Refresh a single section: filter, paginate, slice, project tab/columns. Returns the same `Section` shape as `bc_open_page`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `bc_write_data`      | Write field values; BC validates and echoes confirmed values. Section-aware (header, lines, factboxes, and the modal `dialog` open over the page). Reports per field whether the value actually **changed**, and BC's own words when it refused.                                                                                                                                                                                                                                                                                                                                                                        |
+| `bc_execute_action`  | Run header / row / wizard actions, OR drill down on Role Center cue tiles via `cue` input.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `bc_respond_dialog`  | Answer a confirmation prompt or request page (ok / cancel / yes / no / abort / close). A dialog carrying FIELDS is filled first with `bc_write_data { section: "dialog" }`.                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `bc_navigate`        | Select rows, drill down into records, field lookups                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `bc_search_pages`    | Tell Me search. Returns `{ name, objectType, runTarget, departmentPath, category, score }` per result.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `bc_close_page`      | Close a page and free server resources                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `bc_switch_company`  | Switch company by **re-opening the session on it** (BC binds a session to its company at open time) and confirming against what BC granted. Fails rather than reporting a switch that did not happen. Every open page dies with the old session.                                                                                                                                                                                                                                                                                                                                                                        |
+| `bc_list_companies`  | Discover available companies                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `bc_run_report`      | Execute reports and fill request page parameters (over the WebSocket).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `bc_download_report` | Render a report and DOWNLOAD its output (PDF/Excel/Word) to disk via the headless browser (CDP download interception). Output-capture companion to `bc_run_report`; out-of-band. Reports needing parameters return `requestPageShown:true`.                                                                                                                                                                                                                                                                                                                                                                             |
+| `bc_wizard_navigate` | Drive NavigatePage / wizard flows (back / next / finish / cancel)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `bc_screenshot`      | Capture a REAL PNG of the BC web client for a page/record. Annotate with highlight callout boxes (single, auto-numbered badges, arrows), redact fields, and crop to a section -- for manuals and docs. Fields in collapsed FastTabs or behind "Show more" are revealed automatically when highlighted (or pass `expand:true`). Saves to disk and returns the image inline — and only **after** the capture is judged good, so a failed capture never overwrites a previous image. Reports every pre-capture click, and a dialog that opened by itself. Out-of-band.                                                     |
+| `bc_build_manual`    | Build a step-by-step user manual with annotated screenshots, either from a list of steps or from an existing `.md` (`source`, validated with `validate:true`). Three outputs from one authoring pass (`formats`): **Markdown** (default), a **printable A4 web page** -- real 210x297mm sheets with cover, index and page numbers, so Ctrl+P prints it or saves it as a paged PDF -- and an **editable Word document** carrying the _same page breaks as the HTML_ (measured in the browser and replayed into Word), real Word styles, a live index and live page numbers. The high-level companion to `bc_screenshot`. |
+| `bc_find_object`     | Resolve a page/report/table/codeunit by name or keyword to its numeric ID, from a cached object index. Use before `bc_open_page` when you don't know the id.                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `bc_refresh_objects` | Refresh the cached object index (reads "All Objects with Caption", page 9174) used by `bc_find_object`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `bc_health`          | Server/session diagnostics: connected?, active company, open forms, modal depth, and metrics (invokes, errors, reconnects, uptime). Answers even when BC is down.                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 > **Full per-tool reference:** [`docs/README.md`](docs/README.md) is the documentation index —
 > every tool has its own page under [`docs/tools/`](docs/tools/), with cross-cutting behavior in
@@ -170,7 +170,7 @@ Restart Claude Desktop.
 > **Screenshots & manuals — which one do I use?** The
 > [documentation guide](docs/guides/documenting.md) is the decision table: one image →
 > `bc_screenshot`; a whole process → `bc_build_manual`. Then pick the format by what the reader
-> *does* with the file: `md` for repos/wikis, `html` for anything a human reads or prints (real A4
+> _does_ with the file: `md` for repos/wikis, `html` for anything a human reads or prints (real A4
 > sheets with cover, index and page numbers — Ctrl+P gives the paged PDF), `docx` when they must
 > **edit** it or you were asked for "a Word". The Word file is derived from the HTML, so both print
 > the same pages. Collapsed FastTabs and "Show more" (Additional) fields are revealed automatically
@@ -215,6 +215,7 @@ BC Server
 ```
 
 Each section carries its own content shape:
+
 - **Card-style** (`header` on Card pages, `factbox`, `requestPage`): `fields[]` and (for `header`) `actions[]`
 - **List-style** (`lines` on Documents, `header` on List pages, repeater subpages): `rows[]` and `totalRowCount`
 - **Cue tiles** (Role Center hosted CardParts): `cues[]` with each tile's `name`, `value`, `groupCaption`, `synopsis`, `hasAction`. Drill down with `bc_execute_action { section, cue }`.
@@ -236,19 +237,19 @@ Each section carries its own content shape:
 
 ## Key files
 
-| File | Purpose |
-|------|---------|
-| `src/stdio-server.ts` | npm `bin` entry -- stdio MCP transport |
-| `src/server.ts` | HTTP MCP transport entry |
-| `src/mcp/` | MCP tool registry, schemas, request handler |
-| `src/operations/` | One handler per tool (`bc_open_page`, `bc_read_data`, etc.) |
-| `src/services/` | Page, data, action, navigation, search business logic |
-| `src/protocol/` | WebSocket transport, wire types, captures |
-| `src/session/` | Session lifecycle, modal stack, reconnect |
-| `manifest.json` | Claude Desktop Extension manifest |
-| `scripts/build-dxt.ts` | Builds `.dxt` artifact for Claude Desktop |
-| `.github/workflows/release.yml` | Builds + attaches `.dxt` on `v*` tag pushes |
-| `docs/` | Documentation set — [index](docs/README.md), per-tool reference, conventions, roadmap |
+| File                            | Purpose                                                                               |
+| ------------------------------- | ------------------------------------------------------------------------------------- |
+| `src/stdio-server.ts`           | npm `bin` entry -- stdio MCP transport                                                |
+| `src/server.ts`                 | HTTP MCP transport entry                                                              |
+| `src/mcp/`                      | MCP tool registry, schemas, request handler                                           |
+| `src/operations/`               | One handler per tool (`bc_open_page`, `bc_read_data`, etc.)                           |
+| `src/services/`                 | Page, data, action, navigation, search business logic                                 |
+| `src/protocol/`                 | WebSocket transport, wire types, captures                                             |
+| `src/session/`                  | Session lifecycle, modal stack, reconnect                                             |
+| `manifest.json`                 | Claude Desktop Extension manifest                                                     |
+| `scripts/build-dxt.ts`          | Builds `.dxt` artifact for Claude Desktop                                             |
+| `.github/workflows/release.yml` | Builds + attaches `.dxt` on `v*` tag pushes                                           |
+| `docs/`                         | Documentation set — [index](docs/README.md), per-tool reference, conventions, roadmap |
 
 ## Development
 
@@ -259,6 +260,12 @@ npm install
 npm run start:stdio-direct   # Run from source
 npm test                     # 403 unit + protocol tests
 npm run test:integration     # 117 integration tests against real BC (requires running BC server)
+```
+
+Para compilar
+
+```bash
+npm run build
 ```
 
 ## Roadmap

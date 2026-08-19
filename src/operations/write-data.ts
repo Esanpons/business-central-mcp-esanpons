@@ -18,6 +18,13 @@ export interface WriteDataInput {
    * exact controlPath (those are already unambiguous).
    */
   group?: string;
+  /**
+   * Create a NEW line in the section and write these fields into it. This is how a
+   * freshly created document gets its FIRST line: its repeater is empty, so there is
+   * no bookmark or rowIndex to name, and without this the write fell through to the
+   * header path and reported "Field not found" for a line column (bc-saas F-39).
+   */
+  newLine?: boolean;
 }
 
 export interface WriteDataOutput {
@@ -45,6 +52,7 @@ export class WriteDataOperation {
       rowIndex: input.rowIndex,
       bookmark: input.bookmark,
       group: input.group,
+      newLine: input.newLine,
     });
     if (!isOk(result)) return result;
 

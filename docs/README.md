@@ -77,7 +77,7 @@ cross-cutting conventions, setup, and the roadmap.
 - **Protocol & dev reference** — [`CLAUDE.md`](../CLAUDE.md) (BC wire-protocol patterns,
   development rules, decompiled-source verification procedure).
 - **[SaaS evidence (frozen)](SAAS-EVIDENCE.md)** — how SaaS's per-tab backend WebSocket was
-  discovered, plus the 18-tool Docker-vs-SaaS parity matrix. Results only — pending work goes in
+  discovered, plus the 19-tool Docker-vs-SaaS parity matrix. Results only — pending work goes in
   the roadmap.
 
 ## Configuration

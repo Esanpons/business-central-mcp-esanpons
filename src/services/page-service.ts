@@ -338,7 +338,20 @@ export class PageService {
     else this.logger.warn(`Could not dismiss BC's error dialog (formId=${formId}); the next invoke will reconcile the modal stack.`);
   }
 
-  private async discoverAndLoadChildForms(pageContextId: string, openEvents: BCEvent[]): Promise<void> {
+  /**
+   * Discover and load the child forms (subpages, FactBoxes) embedded in a root
+   * form's control tree.
+   *
+   * PUBLIC because a page does not only arrive through `openPage`: an ACTION can
+   * open one too (`Nuevo` on a list opens the creation card, a drill-down opens a
+   * card), and those contexts used to be registered with their root form alone —
+   * no subpages at all. On a document that meant the creation context had no
+   * `lines` section, so there was no way to put the first line on a document you
+   * had just created; the caller had to guess a parameter that does not exist and
+   * got "Field not found" for a line column (bc-saas F-39). ActionService is given
+   * this method so both paths build the same context shape.
+   */
+  async discoverAndLoadChildForms(pageContextId: string, openEvents: BCEvent[]): Promise<void> {
     const ctx = this.repo.get(pageContextId);
     if (!ctx) return;
 

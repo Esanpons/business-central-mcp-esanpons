@@ -315,6 +315,71 @@ export class SessionManager {
     return { previousCompany, newCompany: created.companyName, invalidatedPageContextIds: impactedIds };
   }
 
+  /**
+   * Throw away the current session and open a brand new one on the SAME company.
+   *
+   * This is the only way back to a clean slate short of restarting the process
+   * (bc-saas F-39 §4 ter). `openForms` and the modal stack are session state — a
+   * modal BC is holding cannot be closed from the client once the dialog form is
+   * gone, and bc_close_page was observed RAISING modalDepth (2 -> 3) while cleaning
+   * up — so both only reach zero by construction, when the session they live on is
+   * replaced.
+   *
+   * Mechanically identical to switchCompany() minus the company change, and it
+   * reuses the same fence: `firstCreate` is held for the whole operation so a
+   * concurrent getSession() joins this attempt instead of opening a second session
+   * behind it. The pinned company is preserved, so a reset never silently moves the
+   * caller back to BC's default company.
+   */
+  async resetSession(): Promise<{
+    previousCompany: string;
+    newCompany: string;
+    invalidatedPageContextIds: string[];
+    previousOpenForms: number;
+    previousModalDepth: number;
+  }> {
+    const previousCompany = this.session?.companyName ?? '';
+    const previousOpenForms = this.session?.openFormIds.size ?? 0;
+    const previousModalDepth = this.session?.modalStackSnapshot().length ?? 0;
+    const impactedIds = this.pageContextRepo.listPageContextIds();
+
+    if (this.session !== null) {
+      // Polite close first: an orderly close hands the auth slot back, which is what
+      // makes the immediate re-open below reliable (BC holds it ~15s after a CRASH).
+      // A session wedged behind a modal may refuse the graceful path, so fall back to
+      // the abrupt one -- the point of a reset is that it always gets there.
+      await this.session.closeGracefully().catch(() => this.session?.close());
+      this.session = null;
+    }
+    this.pageContextRepo.clearAll();
+    this.servicesInvalidated = true;
+
+    const attempt = this.createAndPublish();
+    this.firstCreate = attempt;
+    let created: BCSession | null;
+    try {
+      created = await attempt;
+    } finally {
+      this.firstCreate = null;
+    }
+    if (created === null) throw this.createFailedError();
+
+    this.metrics?.recordReconnect();
+    this.logger.info(
+      `Session reset: new session on "${created.companyName}" `
+      + `(dropped ${previousOpenForms} open form(s), modal depth ${previousModalDepth}, `
+      + `${impactedIds.length} page context(s))`,
+    );
+
+    return {
+      previousCompany,
+      newCompany: created.companyName,
+      invalidatedPageContextIds: impactedIds,
+      previousOpenForms,
+      previousModalDepth,
+    };
+  }
+
   private reconnectFailedError(impactedIds: string[]): SessionLostError {
     // Surface the underlying auth/connect reason (e.g. AAD needs an interactive
     // `npm run login:aad` because the persisted Entra session expired) instead

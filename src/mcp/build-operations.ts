@@ -88,6 +88,11 @@ export function buildOperations(session: BCSession, deps: OperationsDeps): Opera
   const screenshotService = new ScreenshotService(config.bc, config.screenshotDir, () => session.companyName, logger, authProvider, metrics);
   const reportDownloadService = new ReportDownloadService(config.bc, config.reportDir, () => session.companyName, logger, authProvider, metrics);
   const objectIndexService = new ObjectIndexService(pageService, config.stateDir, config.bc.baseUrl, config.bc.tenantId, logger);
+  // A page opened by an action needs the same subpage/FactBox discovery as one
+  // opened by bc_open_page (bc-saas F-39: the creation context of a document had no
+  // `lines` section, so its first line could not be written).
+  actionService.setChildFormDiscovery((pcId, events) => pageService.discoverAndLoadChildForms(pcId, events));
+
 
   return {
     openPage: new OpenPageOperation(pageService),
@@ -97,7 +102,7 @@ export function buildOperations(session: BCSession, deps: OperationsDeps): Opera
     closePage: new ClosePageOperation(pageService),
     searchPages: new SearchPagesOperation(searchService),
     navigate: new NavigateOperation(navigationService),
-    respondDialog: new RespondDialogOperation(session, pageContextRepo, logger),
+    respondDialog: new RespondDialogOperation(session, pageContextRepo, logger, dataService),
     switchCompany: new SwitchCompanyOperation(switchSessionCompany, logger, onCompanySelected),
     listCompanies: new ListCompaniesOperation(pageService, dataService, () => session.companyName, logger),
     runReport: new RunReportOperation(session),

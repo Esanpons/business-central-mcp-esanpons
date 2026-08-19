@@ -9,7 +9,7 @@ import { InteractionEncoder } from './protocol/interaction-encoder.js';
 import { PageContextRepository } from './protocol/page-context-repo.js';
 import { SessionFactory } from './session/session-factory.js';
 import { SessionManager } from './session/session-manager.js';
-import { buildHealthTool, buildLazyToolRegistry, type Operations } from './mcp/tool-registry.js';
+import { buildHealthTool, buildResetSessionTool, buildLazyToolRegistry, type Operations } from './mcp/tool-registry.js';
 import { buildOperations } from './mcp/build-operations.js';
 import { MCPHandler, type JsonRpcRequest } from './mcp/handler.js';
 import { Metrics } from './services/metrics.js';
@@ -82,7 +82,10 @@ async function main() {
   // worked solely because no constructor dereferenced the session.)
   // SessionManager throws SessionLostError on recovery — MCPHandler catches it.
   const healthTool = buildHealthTool({ currentSession: () => sessionManager.currentSession, metrics, bc: config.bc });
-  const mcpHandler = new MCPHandler([...buildLazyToolRegistry(ensureSession), healthTool], logger, metrics);
+  // Registered OUTSIDE the ensureSession() gate, like bc_health: a reset must work
+  // precisely when the session is wedged, and the gate would throw before reaching it.
+  const resetTool = buildResetSessionTool(() => sessionManager.resetSession(), logger);
+  const mcpHandler = new MCPHandler([...buildLazyToolRegistry(ensureSession), healthTool, resetTool], logger, metrics);
 
   // Read JSON-RPC from stdin, write responses to stdout
   const rl = createInterface({ input: process.stdin, terminal: false });

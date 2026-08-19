@@ -5,6 +5,37 @@ import { translateBcError } from '../core/error-translator.js';
 import type { Metrics } from '../services/metrics.js';
 import { SERVER_NAME, SERVER_VERSION } from './version.js';
 
+/**
+ * The keys an object schema accepts, looking THROUGH the wrappers a tool schema may
+ * be built with: `BuildManualSchema` is a `.refine()`ed object ("source XOR
+ * title+steps"), which hides `.shape` one level down, and an `.optional()` /
+ * `.default()` wrapper hides it too. Returns an empty array when the schema is not
+ * object-shaped, which makes every caller treat it as "cannot tell" and skip the
+ * unknown-key check rather than reject a valid call.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function acceptedKeys(schema: any): string[] {
+  let node = schema;
+  for (let depth = 0; depth < 8 && node; depth++) {
+    const shape = node?.shape ?? node?._def?.shape;
+    const resolved = typeof shape === 'function' ? shape() : shape;
+    if (resolved && typeof resolved === 'object') return Object.keys(resolved);
+    // Unwrap: ZodEffects/ZodOptional/ZodDefault/ZodNullable all keep the inner
+    // schema on _def, under a name that has moved between Zod majors.
+    node = node?._def?.schema ?? node?._def?.innerType ?? node?.unwrap?.() ?? null;
+  }
+  return [];
+}
+
+/** Argument keys the tool's schema does not define. Empty when it cannot be told. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function findUnknownArgs(schema: any, args: unknown): string[] {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return [];
+  const accepted = acceptedKeys(schema);
+  if (accepted.length === 0) return [];
+  return Object.keys(args as Record<string, unknown>).filter(k => !accepted.includes(k));
+}
+
 export interface JsonRpcRequest {
   jsonrpc: string;
   id: unknown;
@@ -239,6 +270,31 @@ export class MCPHandler {
     }
 
     this.metrics?.recordInvoke();
+
+    // An argument the schema does not know is an ERROR, not something to drop.
+    //
+    // Zod strips unknown keys by default, so a caller that invents a plausible
+    // parameter gets silence: the call runs as if the parameter had never been
+    // written, and then fails somewhere else entirely. That is exactly how a
+    // fabricated `newRow: true` on bc_write_data cost a morning of debugging —
+    // stripped, the write fell through to the header path and answered "Field not
+    // found: Cantidad" for a line column, which reads like a BC problem and was
+    // catalogued as one (bc-saas F-39). Naming the unknown key, and the accepted
+    // ones, turns that into a one-turn correction.
+    const unknownArgs = findUnknownArgs(tool.zodSchema, params.arguments);
+    if (unknownArgs.length > 0) {
+      const accepted = acceptedKeys(tool.zodSchema);
+      const msg = `Unknown parameter${unknownArgs.length > 1 ? 's' : ''} for ${params.name}: `
+        + `${unknownArgs.map(k => `"${k}"`).join(', ')}. `
+        + `This parameter does not exist and was NOT applied. ${params.name} accepts: ${accepted.join(', ')}. `
+        + 'Check the tool schema before retrying — do not assume a parameter exists because it would be useful.';
+      this.metrics?.recordError('INPUT_VALIDATION', msg);
+      return {
+        jsonrpc: '2.0',
+        id: request.id,
+        result: { content: [{ type: 'text', text: msg }], isError: true },
+      };
+    }
 
     // Validate input via Zod
     const parseResult = tool.zodSchema.safeParse(params.arguments ?? {});
