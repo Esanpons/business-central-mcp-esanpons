@@ -117,6 +117,17 @@ Each step's `screenshot` is the same shape as `bc_screenshot`. What to reach for
 - `redact: ["Name"]` — black out sensitive values before the manual leaves the building.
 - `expand: true` — force every FastTab open and every "Show more" clicked, for a complete-section
   capture.
+- `clickBeforeCapture: ["Lines"]` — click named captions before the shot (a tab, a toggle, an
+  action that opens a dialog). It is a DOM click: enough for buttons and tabs, nothing more.
+- `steps: [...]` — REAL browser interactions before the shot, for what only a pointer or the
+  keyboard can reach: `{ click: "Todo" }` opens the view-selector flyout, `{ type: "reason", into:
+  "Motivo" }` fills a dialog field, `{ press: "Enter" }`, `{ selectRows: ["102318", "102319"] }`
+  selects several rows before an action, `{ wait: 800 }` lets an animation finish. Every step
+  reports `ok`/`reason` in `steps[]`. Nothing typed or selected is committed unless a step presses
+  the confirming button, so a dialog can be photographed filled in without executing it. Three
+  things to know: a card opened for a figure is in VIEW mode, so click its edit pencil before typing
+  (the tool reports `value did not change` otherwise); `Escape` with nothing open closes the page;
+  and when a caption is not found, `debugCaptions: true` returns the exact text BC renders.
 
 **You do not need `expand` just to highlight a hidden field.** If a caption lives in a collapsed
 FastTab or behind "Show more", the tool reveals it automatically and scrolls it into view
@@ -160,6 +171,8 @@ Always report the returned absolute paths back to the user — they are the deli
 | `MANUAL_ERROR` mentioning Chrome | Chrome/Edge is not installed on the server host, or `BC_SCREENSHOT_CHROME` points at the wrong path. Rendering the HTML itself needs no browser — only the captures do. |
 | `authenticated: false` | Wrong credentials or BC unreachable. Check `bc_health`. |
 | A step's image shows the page WITHOUT the click it was supposed to make | Read `clicks[]`: `reason: "disabled"` means BC greyed the action out — in a LIST it applies to the selected row, so pass the step's `bookmark` to position it first. `reason: "not found"` means the caption is not what the page renders (captions are locale-dependent). The warning also reaches the manual's `warnings`. |
+| A step's image shows the page WITHOUT a `steps` interaction | Read `steps[]`: `not found` = no visible control matched (pass `debugCaptions: true` and retry with the text BC renders); `disabled` = BC greyed it out for the selected row; `no row matched: ...` = those `selectRows` tokens hit no visible row (a list shown as tiles does not multi-select — use a real list view); `value did not change` = the field ignored the keys, usually a card in view mode — add `{ click: <edit pencil caption> }` before the `type`. |
+| A step's image is the Role Center instead of the page | A `press: "Escape"` ran with nothing open, and BC closes the page on Escape. Only press it after a step that opened something. |
 | A step's image is of a dialog nobody asked for | `unexpectedDialog` carries BC's text, usually a refusal — a bookmark only addresses the table its own list is bound to, so one from another list is rejected. Open the record another way (filter the card by its number) or drill in from its own list. |
 | The whole build fails on one step saying the browser session expired | The capture browser's session is NOT the WebSocket's; on SaaS it ages out after about an hour. It renews itself, so this only surfaces when a human is genuinely needed: run `npm run login:aad` once and rebuild. **Nothing was overwritten** — a failed capture writes no file. |
 | A blue "About this page" bubble covers the corner of an image | It should be dismissed automatically (`dismissTeachingTips`, default true). If one survives, report it — and note you can turn the dismissal off per step when the bubble IS the subject. |

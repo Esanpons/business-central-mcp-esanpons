@@ -75,12 +75,57 @@ export interface CaptureInput {
    * e.g. when documenting the tip itself.
    */
   dismissTeachingTips?: boolean;
+  /**
+   * Ordered REAL browser interactions to run before capturing, after
+   * `clickBeforeCapture`. See ScreenshotStep: these move the mouse and press keys
+   * through the browser's input pipeline, which is what BC's flyouts, dialogs and
+   * multi-row selection respond to; a DOM `.click()` reaches none of them.
+   */
+  steps?: ScreenshotStep[];
+  /** Report the visible clickable captions of the page as captured (diagnostic). */
+  debugCaptions?: boolean;
   out?: string;
   width?: number;
   height?: number;
   scale?: number;
   fullPage?: boolean;
   inline?: boolean;
+}
+
+/** Keys that can be held during a step's click. */
+export type StepModifier = 'Control' | 'Shift' | 'Alt' | 'Meta';
+
+/**
+ * One real browser interaction. Exactly ONE of click / selector / type / press /
+ * selectRows / wait is set (the schema enforces it); `into` qualifies `type`,
+ * `modifiers` qualifies `click` / `selector`.
+ */
+export interface ScreenshotStep {
+  /** Real pointer click on the control with this caption (aria-label / title / text; exact, then prefix). */
+  click?: string;
+  /** Real pointer click on the first visible element matching this CSS selector. */
+  selector?: string;
+  /** Text typed with the keyboard, into `into` when given, else into the focused control. */
+  type?: string;
+  /** Caption of the field that receives `type`. */
+  into?: string;
+  /** Key or chord: "Escape", "Enter", "Control+A". */
+  press?: string;
+  /** Row tokens to multi-select: plain click on the first match, Control+click on the rest. */
+  selectRows?: string[];
+  /** Milliseconds to pause. */
+  wait?: number;
+  /** Keys held during `click` / `selector`. */
+  modifiers?: StepModifier[];
+}
+
+/** What happened to one step. `ok:false` means the image shows the page WITHOUT it. */
+export interface StepOutcome {
+  /** Human-readable rendering of the step, e.g. `click "Todo"`. */
+  step: string;
+  ok: boolean;
+  /** 'not found' | 'disabled' | 'no row matched: ...' | the browser's own error. */
+  reason?: string;
 }
 
 export interface CaptureResult {
@@ -105,9 +150,18 @@ export interface CaptureResult {
    */
   clicks?: Array<{ target: string; clicked: boolean; reason?: 'not found' | 'disabled' }>;
   /**
+   * Per-`steps` outcome, in the order requested. Same contract as `clicks`: a
+   * step that did nothing is reported here AND in `warning`, never dropped, so
+   * an image that lacks the interaction cannot pass for one that has it.
+   */
+  steps?: StepOutcome[];
+  /** With `debugCaptions`: visible clickable captions / aria-labels / titles, deduplicated, capped. */
+  captions?: string[];
+  /**
    * Text of a modal dialog that appeared WITHOUT being asked for (i.e. no
-   * clickBeforeCapture). Usually BC explaining why it refused what the deep link
-   * asked for, in which case the PNG shows that message instead of the page.
+   * clickBeforeCapture and no steps). Usually BC explaining why it refused what
+   * the deep link asked for, in which case the PNG shows that message instead of
+   * the page.
    */
   unexpectedDialog?: string;
   /** Loud, human-readable alert when something is wrong with the capture (redaction misses first). */
@@ -277,6 +331,15 @@ export class ScreenshotService {
       }
     }
 
+    // Real browser interactions, after the caption clicks so a step can build on
+    // what they opened. Each one reports its own outcome; a miss never aborts the
+    // capture, because the image of "what the page looked like without it" is
+    // still the honest answer -- as long as the result says so.
+    let steps: StepOutcome[] | undefined;
+    if (input.steps?.length) {
+      steps = await this.runSteps(p, input.steps);
+    }
+
     // Redacted captions are just blur-style annotations, appended AFTER the
     // requested ones — the split below relies on that order.
     const requested = input.annotations ?? [];
@@ -289,8 +352,10 @@ export class ScreenshotService {
 
     // F-9: a dialog that appeared on its own. Checked BEFORE the annotation pass,
     // which can legitimately open things, and only meaningful when the caller did
-    // NOT ask for one: a manual documenting a dialog passes clickBeforeCapture.
-    const unexpectedDialog = input.clickBeforeCapture?.length
+    // NOT ask for one: a manual documenting a dialog passes clickBeforeCapture or
+    // steps, and either of those may open one on purpose.
+    const askedForInteraction = !!input.clickBeforeCapture?.length || !!input.steps?.length;
+    const unexpectedDialog = askedForInteraction
       ? undefined
       : await detectModalDialog(p);
 
@@ -320,6 +385,11 @@ export class ScreenshotService {
       clip = res.clip;
       await sleep(300); // let any scroll-into-view settle before the capture
     }
+
+    // Diagnostic: what could be clicked on the page AS CAPTURED (after every
+    // reveal, click and step), so a caption that matched nothing can be corrected
+    // from the real text instead of guessed again.
+    const captions = input.debugCaptions ? await this.listCaptions(p) : undefined;
 
     // Capture to MEMORY, not to the destination file.
     //
@@ -370,6 +440,15 @@ export class ScreenshotService {
         + 'means the caption does not match what the page renders (it is locale-dependent).',
       );
     }
+    const failedSteps = (steps ?? []).filter((s) => !s.ok);
+    if (failedSteps.length) {
+      warnings.push(
+        `STEP DID NOTHING: ${failedSteps.map((s) => `${s.step} (${s.reason ?? 'unknown'})`).join(', ')}. `
+        + 'The image shows the page WITHOUT that interaction. "not found" means no visible control matched the caption '
+        + 'or selector (pass debugCaptions:true to see the exact text BC renders); "disabled" means BC greyed it out for '
+        + 'the current row/state; "no row matched" lists the selectRows tokens that hit no visible row.',
+      );
+    }
     if (unexpectedDialog) {
       warnings.push(
         `A DIALOG NOBODY ASKED FOR is on screen, so the image shows it instead of the page: "${unexpectedDialog}". `
@@ -403,6 +482,8 @@ export class ScreenshotService {
       annotations,
       redactions,
       ...(clicks ? { clicks } : {}),
+      ...(steps ? { steps } : {}),
+      ...(captions ? { captions } : {}),
       ...(unexpectedDialog ? { unexpectedDialog } : {}),
       ...(warning ? { warning } : {}),
       cropped: !!clip,
@@ -681,7 +762,7 @@ export class ScreenshotService {
             // native attribute on a <button>); its class also carries "disabled".
             const off = el.getAttribute('aria-disabled') === 'true'
               || el.hasAttribute('disabled')
-              || /(^|[\s-])disabled([\s-]|$)/i.test(String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className || ''));
+              || /(^|\s)(disabled|is-disabled|ms-[A-Za-z]+--disabled)(\s|$)/i.test(String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className || ''));
             if (off) { disabled = true; continue; }
             if (exact) { el.click(); return 'clicked'; }
             if (!prefixHit) prefixHit = el;
@@ -837,6 +918,370 @@ export class ScreenshotService {
         this.logger.debug('screenshot', `reveal frame skipped: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
+  }
+
+  // ---------- steps: real browser interactions before the capture ----------
+  //
+  // Everything here goes through puppeteer's INPUT pipeline (ElementHandle.click
+  // moves the mouse and fires pointerdown/mousedown/.../click; page.keyboard sends
+  // real key events). That is the whole point: BC's view selector, column menus,
+  // the "..." overflow and multi-row selection react to pointer/keyboard events and
+  // ignore the synthetic DOM `.click()` that clickBeforeCapture performs. The
+  // in-browser callbacks below hold NO named nested functions (tsx/esbuild wraps
+  // those in a `__name` helper that does not exist in the page); normalisation is
+  // inlined on purpose.
+
+  /** Render a step for `StepOutcome.step` and the log line. */
+  private describeStep(s: ScreenshotStep): string {
+    const mods = s.modifiers?.length ? ` +${s.modifiers.join('+')}` : '';
+    if (s.click !== undefined) return `click "${s.click}"${mods}`;
+    if (s.selector !== undefined) return `selector "${s.selector}"${mods}`;
+    if (s.type !== undefined) return s.into !== undefined ? `type "${s.type}" into "${s.into}"` : `type "${s.type}"`;
+    if (s.press !== undefined) return `press "${s.press}"`;
+    if (s.selectRows !== undefined) return `selectRows [${s.selectRows.join(', ')}]`;
+    if (s.wait !== undefined) return `wait ${s.wait}ms`;
+    return 'empty step';
+  }
+
+  /**
+   * Run the caller's steps in order. A step that fails is REPORTED and the run
+   * continues: the image of the page without that interaction is still the honest
+   * answer, provided the result says so (the warning does). Each step is followed
+   * by a short settle pause so BC can render what it opened.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async runSteps(p: any, steps: ScreenshotStep[]): Promise<StepOutcome[]> {
+    const out: StepOutcome[] = [];
+    for (const s of steps) {
+      const label = this.describeStep(s);
+      let reason: string | undefined;
+      try {
+        if (s.click !== undefined) reason = await this.clickReal(p, { caption: s.click }, s.modifiers);
+        else if (s.selector !== undefined) reason = await this.clickReal(p, { selector: s.selector }, s.modifiers);
+        else if (s.type !== undefined) reason = await this.typeInto(p, s.type, s.into);
+        else if (s.press !== undefined) reason = await this.pressChord(p, s.press);
+        else if (s.selectRows !== undefined) reason = await this.selectRows(p, s.selectRows);
+        else if (s.wait !== undefined) await sleep(Math.max(0, Math.min(s.wait, 30000)));
+        else reason = 'empty step';
+      } catch (e) {
+        reason = e instanceof Error ? e.message : String(e);
+      }
+      this.logger.info(`[screenshot] step ${label} -> ${reason ?? 'ok'}`);
+      out.push(reason ? { step: label, ok: false, reason } : { step: label, ok: true });
+      if (s.wait === undefined) await sleep(600);
+    }
+    return out;
+  }
+
+  /**
+   * Locate ONE visible control across every frame and hand back the frame's
+   * ElementHandle, so the caller can click it for real. By caption: aria-label,
+   * title or visible text, exact first, then prefix -- the same matching
+   * clickByCaption uses, widened to labels, inputs, tabs and menu items so a step
+   * can name a field or an entry of an open menu. By selector: the first visible
+   * match. A control BC greyed out is told apart from a missing one.
+   */
+  private async findHandle(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    p: any,
+    by: { caption?: string; selector?: string },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): Promise<{ handle?: any; reason?: 'not found' | 'disabled' }> {
+    let sawDisabled = false;
+    for (const f of p.frames()) {
+      try {
+        const jh = await f.evaluateHandle((spec: { caption?: string; selector?: string }) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const doc = (globalThis as any).document;
+          if (spec.selector) {
+            const list = doc.querySelectorAll(spec.selector);
+            for (let i = 0; i < list.length; i++) {
+              const el = list[i];
+              if (el.offsetParent !== null || (el.getClientRects && el.getClientRects().length > 0)) return el;
+            }
+            return null;
+          }
+          const target = (spec.caption || '').replace(/\s+/g, ' ').trim().toLowerCase();
+          if (!target) return null;
+          const els = doc.querySelectorAll(
+            'button,[role="button"],[role="menuitem"],[role="menuitemcheckbox"],[role="tab"],[role="option"],[role="link"],'
+            + 'a,input,textarea,select,label,summary,[aria-expanded],[aria-label],[title],[class*="caption"],[class*="header"]',
+          );
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          let prefixHit: any = null;
+          let disabled = false;
+          for (let i = 0; i < els.length; i++) {
+            const el = els[i];
+            const visible = el.offsetParent !== null || (el.getClientRects && el.getClientRects().length > 0);
+            if (!visible) continue;
+            const text = (el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            const label = (el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            const title = (el.getAttribute('title') || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            const exact = text === target || label === target || title === target;
+            const prefix = text.indexOf(target) === 0 || label.indexOf(target) === 0 || title.indexOf(target) === 0;
+            if (!exact && !prefix) continue;
+            const off = el.getAttribute('aria-disabled') === 'true'
+              || el.hasAttribute('disabled')
+              || /(^|\s)(disabled|is-disabled|ms-[A-Za-z]+--disabled)(\s|$)/i.test(String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className || ''));
+            if (off) { disabled = true; continue; }
+            if (exact) return el;
+            if (!prefixHit) prefixHit = el;
+          }
+          if (prefixHit) return prefixHit;
+          return disabled ? 'disabled' : null;
+        }, by);
+        const el = jh.asElement ? jh.asElement() : null;
+        if (el) return { handle: el };
+        const v = await jh.jsonValue().catch(() => null);
+        await jh.dispose().catch(() => undefined);
+        if (v === 'disabled') sawDisabled = true;
+      } catch {
+        // cross-origin / detached frame
+      }
+    }
+    return { reason: sawDisabled ? 'disabled' : 'not found' };
+  }
+
+  /** Real pointer click, with the requested modifier keys held for its duration. */
+  private async clickReal(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    p: any,
+    by: { caption?: string; selector?: string },
+    modifiers?: StepModifier[],
+  ): Promise<string | undefined> {
+    const { handle, reason } = await this.findHandle(p, by);
+    if (!handle) return reason;
+    const held = modifiers ?? [];
+    try {
+      for (const m of held) await p.keyboard.down(m);
+      await handle.click();
+    } finally {
+      for (const m of [...held].reverse()) await p.keyboard.up(m).catch(() => undefined);
+      await handle.dispose().catch(() => undefined);
+    }
+    return undefined;
+  }
+
+  /**
+   * Type through the keyboard. With `into`, the named control is focused first: a
+   * caption usually names the LABEL, and the element that takes keystrokes is the
+   * input beside it (`label[for]`, else the nearest field-sized ancestor that holds
+   * one). Without `into`, the text goes wherever focus already is -- the field a
+   * previous click landed on, typically the mandatory one of a dialog.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async typeInto(p: any, text: string, into?: string): Promise<string | undefined> {
+    if (into !== undefined) {
+      const { handle, reason } = await this.findHandle(p, { caption: into });
+      if (!handle) return reason;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const target = await handle.evaluateHandle((el: any) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const doc = (globalThis as any).document;
+        const SEL = 'input:not([type="hidden"]),textarea,[contenteditable="true"],[role="textbox"],[role="combobox"]';
+        if (el.matches && el.matches(SEL)) return el;
+        const forId = el.getAttribute && el.getAttribute('for');
+        if (forId) {
+          const t = doc.getElementById(forId);
+          if (t) return t;
+        }
+        // Climb only while the ancestor is still field-sized: a whole form also
+        // "contains an input", and that one would be the wrong field.
+        const vh = doc.documentElement.clientHeight || 1000;
+        let up = el;
+        for (let step = 0; step < 6 && up; step++) {
+          const r = up.getBoundingClientRect ? up.getBoundingClientRect() : null;
+          if (r && r.height > vh * 0.5) break;
+          const hit = up.querySelector ? up.querySelector(SEL) : null;
+          if (hit) return hit;
+          up = up.parentElement;
+        }
+        return el;
+      });
+      const tEl = target.asElement ? target.asElement() : null;
+      await handle.dispose().catch(() => undefined);
+      if (!tEl) return 'not found';
+      try {
+        await tEl.click();
+      } finally {
+        await tEl.dispose().catch(() => undefined);
+      }
+      await sleep(200);
+    }
+    // Judge the typing by its EFFECT, not by the keys having been sent. Measured
+    // on SaaS: a card opened by deep link is in VIEW mode, so its inputs swallow
+    // every keystroke, and "ok" here would have shipped a figure of the untouched
+    // field as if the value had been entered (the F-36/F-38 pattern). The focused
+    // control's value is read before and after; when nothing has focus there is
+    // nothing to compare and the outcome stays "ok".
+    const before = await this.focusedValue(p);
+    await p.keyboard.type(text, { delay: 15 });
+    const after = await this.focusedValue(p);
+    if (before !== undefined && after !== undefined && before === after) {
+      return 'value did not change: the focused control ignored the keys (read-only field, or a card opened in view mode -- click its edit action first)';
+    }
+    return undefined;
+  }
+
+  /**
+   * Value of the control that currently has focus, in whichever frame holds it
+   * (`value` for inputs, text for contenteditable/textbox roles). `undefined`
+   * when nothing editable is focused.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async focusedValue(p: any): Promise<string | undefined> {
+    for (const f of p.frames()) {
+      try {
+        const v: string | null = await f.evaluate(() => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const el = (globalThis as any).document.activeElement;
+          if (!el || el === (globalThis as any).document.body) return null;
+          if (typeof el.value === 'string') return el.value;
+          if (el.isContentEditable || el.getAttribute('role') === 'textbox') return el.textContent || '';
+          return null;
+        });
+        if (v !== null) return v;
+      } catch {
+        // cross-origin / detached frame
+      }
+    }
+    return undefined;
+  }
+
+  /** Press a key or a chord ("Control+A"): every part but the last is held. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async pressChord(p: any, chord: string): Promise<string | undefined> {
+    const parts = chord.split('+').map((x) => x.trim()).filter((x) => x.length > 0)
+      .map((x) => (/^ctrl$/i.test(x) ? 'Control' : /^cmd$/i.test(x) ? 'Meta' : /^esc$/i.test(x) ? 'Escape' : x));
+    const key = parts[parts.length - 1];
+    if (!key) return 'empty key';
+    const held = parts.slice(0, -1);
+    try {
+      for (const m of held) await p.keyboard.down(m);
+      await p.keyboard.press(key);
+    } finally {
+      for (const m of [...held].reverse()) await p.keyboard.up(m).catch(() => undefined);
+    }
+    return undefined;
+  }
+
+  /**
+   * Multi-row selection the way a person does it: click the first matching row,
+   * Control+click the rest. A row is matched by its visible text containing the
+   * token; the click lands on a cell that holds NO link, because clicking a link
+   * cell drills into the record instead of selecting the row (BC renders the
+   * first column of most lists as a link). Tokens that matched nothing are
+   * returned as the reason -- the selection is then incomplete and the image
+   * shows exactly that.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async selectRows(p: any, tokens: string[]): Promise<string | undefined> {
+    const misses: string[] = [];
+    let first = true;
+    for (const token of tokens) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let cell: any = null;
+      for (const f of p.frames()) {
+        try {
+          const jh = await f.evaluateHandle((want: string) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const doc = (globalThis as any).document;
+            const t = (want || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            if (!t) return null;
+            const rows = doc.querySelectorAll('tr,[role="row"]');
+            for (let i = 0; i < rows.length; i++) {
+              const row = rows[i];
+              if (row.querySelector('th,[role="columnheader"]')) continue;
+              const visible = row.offsetParent !== null || (row.getClientRects && row.getClientRects().length > 0);
+              if (!visible) continue;
+              const text = (row.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+              if (text.indexOf(t) < 0) continue;
+              const cells = row.querySelectorAll('td,[role="gridcell"],[role="cell"]');
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              let fallback: any = null;
+              for (let k = 0; k < cells.length; k++) {
+                const c = cells[k];
+                const r = c.getBoundingClientRect();
+                if (!(r.width > 8 && r.height > 8)) continue;
+                if (!fallback) fallback = c;
+                if (c.querySelector('a,button,[role="link"],[role="button"]')) continue;
+                return c;
+              }
+              return fallback || row;
+            }
+            return null;
+          }, token);
+          const el = jh.asElement ? jh.asElement() : null;
+          if (el) { cell = el; break; }
+          await jh.dispose().catch(() => undefined);
+        } catch {
+          // cross-origin / detached frame
+        }
+      }
+      if (!cell) { misses.push(token); continue; }
+      try {
+        if (!first) await p.keyboard.down('Control');
+        await cell.click();
+      } finally {
+        if (!first) await p.keyboard.up('Control').catch(() => undefined);
+        await cell.dispose().catch(() => undefined);
+      }
+      first = false;
+      await sleep(250);
+    }
+    return misses.length ? `no row matched: ${misses.join(', ')}` : undefined;
+  }
+
+  /**
+   * The visible clickable captions of the page as it stands: aria-labels, titles
+   * and short visible texts of buttons, links, menu items and tabs, across every
+   * frame, deduplicated and capped. The diagnostic behind `debugCaptions`.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async listCaptions(p: any): Promise<string[]> {
+    const seen = new Set<string>();
+    for (const f of p.frames()) {
+      try {
+        const arr: string[] = await f.evaluate(() => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const doc = (globalThis as any).document;
+          const els = doc.querySelectorAll(
+            'button,[role="button"],[role="menuitem"],[role="menuitemcheckbox"],[role="tab"],[role="option"],[role="link"],a,summary,[aria-label],[title]',
+          );
+          const out: string[] = [];
+          for (let i = 0; i < els.length; i++) {
+            const el = els[i];
+            const visible = el.offsetParent !== null || (el.getClientRects && el.getClientRects().length > 0);
+            if (!visible) continue;
+            // Icon-only buttons carry a Private Use Area glyph of the icon font as their
+            // text (U+E6AA, U+E721, ...), which renders as an empty caption; zero-width
+            // characters are not `\s` either. Strip both, measured live on SaaS.
+            const ZW = /[​-‍﻿-]/g;
+            const label = (el.getAttribute('aria-label') || '').replace(ZW, '').replace(/\s+/g, ' ').trim();
+            const title = (el.getAttribute('title') || '').replace(ZW, '').replace(/\s+/g, ' ').trim();
+            let text = el.childElementCount < 4 ? (el.textContent || '').replace(ZW, '').replace(/\s+/g, ' ').trim() : '';
+            // BC's navigation entries render the caption twice (a visible span plus a
+            // screen-reader copy), so textContent reads "FinanzasFinanzas": fold it.
+            if (text.length % 2 === 0 && text.length > 0) {
+              const half = text.slice(0, text.length / 2);
+              if (half === text.slice(text.length / 2)) text = half;
+            }
+            // A title is a caption only when it is short; the long ones are tooltips
+            // ("Permite registrar transacciones financieras, ...") and drown the list.
+            if (label) out.push(label);
+            if (title && title.length <= 60 && title !== label) out.push(title);
+            if (text && text.length <= 60 && text !== label && text !== title) out.push(text);
+          }
+          return out;
+        });
+        // BC stamps a literal "undefined" aria-label on some shell controls.
+        for (const c of arr) if (c && c !== 'undefined') seen.add(c);
+      } catch {
+        // cross-origin / detached frame
+      }
+      if (seen.size >= 400) break;
+    }
+    return Array.from(seen).slice(0, 400);
   }
 
   // ---------- output path ----------

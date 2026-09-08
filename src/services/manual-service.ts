@@ -12,6 +12,7 @@ import { renderDocx } from './manual-docx.js';
 import { measurePageBreaks, type PageBreakMap } from './manual-paginate.js';
 import { parseManualSource, formatDiagnostics } from './manual-source.js';
 import type { Metrics } from './metrics.js';
+import type { ScreenshotStep } from './screenshot-service.js';
 
 export interface ManualScreenshotSpec {
   pageId: string | number;
@@ -23,6 +24,10 @@ export interface ManualScreenshotSpec {
   expand?: boolean;
   /** Captions to click before capturing (e.g. ["Lines"]). Same semantics as bc_screenshot. */
   clickBeforeCapture?: string[];
+  /** Ordered REAL browser interactions before capturing. Same semantics as bc_screenshot. */
+  steps?: ScreenshotStep[];
+  /** Report the page's visible clickable captions (diagnostic). Same semantics as bc_screenshot. */
+  debugCaptions?: boolean;
   /** Close BC's "About this page" callouts before capturing (default true). */
   dismissTeachingTips?: boolean;
   width?: number;
@@ -248,6 +253,8 @@ export class ManualService {
             crop: s.crop === undefined ? undefined : Array.isArray(s.crop) ? s.crop : [s.crop],
             expand: s.expand,
             clickBeforeCapture: s.clickBeforeCapture,
+            steps: s.steps,
+            debugCaptions: s.debugCaptions,
             dismissTeachingTips: s.dismissTeachingTips,
             width: s.width,
             height: s.height,

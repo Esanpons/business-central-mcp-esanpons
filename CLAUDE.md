@@ -517,6 +517,38 @@ Key empirical findings (all verified live, BC27):
   bottom-left corner of every image in a manual (F-7). The close button is found structurally (a
   close control INSIDE a teaching/callout container), never by caption — the cross has no accessible
   text, which is why `clickBeforeCapture: ["Cerrar"]` could not reach it.
+- **`steps` are REAL browser interactions; `clickBeforeCapture` is a DOM `.click()`.** Measured on
+  SaaS (2026-09-08): `clickBeforeCapture: ["Todo"]` reported `clicked:true` on the view selector and
+  the flyout was NOT in the image — it opens on pointer events. `steps` run through puppeteer's input
+  pipeline (`ElementHandle.click()`, `page.keyboard`): `{ click }` / `{ selector }` real clicks with
+  optional held `modifiers`, `{ type, into }` keyboard text (a label resolves to the input beside it,
+  climbing only while the ancestor is still field-sized), `{ press }` chords, `{ selectRows }`
+  multi-row selection (plain click, then Control+click, on a cell that holds NO link — the first
+  column of a list is a link and drills in), `{ wait }`. Outcomes in `steps[]` + `STEP DID NOTHING`
+  warning, same contract as `clicks[]`; `debugCaptions` returns `captions[]` (what the page renders,
+  to fix a miss). A modal opened by a step is not an `unexpectedDialog`. The browser is torn down
+  after the capture, so typed values and selections are never committed unless a step presses the
+  confirming button. Files: `screenshot-service.ts` (`runSteps`, `findHandle`, `clickReal`,
+  `typeInto`, `focusedValue`, `pressChord`, `selectRows`, `listCaptions`), `schemas.ts`
+  (`ScreenshotStepSchema`, flat object + `.refine`, never a `oneOf`), `manual-service.ts` (per-step
+  pass-through). Tests: `tests/unit/screenshot-steps.test.ts`.
+  **Verified live on SaaS (2026-09-08, `Dev` sandbox, ES locale)** with one-off scripts (deleted,
+  evidence in `logs/server.log` as `[screenshot] step ...`): `{ click: "Todo" }` opens the view
+  selector flyout while the DOM click does not; `{ selectRows }` marks two rows of the Sales Order
+  list; `Alt+Q` + `{ type }` opens Tell Me with the text in it; typing into `Nombre` of a Customer
+  Card after clicking its edit pencil shows the value in the figure and the WS read afterwards
+  still returns the old name. Four things that run taught, all now in code or docs: (1) a **card
+  opened by deep link is in VIEW mode on SaaS** and its inputs swallow keystrokes, so `typeInto`
+  judges by EFFECT — the focused control's value before vs after (`focusedValue`) — and reports
+  `value did not change` instead of `ok`; click the pencil first (its caption is "Realizar cambios
+  en la página" in ES, find it with `debugCaptions`). (2) **Fluent theme classes contain
+  `states_is-disabled`** on perfectly enabled buttons, and the old `/(^|[\s-])disabled([\s-]|$)/`
+  class test in BOTH `clickByCaption` and `findHandle` reported them `disabled` — it now requires a
+  whole class token (`disabled`, `is-disabled`, `ms-X--disabled`). (3) **`press: "Escape"` with
+  nothing open CLOSES the page** (back to the Role Center) — it is not a no-op. (4) `captions[]` was
+  drowned in icon-font glyphs (PUA U+E6xx render as ""), literal `"undefined"` labels, doubled
+  navigation text (`FinanzasFinanzas`) and tooltip-length titles; all four are filtered. Also: a list
+  rendered as TILES (page 22 on SaaS) does not multi-select — `selectRows` needs a real list view.
 
 Config: `BC_SCREENSHOT_DIR` (default `./screenshots`), `BC_SCREENSHOT_CHROME` (browser path
 override; auto-detected otherwise). Requires Chrome/Edge installed. `puppeteer-core` is a

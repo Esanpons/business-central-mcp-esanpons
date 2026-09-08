@@ -221,4 +221,18 @@ describe('ManualService.build -- capture diagnostics (never trust success alone)
     });
     expect(f.captures()[0]?.clickBeforeCapture).toEqual(['Lines']);
   });
+
+  it('forwards steps and debugCaptions to the capture engine', async () => {
+    // A manual step that needs a flyout, a filled dialog or a multi-row selection
+    // carries `steps`; dropping them here would silently produce the figure WITHOUT
+    // the interaction, which is exactly what steps[] / warning exist to prevent.
+    const f = fakeScreenshots();
+    const steps = [{ selectRows: ['102318', '102319'] }, { click: 'Agrupar' }, { wait: 800 }];
+    await new ManualService(f.service, dir, logger).build({
+      title: 'M', name: 'steps',
+      steps: [{ heading: 'Agrupa', screenshot: { pageId: 50003, steps, debugCaptions: true } }],
+    });
+    expect(f.captures()[0]?.steps).toEqual(steps);
+    expect(f.captures()[0]?.debugCaptions).toBe(true);
+  });
 });

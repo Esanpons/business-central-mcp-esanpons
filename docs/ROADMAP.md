@@ -32,6 +32,7 @@
 | `npm run verify:features saas` | **6 PASS · 0 FAIL · 0 SKIP** — fully green, including a line write and a confirmed line delete end to end. Also confirms the SaaS/AAD path re-worked in this pass (browser-leak fix, page-level WS capture, profile close sequencing, tenant-less report queries) |
 | `npm run test-battery docker` (2026-08-13) | **16 PASS · 1 FAIL · 1 SKIP** — the FAIL is G16 (wizard 1803 has no Cancel after Next on this database; confirmed pre-existing by re-running the same probe against the previous code). `bc_switch_company` passes for the first time: it now re-opens the session on the company (see CLAUDE.md "Company Switching") |
 | `npm run test-battery saas` (2026-08-13) | **16 PASS · 1 FAIL · 1 SKIP** — the FAIL is G5 (report download on SaaS), unchanged. Includes a confirmed company switch and a dialog write on a fresh `Dev` sandbox |
+| `bc_screenshot { steps }` live on SaaS (2026-09-08) | Real click opens the view-selector flyout (DOM click does not), `selectRows` marks two Sales Orders, `Alt+Q` + typing opens Tell Me, a typed card value shows in the figure and is NOT committed (WS read unchanged). Found and fixed on the way: false `disabled` from Fluent theme classes, `type` reporting `ok` on a view-mode card, `captions[]` noise. See CLAUDE.md "Screenshot Capture" and CHANGELOG |
 
 Test counts are deliberately NOT frozen here — run the command.
 

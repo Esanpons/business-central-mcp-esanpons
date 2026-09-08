@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (2026-09-08) — `steps`: real browser interactions before a capture
+
+`bc_screenshot` (and each `bc_build_manual` step) takes `steps`, an ordered list of interactions
+performed in the headless browser after `clickBeforeCapture` and before the shot:
+
+- `{ click }` — a REAL pointer click (mouse moved, pointer/mouse events fired) on the control
+  whose caption / aria-label / title matches. `clickBeforeCapture` fires a DOM `.click()`, which
+  BC's view selector, column menus and the `...` overflow ignore: they open on pointer events.
+  `modifiers` holds Control / Shift / Alt / Meta during the click.
+- `{ selector }` — the same real click by CSS selector, for icon-only controls with no caption.
+- `{ type, into }` — keyboard text into the field named by `into` (a label resolves to the input
+  beside it), or into whatever has focus. The browser is discarded after the capture, so a value
+  typed into a dialog is never committed unless a step presses the confirming button itself —
+  which is what lets a manual photograph a dialog filled in without executing it.
+- `{ press }` — a key or chord (`Escape`, `Enter`, `Control+A`).
+- `{ selectRows: [tokens] }` — multi-row selection: plain click on the first row whose text
+  contains the token, Control+click on the rest, on a cell that is not a link (a link cell would
+  drill into the record instead). The only way to photograph an action applied to several
+  documents at once.
+- `{ wait }` — a pause, for a flyout animation.
+
+Every step comes back in `steps[]` as `{ step, ok, reason }` and a failed one raises `STEP DID
+NOTHING` in `warning`, on the same principle as `clicks[]`: an image that lacks the interaction
+must never pass for one that has it. `debugCaptions: true` adds `captions[]` — the visible captions
+/ aria-labels / titles of every clickable control as captured — so a caption that matched nothing
+can be corrected from the text BC actually renders instead of guessed again. A modal opened by a
+step is not reported as `unexpectedDialog` (the call asked for interaction).
+
+Why: documenting the DeCA module for a customer left some fifty manual figures that could not be
+captured because they needed a flyout, a filled-in dialog or a multi-row selection. All three are
+ordinary web-client gestures; the capture engine simply had no way to make them.
+
+Verified live on SaaS the same day (Customer List / Sales Order List / Customer Card, ES locale):
+the real click opens the view-selector flyout where the DOM click leaves the page untouched, two
+Sales Orders come out selected, `Alt+Q` + typing opens Tell Me with the text in it, and a value
+typed into a card field shows in the figure while a WebSocket read afterwards still returns the
+old value. The run also found and fixed three things:
+
+- **`{ type }` is judged by its effect.** A card opened by deep link is in VIEW mode on SaaS and
+  its inputs swallow every keystroke, yet the step reported `ok`. The focused control's value is
+  now read before and after typing and an unchanged value comes back as `ok:false` with
+  `value did not change ...` (click the edit pencil first).
+- **False `disabled` on enabled buttons.** Fluent theme classes such as
+  `thm-bgcolor--palette--N--states_is-disabled` sit on perfectly enabled controls (the card's edit
+  pencil, for one), and the class test shared by `clickBeforeCapture` and `steps` matched the
+  substring. It now requires a whole class token (`disabled`, `is-disabled`, `ms-X--disabled`).
+  This was a pre-existing bug of `clickBeforeCapture` as well.
+- **`captions[]` noise.** Icon-font glyphs (Private Use Area, rendered as `""`), a literal
+  `"undefined"` aria-label, doubled navigation text (`FinanzasFinanzas`) and tooltip-length titles
+  are filtered, so the list is captions rather than DOM debris.
+
+Documented as well: `press: "Escape"` with nothing open CLOSES the page (the capture then shows the
+Role Center), and a list rendered as tiles does not multi-select.
+
 ### Fixed (2026-08-13) — nothing reports success for work Business Central never did
 
 Eight faults found while building real manuals against a customer environment (catalogued as

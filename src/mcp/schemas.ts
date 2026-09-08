@@ -176,6 +176,33 @@ const AnnotationSchema = z.object({
 
 const HighlightSchema = z.union([z.string(), z.array(z.string()), z.array(AnnotationSchema)]);
 
+const StepModifierSchema = z.enum(['Control', 'Shift', 'Alt', 'Meta']);
+
+/**
+ * One REAL browser interaction run before a capture. Kept a FLAT object with every
+ * key optional and "exactly one kind" enforced by .refine(): a discriminated union
+ * would publish a oneOf, and Claude Code's MCP client drops a tool whose schema
+ * carries a combinator (see ExecuteActionSchema).
+ */
+export const ScreenshotStepSchema = z.object({
+  click: z.string().optional().describe('REAL pointer click (mouse moved, pointer/mouse events fired) on the first visible, enabled control whose visible text, aria-label or title matches this caption (exact first, then prefix), across every frame. Unlike clickBeforeCapture, which fires a DOM .click(), this opens the flyouts BC only shows on pointer events: the view selector ("Todo"), column menus, the "..." overflow. Modifier keys via `modifiers`.'),
+  selector: z.string().optional().describe('REAL pointer click on the first visible element matching this CSS selector. The escape hatch for a control with no caption at all (an icon-only button). Find candidates with debugCaptions, or from the class names BC renders.'),
+  type: z.string().optional().describe('Text to type with the keyboard. With `into`, the control named by that caption is focused first (a label resolves to the input beside it); without `into` the text goes to whatever currently has focus, e.g. the field a previous click landed on.'),
+  into: z.string().optional().describe('Caption of the field that receives `type`. Only valid together with `type`.'),
+  press: z.string().optional().describe('A key or chord to press: "Escape", "Enter", "Tab", "ArrowDown", "Control+A", "Shift+End". Chords hold every part but the last.'),
+  selectRows: z.array(z.string()).min(1).optional().describe('Multi-select repeater rows: for each token, the first visible row whose text contains it is clicked on a non-link cell -- plain click for the first, Control+click for the rest -- which is how the web client builds a multi-row selection for actions like Agrupar/Publicar on several documents. Reports every token that matched no row.'),
+  wait: z.number().optional().describe('Pause this many milliseconds (max 30000) before the next step, e.g. for a flyout animation.'),
+  modifiers: z.array(StepModifierSchema).optional().describe('Keys held during `click` / `selector`: Control, Shift, Alt, Meta.'),
+})
+  .refine((d) => [d.click, d.selector, d.type, d.press, d.selectRows, d.wait].filter((v) => v !== undefined).length === 1, {
+    message: 'A step is exactly ONE of click / selector / type / press / selectRows / wait (into qualifies type; modifiers qualify click / selector).',
+  })
+  .refine((d) => d.into === undefined || d.type !== undefined, { message: '`into` only accompanies `type`.' })
+  .refine((d) => d.modifiers === undefined || d.click !== undefined || d.selector !== undefined, { message: '`modifiers` only accompany `click` / `selector`.' });
+
+const STEPS_DESC = 'Ordered REAL browser interactions to perform before capturing, after clickBeforeCapture: [{ click }, { selector }, { type, into }, { press }, { selectRows }, { wait }]. Use it to photograph what a caption click cannot reach: a view-selector flyout, an overflow menu, a dialog with text typed into it, a multi-row selection. Every step reports back in `steps` with ok:true/false + reason, and a failed step raises a `warning` -- the image then shows the page WITHOUT that step. The browser is torn down after the capture, so nothing typed or selected is ever committed unless a step presses the confirming button itself.';
+const DEBUG_CAPTIONS_DESC = 'Also return `captions`: the visible captions / aria-labels / titles of clickable controls on the page as captured (deduplicated, capped). Use it when a click or clickBeforeCapture came back "not found", to see the exact locale-dependent text BC renders and retry with it.';
+
 export const ScreenshotSchema = z.object({
   pageId: NumericIdInput.describe('Numeric BC page ID to screenshot (e.g., 21 for Customer Card, 22 for Customer List). Use bc_search_pages to find IDs.'),
   bookmark: z.string().optional().describe('Open a specific record before capturing. Bookmarks come from list row results in bc_open_page / bc_read_data. Omit for list/role-center pages.'),
@@ -184,7 +211,9 @@ export const ScreenshotSchema = z.object({
   redact: z.array(z.string()).optional().describe('Captions to black out for privacy (each drawn as an opaque box).'),
   crop: z.union([z.string(), z.array(z.string())]).optional().describe('Caption(s) to crop the screenshot to. The image is clipped to the bounding box enclosing the located caption(s) plus padding — use to capture just one section/FactBox/field area.'),
   expand: z.boolean().optional().describe('Reveal hidden content before capturing: expand every collapsed FastTab/group and click every "Show more" toggle so additional fields appear. Default false. Even when false, a reveal pass runs automatically if a requested highlight/crop caption turns out to be hidden behind a collapsed group or "Show more" (reveal-when-needed). Set true to force the fully-expanded view for a whole-section screenshot.'),
-  clickBeforeCapture: z.array(z.string()).optional().describe('Captions of controls to CLICK before capturing, in order (e.g. ["Lines"] to open a document line grid, or a tab name). Use when a section only reveals its content on an explicit toggle and you want to name it instead of relying on expand. Matched by visible text or aria-label, exact then prefix. In a LIST the action applies to the row BC has selected, which this cannot choose: pass `bookmark` to position it first, or the click may land on a disabled button. Every click reports back in `clicks` with clicked:true/false + reason.'),
+  clickBeforeCapture: z.array(z.string()).optional().describe('Captions of controls to CLICK before capturing, in order (e.g. ["Lines"] to open a document line grid, or a tab name). Use when a section only reveals its content on an explicit toggle and you want to name it instead of relying on expand. Matched by visible text or aria-label, exact then prefix. In a LIST the action applies to the row BC has selected, which this cannot choose: pass `bookmark` to position it first, or the click may land on a disabled button. Every click reports back in `clicks` with clicked:true/false + reason. This is a DOM .click(): for a flyout, a menu or anything that needs a real pointer or the keyboard, use `steps`.'),
+  steps: z.array(ScreenshotStepSchema).optional().describe(STEPS_DESC),
+  debugCaptions: z.boolean().optional().describe(DEBUG_CAPTIONS_DESC),
   dismissTeachingTips: z.boolean().optional().describe('Close BC\'s "About this page" callouts before capturing (default true). They pop on first visit and a capture browser is always a first visit, so they otherwise cover the bottom-left corner of every image. Set false only when documenting the callout itself.'),
   out: z.string().optional().describe('Output file path. Absolute path is used as-is; a relative name is placed under BC_SCREENSHOT_DIR. Omit to auto-name as page-<id>-<timestamp>.png.'),
   width: z.number().optional().describe('Viewport width in pixels (default 1600).'),
@@ -202,7 +231,9 @@ const ManualScreenshotSchema = z.object({
   redact: z.array(z.string()).optional().describe('Captions to black out for privacy.'),
   crop: z.union([z.string(), z.array(z.string())]).optional().describe('Caption(s) to crop the image to.'),
   expand: z.boolean().optional().describe('Expand all collapsed FastTabs/groups and click every "Show more" before capturing, so additional fields are visible. Default false (a reveal pass still runs automatically when a highlight/crop caption is hidden).'),
-  clickBeforeCapture: z.array(z.string()).optional().describe('Captions of controls to CLICK before capturing, in order (e.g. ["Lines"] to open a document line grid, or a tab name). Use when a section only reveals its content on an explicit toggle and you want to name it instead of relying on expand. Matched by visible text or aria-label, exact then prefix. In a LIST the action applies to the row BC has selected, which this cannot choose: pass `bookmark` to position it first, or the click may land on a disabled button. Every click reports back in `clicks` with clicked:true/false + reason.'),
+  clickBeforeCapture: z.array(z.string()).optional().describe('Captions of controls to CLICK before capturing, in order (e.g. ["Lines"] to open a document line grid, or a tab name). Use when a section only reveals its content on an explicit toggle and you want to name it instead of relying on expand. Matched by visible text or aria-label, exact then prefix. In a LIST the action applies to the row BC has selected, which this cannot choose: pass `bookmark` to position it first, or the click may land on a disabled button. Every click reports back in `clicks` with clicked:true/false + reason. This is a DOM .click(): for a flyout, a menu or anything that needs a real pointer or the keyboard, use `steps`.'),
+  steps: z.array(ScreenshotStepSchema).optional().describe(STEPS_DESC),
+  debugCaptions: z.boolean().optional().describe(DEBUG_CAPTIONS_DESC),
   dismissTeachingTips: z.boolean().optional().describe('Close BC\'s "About this page" callouts before capturing (default true). They pop on first visit and a capture browser is always a first visit, so they otherwise cover the bottom-left corner of every image. Set false only when documenting the callout itself.'),
   width: z.number().optional(),
   height: z.number().optional(),

@@ -1,6 +1,8 @@
 import { ok, err, type Result } from '../core/result.js';
 import { ProtocolError } from '../core/errors.js';
-import type { ScreenshotService, CaptureInput, Annotation } from '../services/screenshot-service.js';
+import type {
+  ScreenshotService, CaptureInput, Annotation, ScreenshotStep, StepOutcome,
+} from '../services/screenshot-service.js';
 
 /** Flexible highlight input: a caption, a list of captions (auto-numbered), or full annotations. */
 export type HighlightInput = string | string[] | Annotation[];
@@ -14,6 +16,10 @@ export interface ScreenshotInput {
   crop?: string | string[];
   expand?: boolean;
   clickBeforeCapture?: string[];
+  /** Ordered REAL browser interactions to perform before capturing (see ScreenshotStep). */
+  steps?: ScreenshotStep[];
+  /** Return the visible clickable captions of the page in `captions`, to correct a step that matched nothing. */
+  debugCaptions?: boolean;
   dismissTeachingTips?: boolean;
   out?: string;
   width?: number;
@@ -41,6 +47,14 @@ export interface ScreenshotOutput {
    * selected — position it with `bookmark`) or its caption matched nothing.
    */
   clicks?: Array<{ target: string; clicked: boolean; reason?: 'not found' | 'disabled' }>;
+  /**
+   * Per-`steps` outcome, in order. ALWAYS check it: `ok:false` means the image shows
+   * the page WITHOUT that interaction, and `reason` says why (not found / disabled /
+   * no row matched / the browser's own error).
+   */
+  steps?: StepOutcome[];
+  /** With `debugCaptions`: the visible clickable captions of the page as captured. */
+  captions?: string[];
   /** A modal dialog that opened by itself, i.e. BC refusing what was asked. */
   unexpectedDialog?: string;
   /** Loud alert about the capture (a failed redaction above all). Absent when clean. */
@@ -75,6 +89,8 @@ export class ScreenshotOperation {
       crop: input.crop === undefined ? undefined : Array.isArray(input.crop) ? input.crop : [input.crop],
       expand: input.expand,
       clickBeforeCapture: input.clickBeforeCapture,
+      steps: input.steps,
+      debugCaptions: input.debugCaptions,
       dismissTeachingTips: input.dismissTeachingTips,
       out: input.out,
       width: input.width,
