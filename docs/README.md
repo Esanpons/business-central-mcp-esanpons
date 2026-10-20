@@ -55,6 +55,7 @@ cross-cutting conventions, setup, and the roadmap.
 |------|--------------|-----|
 | `bc_screenshot` | Capture a real PNG of the BC web client, with highlight/redact/crop and FastTab reveal. Writes the file only when the capture is good, and reports what went wrong when it is not. | [tools/bc_screenshot.md](tools/bc_screenshot.md) |
 | `bc_build_manual` | Assemble annotated screenshots + prose into a Markdown, printable A4 (Ctrl+P) and/or editable Word user manual — one authoring pass, the same page breaks in all of them. | [tools/bc_build_manual.md](tools/bc_build_manual.md) |
+| `bc_record` | Record an MP4 video of the real web client performing a circuit of `steps` the way a person would (visible cursor, real clicks, human-paced typing, a caption per step) plus a `.json` timeline. Needs ffmpeg. | [tools/bc_record.md](tools/bc_record.md) |
 
 ## Guides & reference
 - **[Manual source format](guides/manual-source-format.md)** — the Markdown format `bc_build_manual`

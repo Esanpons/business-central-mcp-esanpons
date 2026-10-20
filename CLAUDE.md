@@ -587,6 +587,104 @@ box of the given caption(s). All locate controls by visible caption (no dependen
 ids). The in-browser annotate function must contain NO named nested functions — under tsx/esbuild
 those get a `__name` wrapper that is undefined in the browser (`drawn`/`crops` use inline `.map`).
 
+## Video Recording (`bc_record`) — Fork addition
+
+`bc_record` records an **MP4 video** of the BC web client while a circuit of `steps` is performed
+in it the way a person would. It is `bc_screenshot` with a camera on: same authenticated headless
+browser, same deep link, same `steps` (`click` / `selector` / `hover` / `type` / `press` /
+`selectRows` / `wait`, each with an optional `label`), but every step runs through a VISIBLE
+cursor that glides to its target along an eased path (`glidePath`), clicks with a ripple, types at
+~70 ms per key, and a caption strip names the step. A title card opens the video (`intro`), each
+step is followed by `pace` (default 1.2 s), the final state is held (`outro`). Out-of-band like
+`bc_screenshot`: the WebSocket session is never touched. Output: H.264 MP4 (1920x1080, 30 fps,
+`yuv420p`) under `BC_RECORDING_DIR` (default `./recordings`, gitignored) plus `<video>.json`, the
+timeline (every step with the millisecond it began) for subtitles / narration / editing.
+
+Design decisions, all measured live on `devel1` (2026-10-20):
+- **Its own screencast, not puppeteer's.** `page.screencast()` writes each CDP frame
+  `round(fps * dt)` times; a cursor moving at ~60 Hz hands it 16 ms gaps that round to ZERO, and the
+  file came out 24.4 s long for 20.5 s of real time — the timeline no longer matched the picture. It
+  also encodes VP9 only (a second ffmpeg pass to get a playable MP4). `src/services/screencast.ts`
+  keeps the newest `Page.screencastFrame` (JPEG q90) and a scheduler writes it to ffmpeg exactly
+  `fps` times per second of ELAPSED time (sample-and-hold), straight to libx264 in one pass.
+  `elapsedMs()` is the clock the timeline is stamped with. Verified: 7-step circuit -> 19.9 s file
+  for 19.9 s measured, 598 frames, captions within a frame of their `atMs`.
+- **Headless Chrome paints no pointer.** The cursor, the click ripple, the caption strip and the
+  title card are ONE overlay in the TOP document (BC content is in an iframe; a `position:fixed`
+  element above it covers everything). It is injected as a plain JS STRING (`OVERLAY_ENSURE`),
+  never a serialized function (the tsx `__name` lesson), and re-created on every draw if BC replaced
+  the body. The real mouse (`page.mouse.move`) and the drawn cursor move in lockstep, so hover
+  states in the page and the pointer in the picture agree. `ElementHandle.clickablePoint()` already
+  adds the iframe offsets, so the overlay (top-level coordinates) and the click land in the same place.
+- **One engine, protected hooks.** `ScreenshotService` exposes `openPage` (the whole set-up of a
+  capture: viewport, cookies, deep link, login-wall recovery, SPA readiness, BC error page, teaching
+  tips, reveal), `runSteps`, `findHandle` & co., and the hooks `clickHandle` / `hoverHandle` /
+  `beforeStep` / `settleAfterStep` / `typingDelayMs` / `logTag`. `RecordingService extends
+  ScreenshotService` overrides only the hooks, so caption matching, `selectRows`, the view-mode
+  typing verdict and every step outcome are one copy. A `wait` step without a label keeps the
+  previous caption on screen ("wait 1500ms" is noise to a viewer).
+- **Nothing half-written.** The encoder works on `<out>.part.mp4`; the file is renamed into place
+  only after the run has been judged good (login wall at the end = throw), so a failed take never
+  replaces a previous video (the bc_screenshot F-10 rule). `resolveFfmpeg()` runs BEFORE the browser
+  is launched: `BC_FFMPEG`, then PATH, then the `imageio-ffmpeg` (pip), `Gyan.FFmpeg` (winget),
+  `C:fmpegin`, `/usr/bin`, Homebrew locations; a missing one names the three ways to install it.
+  Nothing is bundled (same policy as the browser). On this machine ffmpeg comes from
+  `imageio_ffmpeg` (Python 3.13 site-packages), auto-detected.
+- **Steps resolve captions in the TOPMOST page.** BC stacks pages as sibling `form.ms-nav-root-form`
+  elements in ONE frame (list under card under dialog), every one full-size and "visible", so the first
+  "Customer No." in document order was the LIST's FactBox link behind the card — typing there closed
+  the card while every step said `ok` (measured recording an order, 2026-10-20). `findHandle` /
+  `selectRows` search the last visible root form (`[role=dialog]` counts) first, the whole document
+  only when it has nothing (the shell's search box, Tell Me); `frames(p)` is most-recent first. The
+  lines grid of a document is addressed with `selector: 'td[controlname="No."]'` / `"Quantity"` /
+  `"Qty. to Ship"` (BC stamps `controlname` on the draft row's cells), then `type` + `press Tab`.
+  A card opened by deep link on devel1 is in VIEW mode: click `button[title="Realizar cambios en la
+  página"]` before typing. The JBC extension on devel1 RETAINS every locally created or edited
+  sales order ("There are active retention reasons and the document cannot be processed",
+  `Scheduled Retention` = Sí, not editable by admin, `Modify Retention` renders empty), so a
+  shipment cannot be posted from a new order there; invoices are not retained.
+- **Grid cells are clicked at their VISIBLE centre.** `clickablePoint()` ignores overflow
+  clipping, and BC's lines grid scrolls back while the cursor glides: a Quantity cell to the right
+  of the grid was "clicked" over the FactBox pane, or on the cell that slid under the point (the
+  "5" went into Description; verified by reading the order back over the WebSocket). `aim()` /
+  `visibleCentre()` in `recording-service.ts` scroll the cell inside its own containers, clip the
+  rect by every overflow ancestor and the frame, add the frame offset, wait for two equal readings,
+  and re-scroll right before `mouse.down`. Always verify a recorded data entry by reading the
+  record back (`bc_read_data`); a video where every step says `ok` can still have typed into the
+  wrong cell.
+- **Plain by default; `goto` carries a circuit across pages.** A recording has no title card and no
+  caption strip unless `title` / `captions:true` are passed. `{ goto: 9301 }` opens another page in
+  the same tab and company: it accepts BC's beforeunload prompt (puppeteer's `goto` otherwise waits
+  on it until its 60 s timeout) and waits for `domcontentloaded` + `waitReady`, never `networkidle`
+  (BC's transport keeps the network busy). Tell Me's first result for "Sales Invoices" on devel1 was
+  the POSTED list, so prefer `goto` to Tell Me. In a lookup dialog (Get Shipment Lines) only the
+  visible columns are in the DOM: `selectRows` by the Document No., not by a column off to the right.
+- **`settle` paces the take on BC, not on guesses.** After every step `waitQuiet` polls every frame
+  until no DOM mutation for 250 ms (cap `settle`, default 8 s). Measured: the 46-step circuit with
+  fixed waits took 62 s at best; the same circuit with NO `wait` steps and settle took 33 s with every
+  posting verified. A MutationObserver per document (flag `window.__bcQuiet`) stamps the last change.
+- **Tempo is the caller's:** `pace` (pause after each step), `glide` (longest cursor move), `typingDelay`
+  (ms per key) and `speed` (multiplier over the three AND over every `wait` step, via `waitScale` in
+  the base runner). Measured: the 46-step sales circuit takes 140 s at the default tempo and 62 s with
+  pace/glide/typingDelay 0 and waits of only what BC needs (1.5-2 s after opening a card, 6-7 s after
+  a posting). Below that the next step acts on a page that is not there yet and reports `not found`.
+- **devel1 state since 2026-10-20:** every non-Microsoft app (Global Base JBC, Utils/Stats JBC,
+  Data Sync, Azure Functions Connection, JBC_JAPAN Security, Advanced Cloud Security, FixIssues,
+  BCBench Container Probe, BC Multisession Harness, workspace) is UNINSTALLED (still published:
+  `Install-NAVApp` restores). With JBC installed no sales order could be posted by `admin` (retention,
+  see above). The complete sales circuit (order -> ship -> invoice from shipment -> posted invoice)
+  is recorded in company **CRONUS International Ltd.** (customer 10000, item 1000), whose posting
+  setups are complete; CRONUS_04 lacks COGS / inventory posting accounts for the test items.
+- JPEG frames are full-range: the scale filter adds `out_range=tv,format=yuv420p` so the file is
+  tagged plain `yuv420p` (`yuvj420p` trips some players).
+
+Files: `src/services/recording-service.ts`, `src/services/screencast.ts`, `src/services/ffmpeg.ts`,
+`src/operations/record.ts`, `src/mcp/schemas.ts` (`RecordSchema`; `hover` + `label` on
+`ScreenshotStepSchema`), `src/mcp/tool-registry.ts`, `src/core/config.ts` (`recordingDir`),
+`src/services/metrics.ts` (`browser.recordings`). Tests: `tests/unit/recording.test.ts`. Live:
+`npm run test-battery docker` records a 2-step circuit. Full reference:
+[`docs/tools/bc_record.md`](docs/tools/bc_record.md).
+
 **Producing documentation? Read [`docs/guides/documenting.md`](docs/guides/documenting.md) first.**
 It is the decision table any agent should follow: one image -> `bc_screenshot`; a process ->
 `bc_build_manual`; `md` for repos/wikis, `html` for anything a human reads or prints, `docx` when

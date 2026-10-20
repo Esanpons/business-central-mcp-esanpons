@@ -222,6 +222,19 @@ try {
     else rec('bc_screenshot', 'FAIL', A(r).error.message);
   } catch (e) { rec('bc_screenshot', 'FAIL', String(e)); }
 
+  // --- bc_record (out-of-band browser + ffmpeg): a short, data-neutral circuit ---
+  try {
+    const r = await h.ops.record.execute({
+      pageId: '22', title: `Battery ${ENV}`, intro: 500, outro: 500, pace: 600,
+      steps: [{ hover: 'Nuevo', label: 'Battery: hover' }, { wait: 400 }],
+    });
+    if (isOk(r)) {
+      const v = A(r.value);
+      const okSteps = v.steps.every((s: { ok: boolean }) => s.ok);
+      rec('bc_record', v.path && okSteps ? 'PASS' : 'FAIL', `${v.format} ${v.width}x${v.height}@${v.fps} ${Math.round(v.durationMs / 100) / 10}s steps=${v.steps.length}${v.warning ? ` warning=${v.warning}` : ''}`);
+    } else rec('bc_record', 'FAIL', A(r).error.message);
+  } catch (e) { rec('bc_record', 'FAIL', String(e)); }
+
   // --- bc_build_manual (uses screenshot engine) ---
   try {
     const r = await h.ops.buildManual.execute(A({ title: `Battery ${ENV}`, intro: 'test', steps: [{ heading: 'Customer List', body: 'Lista de clientes', screenshot: { pageId: '22' } }], formats: ['md'] }));

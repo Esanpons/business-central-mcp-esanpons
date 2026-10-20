@@ -42,6 +42,7 @@ import { FilterService } from '../../src/services/filter-service.js';
 import { NavigationService } from '../../src/services/navigation-service.js';
 import { SearchService } from '../../src/services/search-service.js';
 import { ScreenshotService } from '../../src/services/screenshot-service.js';
+import { RecordingService } from '../../src/services/recording-service.js';
 import { ReportDownloadService } from '../../src/services/report-download-service.js';
 import { ManualService } from '../../src/services/manual-service.js';
 import { ObjectIndexService } from '../../src/services/object-index-service.js';
@@ -59,6 +60,7 @@ import { ListCompaniesOperation } from '../../src/operations/list-companies.js';
 import { RunReportOperation } from '../../src/operations/run-report.js';
 import { DownloadReportOperation } from '../../src/operations/download-report.js';
 import { ScreenshotOperation } from '../../src/operations/screenshot.js';
+import { RecordOperation } from '../../src/operations/record.js';
 import { BuildManualOperation } from '../../src/operations/build-manual.js';
 import { FindObjectOperation } from '../../src/operations/find-object.js';
 import { RefreshObjectsOperation } from '../../src/operations/refresh-objects.js';
@@ -82,6 +84,7 @@ export interface Harness {
     navigation: NavigationService;
     search: SearchService;
     screenshot: ScreenshotService;
+    recording: RecordingService;
     reportDownload: ReportDownloadService;
     manual: ManualService;
     objectIndex: ObjectIndexService;
@@ -100,6 +103,7 @@ export interface Harness {
     runReport: RunReportOperation;
     downloadReport: DownloadReportOperation;
     screenshot: ScreenshotOperation;
+    record: RecordOperation;
     buildManual: BuildManualOperation;
     findObject: FindObjectOperation;
     refreshObjects: RefreshObjectsOperation;
@@ -153,6 +157,7 @@ export async function createHarness(env: EnvName, options: HarnessOptions = {}):
     const navigation = new NavigationService(s, repo, logger);
     const search = new SearchService(s, logger);
     const screenshot = new ScreenshotService(cfg.bc, cfg.screenshotDir, () => session.companyName, logger, auth);
+    const recording = new RecordingService(cfg.bc, cfg.recordingDir, () => session.companyName, logger, auth);
     const reportDownload = new ReportDownloadService(cfg.bc, cfg.reportDir, () => session.companyName, logger, auth);
     const manual = new ManualService(screenshot, cfg.manualDir, logger);
     const objectIndex = new ObjectIndexService(page, cfg.stateDir, cfg.bc.baseUrl, cfg.bc.tenantId, logger);
@@ -162,7 +167,7 @@ export async function createHarness(env: EnvName, options: HarnessOptions = {}):
     // Same as the real server: late FactBox refreshes BC pushes between invokes.
     s.onUnsolicitedEvents((events) => repo.applyEvents(events));
     return {
-      services: { page, data, action, filter, navigation, search, screenshot, reportDownload, manual, objectIndex },
+      services: { page, data, action, filter, navigation, search, screenshot, recording, reportDownload, manual, objectIndex },
       ops: {
         openPage: new OpenPageOperation(page),
         readData: new ReadDataOperation(data, repo, page),
@@ -181,6 +186,7 @@ export async function createHarness(env: EnvName, options: HarnessOptions = {}):
         runReport: new RunReportOperation(s),
         downloadReport: new DownloadReportOperation(reportDownload),
         screenshot: new ScreenshotOperation(screenshot),
+        record: new RecordOperation(recording),
         buildManual: new BuildManualOperation(manual),
         findObject: new FindObjectOperation(objectIndex),
         refreshObjects: new RefreshObjectsOperation(objectIndex),

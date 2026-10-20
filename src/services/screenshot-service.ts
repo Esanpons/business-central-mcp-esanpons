@@ -105,6 +105,10 @@ export interface ScreenshotStep {
   click?: string;
   /** Real pointer click on the first visible element matching this CSS selector. */
   selector?: string;
+  /** Move the pointer onto the control with this caption without clicking (tooltips, hover states; in a recording, "look here"). */
+  hover?: string;
+  /** Open another page by id (deep link, same browser tab) and wait for it, e.g. to continue a circuit on a different list. */
+  goto?: string | number;
   /** Text typed with the keyboard, into `into` when given, else into the focused control. */
   type?: string;
   /** Caption of the field that receives `type`. */
@@ -117,6 +121,11 @@ export interface ScreenshotStep {
   wait?: number;
   /** Keys held during `click` / `selector`. */
   modifiers?: StepModifier[];
+  /**
+   * Narration caption for this step, shown on screen while it runs in a `bc_record`
+   * video ("Open the customer card"). A screenshot ignores it.
+   */
+  label?: string;
 }
 
 /**
@@ -239,23 +248,54 @@ interface Rect { x: number; y: number; w: number; h: number; }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+/** What `openPage` needs to land the browser on a BC page (the first half of a capture). */
+export type OpenPageInput = Pick<CaptureInput, 'pageId' | 'bookmark' | 'company' | 'width' | 'height' | 'scale' | 'dismissTeachingTips' | 'expand'>;
+
+/** Where `openPage` landed. */
+export interface OpenedPage {
+  url: string;
+  pageId: string;
+  company: string | undefined;
+  spaReady: boolean;
+}
+
+/**
+ * The browser engine is shared with `RecordingService` (bc_record), which extends
+ * this class: it opens the page the same way and runs the same `steps`, but through
+ * an animated pointer and a screencast. Everything a subclass needs to replace is a
+ * `protected` hook (clickHandle / hoverHandle / typingDelayMs / beforeStep /
+ * settleAfterStep); the matching logic (findHandle, selectRows, typeInto) is one
+ * copy, so a caption that works in a screenshot works in a recording.
+ */
 export class ScreenshotService {
   private _auth?: IBCAuthProvider;
 
+  /** Keyboard delay between typed characters. A recording slows this to a human pace. */
+  protected typingDelayMs = 15;
+
+  /** Prefix of this engine's log lines (`[screenshot]`, `[record]`). */
+  protected logTag = 'screenshot';
+
+  /** Divisor applied to `wait` steps (a recording's `speed`). */
+  protected waitScale = 1;
+
+  /** Company the current page was opened in (so a `goto` step stays in it). */
+  protected lastCompany: string | undefined;
+
   constructor(
-    private readonly config: BCConfig,
+    protected readonly config: BCConfig,
     private readonly screenshotDir: string,
-    private readonly getCompany: () => string | undefined,
-    private readonly logger: Logger,
+    protected readonly getCompany: () => string | undefined,
+    protected readonly logger: Logger,
     authProvider?: IBCAuthProvider,
-    private readonly metrics?: Metrics,
+    protected readonly metrics?: Metrics,
   ) {
     this._auth = authProvider;
   }
 
   /** Shared auth provider (one login for WS + browser). Standalone scripts that
    * don't inject one get a self-contained forms provider built from config. */
-  private auth(): IBCAuthProvider {
+  protected auth(): IBCAuthProvider {
     if (!this._auth) this._auth = fallbackFormsProvider(this.config, this.logger);
     return this._auth;
   }
@@ -306,12 +346,19 @@ export class ScreenshotService {
     }
   }
 
+  /**
+   * Land the browser on a BC page, authenticated and settled: viewport, cookie
+   * injection, deep link, login-wall recovery, SPA readiness, BC's own error page
+   * (which THROWS, see below), teaching tips and the optional reveal pass. This is
+   * the first half of a capture and the whole set-up of a recording.
+   */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async captureInner(p: any, cookies: unknown[], input: CaptureInput): Promise<CaptureResult> {
+  protected async openPage(p: any, cookies: unknown[], input: OpenPageInput, tag = 'screenshot'): Promise<OpenedPage> {
     const pageId = String(input.pageId).trim();
     const company = input.company || this.getCompany();
+    this.lastCompany = company;
     const url = deepLinkPage(this.config, pageId, input.bookmark, company);
-    this.logger.info(`[screenshot] capturing ${url}`);
+    this.logger.info(`[${tag}] opening ${url}`);
 
     const width = input.width ?? 1600;
     const height = input.height ?? 1000;
@@ -325,7 +372,7 @@ export class ScreenshotService {
     // and when it cannot be recovered unattended, this THROWS with what to do,
     // instead of letting us photograph a login form and call it a success (F-10).
     await recoverIfLoggedOut(p, this.auth(), this.config, this.logger, {
-      tag: 'screenshot',
+      tag,
       returnTo: url,
       applyCookies: async (jar: RawCookie[]) => { await p.setCookie(...jar); },
     });
@@ -341,7 +388,7 @@ export class ScreenshotService {
     if (bcError) {
       throw new Error(
         `BC returned an error page instead of page ${pageId}: "${bcError}" `
-        + `(url: ${url}). No screenshot was written. If it mentions the company, check the `
+        + `(url: ${url}). Nothing was written. If it mentions the company, check the `
         + `\`company\` argument / the session company (${company ?? 'none'}); otherwise check the page id and bookmark.`,
       );
     }
@@ -352,7 +399,7 @@ export class ScreenshotService {
     if (input.dismissTeachingTips !== false) {
       const dismissed = await this.dismissTeachingTips(p);
       if (dismissed) {
-        this.logger.info(`[screenshot] dismissed ${dismissed} teaching tip(s)`);
+        this.logger.info(`[${tag}] dismissed ${dismissed} teaching tip(s)`);
         await sleep(400);
       }
     }
@@ -362,6 +409,15 @@ export class ScreenshotService {
       await this.revealAll(p);
       await sleep(800); // let the relayout settle before locating controls
     }
+
+    return { url, pageId, company, spaReady };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async captureInner(p: any, cookies: unknown[], input: CaptureInput): Promise<CaptureResult> {
+    const width = input.width ?? 1600;
+    const height = input.height ?? 1000;
+    const { url, pageId, spaReady } = await this.openPage(p, cookies, input);
 
     // G6: explicit toggles. They run after the `expand` reveal pass (so a caption
     // that pass already opened is not toggled shut again) but BEFORE the automatic
@@ -684,7 +740,7 @@ export class ScreenshotService {
     };
 
     const perFrame: Array<{ drawn: Array<{ found: boolean; rect: Rect | null }>; crops: Array<Rect | null> }> = [];
-    for (const f of p.frames()) {
+    for (const f of this.frames(p)) {
       try {
         const res = await f.evaluate(inFrame, { annotations, cropTargets, scrollTarget });
         // Translate the crop rects out of the FRAME's coordinate system into the
@@ -740,7 +796,7 @@ export class ScreenshotService {
    * accumulation. Returns {0,0} if the frame is detached mid-capture.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async frameOffset(p: any, f: any): Promise<{ x: number; y: number }> {
+  protected async frameOffset(p: any, f: any): Promise<{ x: number; y: number }> {
     try {
       if (f === p.mainFrame()) return { x: 0, y: 0 };
       const el = await f.frameElement();
@@ -780,7 +836,7 @@ export class ScreenshotService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async clickByCaption(p: any, caption: string): Promise<'clicked' | 'disabled' | 'not found'> {
     let sawDisabled = false;
-    for (const f of p.frames()) {
+    for (const f of this.frames(p)) {
       try {
         const hit: string = await f.evaluate((want: string) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -836,9 +892,9 @@ export class ScreenshotService {
    * Returns how many were dismissed.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async dismissTeachingTips(p: any): Promise<number> {
+  protected async dismissTeachingTips(p: any): Promise<number> {
     let total = 0;
-    for (const f of p.frames()) {
+    for (const f of this.frames(p)) {
       try {
         total += await f.evaluate(() => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -873,8 +929,8 @@ export class ScreenshotService {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async revealAll(p: any): Promise<void> {
-    for (const f of p.frames()) {
+  protected async revealAll(p: any): Promise<void> {
+    for (const f of this.frames(p)) {
       try {
         // 1. Expand every collapsed section header. Loop because expanding one can
         //    surface nested collapsibles; bounded so a pathological page can't spin.
@@ -974,10 +1030,12 @@ export class ScreenshotService {
   // inlined on purpose.
 
   /** Render a step for `StepOutcome.step` and the log line. */
-  private describeStep(s: ScreenshotStep): string {
+  protected describeStep(s: ScreenshotStep): string {
     const mods = s.modifiers?.length ? ` +${s.modifiers.join('+')}` : '';
     if (s.click !== undefined) return `click "${s.click}"${mods}`;
     if (s.selector !== undefined) return `selector "${s.selector}"${mods}`;
+    if (s.hover !== undefined) return `hover "${s.hover}"`;
+    if (s.goto !== undefined) return `goto page ${s.goto}`;
     if (s.type !== undefined) return s.into !== undefined ? `type "${s.type}" into "${s.into}"` : `type "${s.type}"`;
     if (s.press !== undefined) return `press "${s.press}"`;
     if (s.selectRows !== undefined) return `selectRows [${s.selectRows.join(', ')}]`;
@@ -992,7 +1050,7 @@ export class ScreenshotService {
    * by a short settle pause so BC can render what it opened.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async runSteps(p: any, steps: ScreenshotStep[]): Promise<StepOutcome[]> {
+  protected async runSteps(p: any, steps: ScreenshotStep[]): Promise<StepOutcome[]> {
     const out: StepOutcome[] = [];
     for (let i = 0; i < steps.length; i++) {
       const s = steps[i]!;
@@ -1000,17 +1058,20 @@ export class ScreenshotService {
       let reason: string | undefined;
       let selected: string[] | undefined;
       try {
+        await this.beforeStep(p, s, i);
         if (s.click !== undefined) reason = await this.clickReal(p, { caption: s.click }, s.modifiers);
         else if (s.selector !== undefined) reason = await this.clickReal(p, { selector: s.selector }, s.modifiers);
+        else if (s.hover !== undefined) reason = await this.hoverReal(p, { caption: s.hover });
+        else if (s.goto !== undefined) reason = await this.gotoPage(p, String(s.goto));
         else if (s.type !== undefined) reason = await this.typeInto(p, s.type, s.into);
         else if (s.press !== undefined) reason = await this.pressChord(p, s.press);
         else if (s.selectRows !== undefined) ({ reason, selected } = await this.selectRows(p, s.selectRows));
-        else if (s.wait !== undefined) await sleep(Math.max(0, Math.min(s.wait, 30000)));
+        else if (s.wait !== undefined) await sleep(Math.max(0, Math.min(s.wait, 30000)) / this.waitScale);
         else reason = 'empty step';
       } catch (e) {
         reason = e instanceof Error ? e.message : String(e);
       }
-      this.logger.info(`[screenshot] step ${label} -> ${reason ?? 'ok'}`);
+      this.logger.info(`[${this.logTag}] step ${label} -> ${reason ?? 'ok'}`);
       out.push({ step: label, ok: !reason, ...(reason ? { reason } : {}), ...(selected ? { selected } : {}) });
       // A selection that is not the one asked for must not be ACTED on: the next step
       // is usually the action ("Agrupar", "Publicar", "Anular") and it would run on the
@@ -1025,9 +1086,140 @@ export class ScreenshotService {
         }
         break;
       }
-      if (s.wait === undefined) await sleep(600);
+      await this.settleAfterStep(p, s);
     }
     return out;
+  }
+
+  /**
+   * The page's frames, TOPMOST FIRST. BC opens a card from a list as a new iframe
+   * stacked over the list's, and the list stays in the DOM, visible under the
+   * overlay -- so a caption looked up in creation order ("Customer No.") resolved
+   * to the LIST's FactBox behind the card, the keystrokes went there, and the card
+   * closed. Measured on devel1 while recording an order (2026-10-20). Later frames
+   * are the ones on top, so they are searched first.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  protected frames(p: any): any[] {
+    return [...p.frames()].reverse();
+  }
+
+  /**
+   * A `goto` step: open another page by id in the SAME tab (deep link, same
+   * company), wait for the SPA, close the teaching tips. Lets one recording carry
+   * a circuit across pages -- the order card to the Sales Invoices list -- where
+   * Tell Me is unreliable (its first result for "Sales Invoices" was the posted
+   * list) and the Role Center menu differs per profile.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  protected async gotoPage(p: any, pageId: string): Promise<string | undefined> {
+    const url = deepLinkPage(this.config, pageId.trim(), undefined, this.lastCompany);
+    this.logger.info(`[${this.logTag}] goto ${url}`);
+    // Leaving a BC page raises its beforeunload prompt ("changes may not be
+    // saved"), and puppeteer's goto waits on it for ever (measured: 60 s timeout,
+    // then a half-navigated tab). Accept it, and wait for the DOM, not for the
+    // network: BC's SPA keeps its transport busy, so networkidle never comes here.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const accept = (d: any): void => { d.accept().catch(() => undefined); };
+    p.on('dialog', accept);
+    try {
+      await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    } finally {
+      p.off('dialog', accept);
+    }
+    const ready = await waitReady(p, { bailOnErrorPage: true });
+    const bcError = await detectErrorPage(p);
+    if (bcError) return `BC returned an error page for page ${pageId}: "${bcError}"`;
+    if (!ready) return `page ${pageId} did not become ready`;
+    const dismissed = await this.dismissTeachingTips(p);
+    if (dismissed) await sleep(400);
+    return undefined;
+  }
+
+  /**
+   * Wait until the page has stopped changing: no DOM mutation in any frame for
+   * `quietMs`, or `maxMs` elapsed. This is what lets a recording follow BC at
+   * BC's own pace instead of fixed waits: a card that opened in 900 ms is acted
+   * on at 900 ms, a posting that takes 6 s keeps its progress dialog mutating
+   * the DOM until it is done. Observers are installed once per document (a flag
+   * on window) and record the time of the last mutation.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  protected async waitQuiet(p: any, quietMs: number, maxMs: number): Promise<number> {
+    const started = Date.now();
+    const INSTALL = '(function(){var w=window;if(!w.__bcQuiet){w.__bcQuiet={t:Date.now()};'
+      + 'try{new MutationObserver(function(){w.__bcQuiet.t=Date.now();}).observe(document.documentElement,{subtree:true,childList:true,attributes:true,characterData:true});}catch(e){}}'
+      + 'return Date.now()-w.__bcQuiet.t;})()';
+    while (Date.now() - started < maxMs) {
+      let idle = Infinity;
+      for (const f of this.frames(p)) {
+        try {
+          const ms: number = await f.evaluate(INSTALL);
+          if (ms < idle) idle = ms;
+        } catch {
+          // detached / cross-origin frame
+        }
+      }
+      if (idle >= quietMs) break;
+      await sleep(Math.min(50, quietMs));
+    }
+    return Date.now() - started;
+  }
+
+  // ---------- hooks a subclass (the recorder) replaces ----------
+
+  /** Called before each step runs. A recording shows the step's caption here. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
+  protected async beforeStep(_p: any, _step: ScreenshotStep, _index: number): Promise<void> {
+    // nothing for a screenshot
+  }
+
+  /** The pause after a step so BC can render what it opened. A `wait` step is its own pause. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  protected async settleAfterStep(_p: any, step: ScreenshotStep): Promise<void> {
+    if (step.wait === undefined) await sleep(600);
+  }
+
+  /**
+   * Click a located element for real, with the given keys held. A screenshot takes
+   * puppeteer's click (pointer jumps to the element); a recording glides a visible
+   * cursor there first.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  protected async clickHandle(p: any, handle: any, modifiers?: StepModifier[]): Promise<void> {
+    const held = modifiers ?? [];
+    // Bring the element into view FIRST and let the page settle: a grid cell off to
+    // the right makes BC scroll the grid, and puppeteer's own click measures the
+    // point right after its scroll, before the grid has finished moving, so the
+    // click lands on the cell that slid under it (seen on devel1 while typing a
+    // quantity: it went into Description).
+    await handle.scrollIntoViewIfNeeded().catch(() => undefined);
+    await sleep(250);
+    try {
+      for (const m of held) await p.keyboard.down(m);
+      await handle.click();
+    } finally {
+      for (const m of [...held].reverse()) await p.keyboard.up(m).catch(() => undefined);
+    }
+  }
+
+  /** Move the pointer onto a located element without clicking. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  protected async hoverHandle(_p: any, handle: any): Promise<void> {
+    await handle.hover();
+  }
+
+  /** Real pointer move onto the control, no click. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async hoverReal(p: any, by: { caption?: string; selector?: string }): Promise<string | undefined> {
+    const { handle, reason } = await this.findHandle(p, by);
+    if (!handle) return reason;
+    try {
+      await this.hoverHandle(p, handle);
+    } finally {
+      await handle.dispose().catch(() => undefined);
+    }
+    return undefined;
   }
 
   /**
@@ -1038,20 +1230,36 @@ export class ScreenshotService {
    * can name a field or an entry of an open menu. By selector: the first visible
    * match. A control BC greyed out is told apart from a missing one.
    */
-  private async findHandle(
+  protected async findHandle(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     p: any,
     by: { caption?: string; selector?: string },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<{ handle?: any; reason?: 'not found' | 'disabled' }> {
     let sawDisabled = false;
-    for (const f of p.frames()) {
+    for (const f of this.frames(p)) {
       try {
         const jh = await f.evaluateHandle((spec: { caption?: string; selector?: string }) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const doc = (globalThis as any).document;
+          // The TOPMOST BC page. Pages stack as sibling root forms in ONE frame (the
+          // list under the card under the dialog), every one full-size and "visible"
+          // to the DOM, so the first "Customer No." in document order is the list's
+          // FactBox link behind the card, not the card's field -- typing there closed
+          // the card (measured on devel1 while recording an order, 2026-10-20). The
+          // last root form is the one the user sees: search it first, the whole
+          // document only when it has nothing (the shell's search box, Tell Me).
+          const roots = doc.querySelectorAll('form.ms-nav-root-form,[role="dialog"]');
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          let scope: any = doc;
+          for (let r = roots.length - 1; r >= 0; r--) {
+            const cand = roots[r];
+            if (cand.offsetParent !== null || (cand.getClientRects && cand.getClientRects().length > 0)) { scope = cand; break; }
+          }
+          // (no helper function here: a named nested function gets esbuild's `__name` wrapper, undefined in the browser)
           if (spec.selector) {
-            const list = doc.querySelectorAll(spec.selector);
+            let list = scope.querySelectorAll(spec.selector);
+            if (!list.length && scope !== doc) list = doc.querySelectorAll(spec.selector);
             for (let i = 0; i < list.length; i++) {
               const el = list[i];
               if (el.offsetParent !== null || (el.getClientRects && el.getClientRects().length > 0)) return el;
@@ -1060,10 +1268,11 @@ export class ScreenshotService {
           }
           const target = (spec.caption || '').replace(/\s+/g, ' ').trim().toLowerCase();
           if (!target) return null;
-          const els = doc.querySelectorAll(
+          const CLICKABLE =
             'button,[role="button"],[role="menuitem"],[role="menuitemcheckbox"],[role="tab"],[role="option"],[role="link"],'
-            + 'a,input,textarea,select,label,summary,[aria-expanded],[aria-label],[title],[class*="caption"],[class*="header"]',
-          );
+            + 'a,input,textarea,select,label,summary,[aria-expanded],[aria-label],[title],[class*="caption"],[class*="header"]';
+          let els = scope.querySelectorAll(CLICKABLE);
+          if (!els.length && scope !== doc) els = doc.querySelectorAll(CLICKABLE);
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           let prefixHit: any = null;
           let disabled = false;
@@ -1071,6 +1280,15 @@ export class ScreenshotService {
             const el = els[i];
             const visible = el.offsetParent !== null || (el.getClientRects && el.getClientRects().length > 0);
             if (!visible) continue;
+            // A control under a modal backdrop or a stacked page is visible to the
+            // DOM and unreachable to a pointer: whatever elementFromPoint returns at
+            // its centre must be the control itself, something inside it, or an
+            // ancestor (a label's text node, an icon).
+            const cr = el.getBoundingClientRect();
+            if (cr.width > 0 && cr.height > 0) {
+              const hit = doc.elementFromPoint(cr.left + cr.width / 2, cr.top + cr.height / 2);
+              if (hit && hit !== el && !el.contains(hit) && !hit.contains(el)) continue;
+            }
             const text = (el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
             const label = (el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim().toLowerCase();
             const title = (el.getAttribute('title') || '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -1108,12 +1326,9 @@ export class ScreenshotService {
   ): Promise<string | undefined> {
     const { handle, reason } = await this.findHandle(p, by);
     if (!handle) return reason;
-    const held = modifiers ?? [];
     try {
-      for (const m of held) await p.keyboard.down(m);
-      await handle.click();
+      await this.clickHandle(p, handle, modifiers);
     } finally {
-      for (const m of [...held].reverse()) await p.keyboard.up(m).catch(() => undefined);
       await handle.dispose().catch(() => undefined);
     }
     return undefined;
@@ -1127,7 +1342,7 @@ export class ScreenshotService {
    * previous click landed on, typically the mandatory one of a dialog.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async typeInto(p: any, text: string, into?: string): Promise<string | undefined> {
+  protected async typeInto(p: any, text: string, into?: string): Promise<string | undefined> {
     if (into !== undefined) {
       const { handle, reason } = await this.findHandle(p, { caption: into });
       if (!handle) return reason;
@@ -1159,11 +1374,11 @@ export class ScreenshotService {
       await handle.dispose().catch(() => undefined);
       if (!tEl) return 'not found';
       try {
-        await tEl.click();
+        await this.clickHandle(p, tEl);
       } finally {
         await tEl.dispose().catch(() => undefined);
       }
-      await sleep(200);
+      await sleep(200 / this.waitScale);
     }
     // Judge the typing by its EFFECT, not by the keys having been sent. Measured
     // on SaaS: a card opened by deep link is in VIEW mode, so its inputs swallow
@@ -1172,7 +1387,7 @@ export class ScreenshotService {
     // control's value is read before and after; when nothing has focus there is
     // nothing to compare and the outcome stays "ok".
     const before = await this.focusedValue(p);
-    await p.keyboard.type(text, { delay: 15 });
+    await p.keyboard.type(text, { delay: this.typingDelayMs });
     const after = await this.focusedValue(p);
     if (before !== undefined && after !== undefined && before === after) {
       return 'value did not change: the focused control ignored the keys (read-only field, or a card opened in view mode -- click its edit action first)';
@@ -1186,8 +1401,8 @@ export class ScreenshotService {
    * when nothing editable is focused.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async focusedValue(p: any): Promise<string | undefined> {
-    for (const f of p.frames()) {
+  protected async focusedValue(p: any): Promise<string | undefined> {
+    for (const f of this.frames(p)) {
       try {
         const v: string | null = await f.evaluate(() => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1207,7 +1422,7 @@ export class ScreenshotService {
 
   /** Press a key or a chord ("Control+A"): every part but the last is held. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async pressChord(p: any, chord: string): Promise<string | undefined> {
+  protected async pressChord(p: any, chord: string): Promise<string | undefined> {
     const parts = chord.split('+').map((x) => x.trim()).filter((x) => x.length > 0)
       .map((x) => (/^ctrl$/i.test(x) ? 'Control' : /^cmd$/i.test(x) ? 'Meta' : /^esc$/i.test(x) ? 'Escape' : x));
     const key = parts[parts.length - 1];
@@ -1232,21 +1447,37 @@ export class ScreenshotService {
    * shows exactly that.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async selectRows(p: any, tokens: string[]): Promise<{ reason?: string; selected: string[] }> {
+  protected async selectRows(p: any, tokens: string[]): Promise<{ reason?: string; selected: string[] }> {
     const misses: string[] = [];
     const hits: string[] = [];
     let first = true;
     for (const token of tokens) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let cell: any = null;
-      for (const f of p.frames()) {
+      for (const f of this.frames(p)) {
         try {
           const jh = await f.evaluateHandle((want: string) => {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const doc = (globalThis as any).document;
             const t = (want || '').replace(/\s+/g, ' ').trim().toLowerCase();
             if (!t) return null;
-            const rows = doc.querySelectorAll('tr,[role="row"]');
+            // The TOPMOST BC page. Pages stack as sibling root forms in ONE frame (the
+            // list under the card under the dialog), every one full-size and "visible"
+            // to the DOM, so the first "Customer No." in document order is the list's
+            // FactBox link behind the card, not the card's field -- typing there closed
+            // the card (measured on devel1 while recording an order, 2026-10-20). The
+            // last root form is the one the user sees: search it first, the whole
+            // document only when it has nothing (the shell's search box, Tell Me).
+            const roots = doc.querySelectorAll('form.ms-nav-root-form,[role="dialog"]');
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            let scope: any = doc;
+            for (let r = roots.length - 1; r >= 0; r--) {
+              const cand = roots[r];
+              if (cand.offsetParent !== null || (cand.getClientRects && cand.getClientRects().length > 0)) { scope = cand; break; }
+            }
+            // (no helper function here: a named nested function gets esbuild's `__name` wrapper, undefined in the browser)
+            let rows = scope.querySelectorAll('tr,[role="row"]');
+            if (!rows.length && scope !== doc) rows = doc.querySelectorAll('tr,[role="row"]');
             for (let i = 0; i < rows.length; i++) {
               const row = rows[i];
               if (row.querySelector('th,[role="columnheader"]')) continue;
@@ -1278,10 +1509,8 @@ export class ScreenshotService {
       }
       if (!cell) { misses.push(token); continue; }
       try {
-        if (!first) await p.keyboard.down('Control');
-        await cell.click();
+        await this.clickHandle(p, cell, first ? undefined : ['Control']);
       } finally {
-        if (!first) await p.keyboard.up('Control').catch(() => undefined);
         await cell.dispose().catch(() => undefined);
       }
       first = false;
@@ -1297,9 +1526,9 @@ export class ScreenshotService {
    * frame, deduplicated and capped. The diagnostic behind `debugCaptions`.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async listCaptions(p: any): Promise<string[]> {
+  protected async listCaptions(p: any): Promise<string[]> {
     const seen = new Set<string>();
-    for (const f of p.frames()) {
+    for (const f of this.frames(p)) {
       try {
         const arr: string[] = await f.evaluate(() => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any

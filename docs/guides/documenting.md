@@ -15,6 +15,7 @@ It answers "I need X, what do I call?" first, then the details.
 | A **PDF** of a manual | `formats: ["html"]`, then open it and press **Ctrl+P** | There is no PDF output and no PDF tool. The HTML *is* the print path. |
 | Text **under** a screenshot | The step's `after` field | `body` goes above the figure, `after` below it. |
 | A manual that **already exists** as `.md` | `bc_build_manual` with `source: "ruta/manual.md"` | Turns it into A4 HTML / Word without retyping. Validate it first with `validate: true`. See the [source format](manual-source-format.md). |
+| A circuit someone must **watch** (a demo, footage for a video tutorial, "show me what you did") | `bc_record` | An MP4 of the real client performing `steps` with a visible cursor and a caption per step, plus a `.json` timeline. Same `steps` as `bc_screenshot`; give each a `label`. See [tools/bc_record.md](../tools/bc_record.md). |
 | The **data** behind a page (values, rows, fields) | `bc_open_page` / `bc_read_data` | Never screenshot a page to read it. |
 | A **report's** rendered output (PDF/Excel/Word) | `bc_download_report` | Unrelated to manuals: that is BC rendering its own report. |
 | To find the page id you need | `bc_find_object` (cached index) or `bc_search_pages` (Tell Me) | |

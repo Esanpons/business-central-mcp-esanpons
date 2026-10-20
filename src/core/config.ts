@@ -53,6 +53,8 @@ export interface AppConfig {
   screenshotDir: string;
   manualDir: string;
   reportDir: string;
+  /** Where bc_record writes its MP4s (+ .json timelines). */
+  recordingDir: string;
 }
 
 function requireEnv(name: string): string {
@@ -166,5 +168,6 @@ export function loadConfig(): AppConfig {
     screenshotDir: optionalEnv('BC_SCREENSHOT_DIR', './screenshots'),
     manualDir: optionalEnv('BC_MANUAL_DIR', './manuals'),
     reportDir: optionalEnv('BC_REPORT_DIR', '.arxius/reports'),
+    recordingDir: optionalEnv('BC_RECORDING_DIR', './recordings'),
   };
 }

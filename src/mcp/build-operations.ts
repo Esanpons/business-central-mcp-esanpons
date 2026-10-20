@@ -9,6 +9,7 @@ import { ActionService } from '../services/action-service.js';
 import { NavigationService } from '../services/navigation-service.js';
 import { SearchService } from '../services/search-service.js';
 import { ScreenshotService } from '../services/screenshot-service.js';
+import { RecordingService } from '../services/recording-service.js';
 import { ReportDownloadService } from '../services/report-download-service.js';
 import { ManualService } from '../services/manual-service.js';
 import { ObjectIndexService } from '../services/object-index-service.js';
@@ -26,6 +27,7 @@ import { RunReportOperation } from '../operations/run-report.js';
 import { DownloadReportOperation } from '../operations/download-report.js';
 import { WizardNavigateOperation } from '../operations/wizard-navigate.js';
 import { ScreenshotOperation } from '../operations/screenshot.js';
+import { RecordOperation } from '../operations/record.js';
 import { BuildManualOperation } from '../operations/build-manual.js';
 import { FindObjectOperation } from '../operations/find-object.js';
 import { RefreshObjectsOperation } from '../operations/refresh-objects.js';
@@ -86,6 +88,7 @@ export function buildOperations(session: BCSession, deps: OperationsDeps): Opera
   const navigationService = new NavigationService(session, pageContextRepo, logger);
   const searchService = new SearchService(session, logger);
   const screenshotService = new ScreenshotService(config.bc, config.screenshotDir, () => session.companyName, logger, authProvider, metrics);
+  const recordingService = new RecordingService(config.bc, config.recordingDir, () => session.companyName, logger, authProvider, metrics);
   const reportDownloadService = new ReportDownloadService(config.bc, config.reportDir, () => session.companyName, logger, authProvider, metrics);
   const objectIndexService = new ObjectIndexService(pageService, config.stateDir, config.bc.baseUrl, config.bc.tenantId, logger);
   // A page opened by an action needs the same subpage/FactBox discovery as one
@@ -120,6 +123,7 @@ export function buildOperations(session: BCSession, deps: OperationsDeps): Opera
     downloadReport: new DownloadReportOperation(reportDownloadService),
     wizardNavigate: new WizardNavigateOperation(actionService, pageContextRepo),
     screenshot: new ScreenshotOperation(screenshotService),
+    record: new RecordOperation(recordingService),
     buildManual: new BuildManualOperation(new ManualService(screenshotService, config.manualDir, logger, metrics)),
     findObject: new FindObjectOperation(objectIndexService),
     refreshObjects: new RefreshObjectsOperation(objectIndexService),

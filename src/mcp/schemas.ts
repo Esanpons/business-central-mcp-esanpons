@@ -189,20 +189,23 @@ const StepModifierSchema = z.enum(['Control', 'Shift', 'Alt', 'Meta']);
 export const ScreenshotStepSchema = z.object({
   click: z.string().optional().describe('REAL pointer click (mouse moved, pointer/mouse events fired) on the first visible, enabled control whose visible text, aria-label or title matches this caption (exact first, then prefix), across every frame. Unlike clickBeforeCapture, which fires a DOM .click(), this opens the flyouts BC only shows on pointer events: the view selector ("Todo"), column menus, the "..." overflow. Modifier keys via `modifiers`.'),
   selector: z.string().optional().describe('REAL pointer click on the first visible element matching this CSS selector. The escape hatch for a control with no caption at all (an icon-only button). Find candidates with debugCaptions, or from the class names BC renders.'),
+  hover: z.string().optional().describe('Move the pointer onto the control with this caption WITHOUT clicking: a tooltip or hover state in a screenshot, a "look here" moment in a bc_record video.'),
+  goto: NumericIdInput.optional().describe('Open another page by its numeric id in the SAME tab (deep link, same company) and wait for it: continue a circuit on a different list, e.g. from the order card to the Sales Invoices list (9301). Use it instead of Tell Me, whose first result is not always the page you mean.'),
   type: z.string().optional().describe('Text to type with the keyboard. With `into`, the control named by that caption is focused first (a label resolves to the input beside it); without `into` the text goes to whatever currently has focus, e.g. the field a previous click landed on.'),
   into: z.string().optional().describe('Caption of the field that receives `type`. Only valid together with `type`.'),
   press: z.string().optional().describe('A key or chord to press: "Escape", "Enter", "Tab", "ArrowDown", "Control+A", "Shift+End". Chords hold every part but the last.'),
   selectRows: z.array(z.string()).min(1).optional().describe('Multi-select repeater rows: for each token, the first visible row whose text contains it is clicked on a non-link cell -- plain click for the first, Control+click for the rest -- which is how the web client builds a multi-row selection for actions like Agrupar/Publicar on several documents. Reports every token that matched no row.'),
   wait: z.number().optional().describe('Pause this many milliseconds (max 30000) before the next step, e.g. for a flyout animation.'),
   modifiers: z.array(StepModifierSchema).optional().describe('Keys held during `click` / `selector`: Control, Shift, Alt, Meta.'),
+  label: z.string().optional().describe('Caption shown on screen while this step runs in a bc_record video ("Open the customer card"). Ignored by a screenshot. Short, in the language of the audience.'),
 })
-  .refine((d) => [d.click, d.selector, d.type, d.press, d.selectRows, d.wait].filter((v) => v !== undefined).length === 1, {
-    message: 'A step is exactly ONE of click / selector / type / press / selectRows / wait (into qualifies type; modifiers qualify click / selector).',
+  .refine((d) => [d.click, d.selector, d.hover, d.goto, d.type, d.press, d.selectRows, d.wait].filter((v) => v !== undefined).length === 1, {
+    message: 'A step is exactly ONE of click / selector / hover / goto / type / press / selectRows / wait (into qualifies type; modifiers qualify click / selector; label is free).',
   })
   .refine((d) => d.into === undefined || d.type !== undefined, { message: '`into` only accompanies `type`.' })
   .refine((d) => d.modifiers === undefined || d.click !== undefined || d.selector !== undefined, { message: '`modifiers` only accompany `click` / `selector`.' });
 
-const STEPS_DESC = 'Ordered REAL browser interactions to perform before capturing, after clickBeforeCapture: [{ click }, { selector }, { type, into }, { press }, { selectRows }, { wait }]. Use it to photograph what a caption click cannot reach: a view-selector flyout, an overflow menu, a dialog with text typed into it, a multi-row selection. Every step reports back in `steps` with ok:true/false + reason, and a failed step raises a `warning` -- the image then shows the page WITHOUT that step. The browser is torn down after the capture, so nothing typed or selected is ever committed unless a step presses the confirming button itself.';
+const STEPS_DESC = 'Ordered REAL browser interactions to perform before capturing, after clickBeforeCapture: [{ click }, { selector }, { hover }, { type, into }, { press }, { selectRows }, { wait }]. Use it to photograph what a caption click cannot reach: a view-selector flyout, an overflow menu, a dialog with text typed into it, a multi-row selection. Every step reports back in `steps` with ok:true/false + reason, and a failed step raises a `warning` -- the image then shows the page WITHOUT that step. The browser is torn down after the capture, so nothing typed or selected is ever committed unless a step presses the confirming button itself.';
 const DEBUG_CAPTIONS_DESC = 'Also return `captions`: the visible captions / aria-labels / titles of clickable controls on the page as captured (deduplicated, capped). Use it when a click or clickBeforeCapture came back "not found", to see the exact locale-dependent text BC renders and retry with it.';
 
 export const ScreenshotSchema = z.object({
@@ -223,6 +226,30 @@ export const ScreenshotSchema = z.object({
   scale: z.number().optional().describe('Device scale factor for crispness (default 2 = retina-sharp). Use 1 for smaller files.'),
   fullPage: z.boolean().optional().describe('Capture the full scrollable page instead of just the viewport (default false). Ignored when crop is set.'),
   inline: z.boolean().optional().describe('Also return the PNG inline in the response so the assistant can see it (default true). Set false to only write the file.'),
+});
+
+export const RecordSchema = z.object({
+  pageId: NumericIdInput.describe('Numeric BC page ID the circuit starts on (e.g. 22 for Customer List). Use bc_search_pages to find IDs.'),
+  bookmark: z.string().optional().describe('Start on a specific record (bookmarks come from list rows in bc_open_page / bc_read_data). Omit for lists / role centers.'),
+  company: z.string().optional().describe('Company to record in. Defaults to the session\'s current company.'),
+  steps: z.array(ScreenshotStepSchema).min(1).describe('The circuit, in order: [{ click }, { selector }, { hover }, { type, into }, { press }, { selectRows }, { wait }], each with an optional `label` shown on screen while it runs. Same step kinds as bc_screenshot, performed with a visible cursor that glides to each target, clicks with a ripple and types at a human pace. Every step reports back in `steps` with ok/reason and WHEN it happened (atMs); a failed step raises a `warning` and the video shows the page WITHOUT it.'),
+  title: z.string().optional().describe('Title card shown over the page during `intro`. Default: none -- a plain recording has no overlays besides the cursor.'),
+  captions: z.boolean().optional().describe("Show the caption strip with each step's label (default false: plain recording). Set true for a narrated tutorial look."),
+  cursor: z.boolean().optional().describe('Draw the cursor overlay (default true). Headless Chrome paints no pointer, so without it the video shows clicks happening from nowhere.'),
+  pace: z.number().optional().describe('Pause after every step in ms (default 1200, max 10000), so the viewer sees what the step produced. A `wait` step is its own pause.'),
+  typingDelay: z.number().optional().describe('Keyboard delay per typed character in ms (default 70). 0 types instantly.'),
+  glide: z.number().optional().describe('Longest a cursor move may take in ms (default 1100; short moves take about a third of it). 0 makes the cursor jump.'),
+  speed: z.number().optional().describe('Overall tempo multiplier (default 1): 2 halves pace, glide, typingDelay AND every { wait } step; 0.5 doubles them. The quickest way to make a recording faster or slower without rewriting the steps.'),
+  settle: z.number().optional().describe('After every step, wait until the page has stopped changing (no DOM mutation for 250 ms), at most this many ms (default 8000; 0 disables). This is what makes a take follow BC at its own pace: a card that opened in 0.9 s is acted on at 0.9 s, a 6 s posting is waited for. With it, { wait } steps are only needed where BC keeps working without touching the page.'),
+  intro: z.number().optional().describe('Hold on the opened page (with the title card) before the first step, ms (default 1500).'),
+  outro: z.number().optional().describe('Hold on the final state before stopping, ms (default 1500).'),
+  out: z.string().optional().describe('Output file. Absolute path used as-is; a relative name is placed under BC_RECORDING_DIR (default ./recordings). Omit to auto-name page-<id>-<timestamp>.mp4. The extension follows `format`.'),
+  width: z.number().optional().describe('Video width in pixels (default 1920).'),
+  height: z.number().optional().describe('Video height in pixels (default 1080).'),
+  fps: z.number().optional().describe('Frames per second (default 30, 10-60).'),
+  format: z.enum(['mp4', 'webm']).optional().describe('"mp4" (default; H.264, plays everywhere) or "webm" (VP9 as the screencast writes it, no second encoding pass).'),
+  expand: z.boolean().optional().describe('Expand every collapsed FastTab and click every "Show more" on the opened page before recording starts (default false).'),
+  dismissTeachingTips: z.boolean().optional().describe('Close BC\'s "About this page" callouts before recording (default true).'),
 });
 
 const ManualScreenshotSchema = z.object({

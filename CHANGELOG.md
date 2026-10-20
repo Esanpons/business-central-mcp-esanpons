@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (2026-10-20) — `bc_record`: a video of a circuit performed in the real web client
+
+- New tool **`bc_record`**: records an **MP4** (H.264, 1920x1080, 30 fps by default) of the BC web
+  client while the given `steps` are performed in it the way a person would — a drawn cursor glides
+  to each control along an eased path, clicks show a ripple, text is typed at ~70 ms per key, a
+  caption strip names each step (`label`), a title card opens the video and the final state is
+  held. Writes `<video>.json` next to it: every step with the millisecond it started, for subtitles,
+  narration or editing. Output under `BC_RECORDING_DIR` (default `./recordings`, gitignored).
+  Operation `src/operations/record.ts`, service `src/services/recording-service.ts`.
+- `steps` (shared by `bc_screenshot`, `bc_build_manual` and `bc_record`) gain **`{ hover }`** (move
+  the pointer onto a control without clicking) and an optional **`label`** per step.
+- `src/services/screencast.ts`: a CDP `Page.startScreencast` stream written to ffmpeg at a FIXED
+  rate in wall-clock time (sample-and-hold), straight to H.264 in one pass. puppeteer's own
+  `page.screencast()` was measured producing a 24.4 s file for 20.5 s of real time (per-frame
+  rounding of 16 ms cursor gaps) and encodes VP9 only.
+- `src/services/ffmpeg.ts`: `BC_FFMPEG`, then `ffmpeg` on PATH, then the `imageio-ffmpeg` (pip),
+  `Gyan.FFmpeg` (winget), `C:\ffmpeg\bin` and Unix/Homebrew locations. Nothing bundled; a missing
+  one fails before a browser is launched, with install instructions.
+- `ScreenshotService` exposes its engine to the recorder through `protected` hooks (`openPage`,
+  `runSteps`, `clickHandle`, `hoverHandle`, `beforeStep`, `settleAfterStep`, `typingDelayMs`): one
+  copy of the matching logic, so a caption that works in a screenshot works in a recording.
+- **Steps now target the TOPMOST BC page.** BC stacks pages as sibling `form.ms-nav-root-form`
+  elements in ONE frame (the list under the card under the dialog), all full-size and visible to the
+  DOM, so a caption looked up in document order ("Customer No.") resolved to the LIST's FactBox
+  behind the card: the keystrokes went there and the card closed, while every step reported `ok`.
+  Measured on devel1 while recording an order (2026-10-20). `findHandle` / `selectRows` search the
+  last visible root form (or `[role=dialog]`) first and the whole document only when it has
+  nothing; frames are searched most-recent first. Applies to `bc_screenshot`, `bc_build_manual`
+  and `bc_record` alike. No helper function inside the browser code (esbuild `__name`).
+- **A grid cell off to the right is clicked where it really is.** puppeteer's `clickablePoint`
+  ignores overflow clipping, and BC's lines grid scrolls back while the cursor glides, so "5"
+  typed for Quantity landed in Description (devel1, 2026-10-20). The recorder now measures the
+  VISIBLE centre of the cell (clipped by every overflow ancestor, translated by the frame offset),
+  waits for it to be stable, and re-scrolls the cell under the cursor right before pressing.
+  `bc_screenshot` steps settle 250 ms after scrolling into view before clicking.
+- **Plain by default.** `bc_record` writes a recording with no title card and no caption strip
+  unless `title` / `captions:true` are passed (asked for explicitly: "first I want recordings").
+- **`{ goto: <pageId> }` step** (screenshots and recordings): open another page in the same tab and
+  company and wait for it, so one take carries a circuit across pages (order card -> Sales Invoices
+  list 9301). Tell Me's first result for "Sales Invoices" was the POSTED list on devel1.
+- **The cursor moves like a hand:** the bow of a move bends with the direction of travel instead of
+  always the same side, and every move overshoots the target by 2% (max 10 px) and comes back.
+  `glide` 600-700 ms with `settle` keeps a take fast without the cursor jumping (asked for).
+- **`settle`: steps follow BC at its own pace.** After every step the recorder waits until no frame
+  has had a DOM mutation for 250 ms (cap `settle`, default 8 s), so a card opened in 0.9 s is acted on
+  at 0.9 s and a 6 s posting is waited for; fixed `wait` steps are no longer the pacing mechanism.
+- **Tempo is configurable**: `pace`, `glide`, `typingDelay` and a `speed` multiplier that also scales
+  every `{ wait }` step (asked for: choose how long each step takes).
+- `bc_health` metrics gain `browser.recordings`. Battery (`npm run test-battery`) records a short
+  circuit. Verified live on devel1: 7-step circuit on the Customer List, 19.9 s video, captions
+  within a frame of their `atMs`. Docs: `docs/tools/bc_record.md`.
+
 ### Fixed (2026-10-04) — SaaS battery review (bc-saas F-54 … F-73)
 
 Most of F-55 … F-68 were observed on a server process started BEFORE the F-42 … F-47 build, so

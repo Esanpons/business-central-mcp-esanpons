@@ -22,6 +22,8 @@ export interface BrowserMetrics {
   screenshots: BrowserOpStats;
   reports: BrowserOpStats;
   manuals: BrowserOpStats;
+  /** bc_record videos. */
+  recordings: BrowserOpStats;
 }
 
 export interface MetricsSnapshot {
@@ -60,6 +62,7 @@ export class Metrics {
   private readonly screenshots = emptyOpStats();
   private readonly reports = emptyOpStats();
   private readonly manuals = emptyOpStats();
+  private readonly recordings = emptyOpStats();
 
   recordInvoke(): void {
     this.invokes++;
@@ -95,6 +98,11 @@ export class Metrics {
     record(this.manuals, ok, ms);
   }
 
+  /** One bc_record run. `ok` = a video file was written. */
+  recordRecording(ok: boolean, ms: number): void {
+    record(this.recordings, ok, ms);
+  }
+
   snapshot(): MetricsSnapshot {
     return {
       invokes: this.invokes,
@@ -109,6 +117,7 @@ export class Metrics {
         screenshots: { ...this.screenshots },
         reports: { ...this.reports },
         manuals: { ...this.manuals },
+        recordings: { ...this.recordings },
       },
     };
   }

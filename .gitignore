@@ -30,6 +30,8 @@ reference/
 # Son reproduibles: es regeneren executant l'eina, no s'han de versionar.
 # screenshots/: BC_SCREENSHOT_DIR per defecte.
 screenshots/
+# recordings/: BC_RECORDING_DIR per defecte (videos MP4 de bc_record + .json de linia de temps).
+recordings/
 # .arxius/: BC_REPORT_DIR per defecte (.arxius/reports).
 .arxius/
 # .poc/: scripts/screenshot-poc.ts, demo-fasttab-states.ts, verify-expand.ts.

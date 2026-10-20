@@ -98,6 +98,8 @@ active values any time with `claude mcp get bc-ws`.
 | `BC_AAD_LOGIN_TIMEOUT` | AAD: ms budget for the OIDC login | `120000` |
 | `BC_REPORT_DIR` | where `bc_download_report` writes files (default `.arxius/reports`, relative to the server's cwd — set an absolute path to control it) | `D:\BCReports` |
 | `BC_SCREENSHOT_DIR` / `BC_MANUAL_DIR` | where `bc_screenshot` / `bc_build_manual` write (defaults `./screenshots` / `./manuals`) | — |
+| `BC_RECORDING_DIR` | where `bc_record` writes its MP4 videos + `.json` timelines (default `./recordings`) | `D:\BCVideos` |
+| `BC_FFMPEG` | ffmpeg executable for `bc_record` (auto-detected: PATH, `imageio-ffmpeg`, winget `Gyan.FFmpeg`, `C:\ffmpeg\bin`) | — |
 
 ### Pointing at a DIFFERENT Docker / server
 

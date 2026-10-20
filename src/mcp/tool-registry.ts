@@ -15,6 +15,7 @@ import {
   DownloadReportSchema,
   WizardNavigateSchema,
   ScreenshotSchema,
+  RecordSchema,
   BuildManualSchema,
   HealthSchema,
   ResetSessionSchema,
@@ -40,6 +41,7 @@ import type { RunReportOperation } from '../operations/run-report.js';
 import type { DownloadReportOperation } from '../operations/download-report.js';
 import type { WizardNavigateOperation } from '../operations/wizard-navigate.js';
 import type { ScreenshotOperation } from '../operations/screenshot.js';
+import type { RecordOperation } from '../operations/record.js';
 import type { BuildManualOperation } from '../operations/build-manual.js';
 
 /**
@@ -83,6 +85,7 @@ export interface Operations {
   downloadReport: DownloadReportOperation;
   wizardNavigate: WizardNavigateOperation;
   screenshot: ScreenshotOperation;
+  record: RecordOperation;
   buildManual: BuildManualOperation;
   findObject: FindObjectOperation;
   refreshObjects: RefreshObjectsOperation;
@@ -376,6 +379,26 @@ Examples:
       inputSchema: toMcpJsonSchema(ScreenshotSchema),
       zodSchema: ScreenshotSchema,
       execute: (ops, input) => ops.screenshot.execute(input as Parameters<typeof ops.screenshot.execute>[0]),
+    },
+    {
+      name: 'bc_record',
+      description: `Records a VIDEO (MP4, H.264, 1920x1080 by default) of the Business Central web client while a circuit of real interactions is performed in it the way a person would: a visible cursor moves to each control, clicks with a ripple, text is typed key by key, and the file lands in a folder like a screenshot would. Use it to show what was done in BC, to review a circuit, or as raw footage for a video tutorial. For ONE still image use bc_screenshot; for a written step-by-step document use bc_build_manual; for reading or editing data use bc_open_page / bc_read_data / bc_write_data -- this tool returns a file, not data.
+
+Like bc_screenshot it runs OUT-OF-BAND: an independent authenticated headless browser (system Chrome/Edge) opens the deep link for pageId (+ bookmark / company), waits for the page, and only then starts recording; the WebSocket session your other bc_ tools use is never touched.
+
+IMPORTANT: this is the REAL client. A step that posts, deletes or confirms DOES it; typed values and selections are discarded with the browser unless a step presses the confirming button, which is what makes a dialog recordable without executing it. A card opened by deep link may be in VIEW mode: click its edit action (title "Realizar cambios en la página" in Spanish) before typing, or the type step reports "value did not change". Every step reports back in steps[] with ok/reason and atMs (when it started, ms from the start of the video); a failed step raises a warning and the video shows the page WITHOUT that interaction -- always read the warning before using the file. Verify a recorded data entry by reading the record back with bc_read_data: a run where every step says ok can still have typed into the wrong cell. When a caption is "not found", run bc_screenshot with debugCaptions:true on the same page to see the exact locale-dependent text BC renders.
+
+ALL OPTIONS. Target: pageId (required), bookmark (start on a record), company (defaults to the session company), expand (open every FastTab and "Show more" first), dismissTeachingTips (default true). Steps (required, at least one), each exactly ONE of: { click: caption } real pointer click by visible text / aria-label / title (exact first, then prefix; modifiers: ["Control"|"Shift"|"Alt"|"Meta"] held during the click); { selector: css } real click on the first visible match (icon-only controls, grid cells such as td[controlname="Quantity"] on a document's lines); { hover: caption } move the cursor onto a control without clicking; { goto: pageId } open another page in the same tab and company and wait for it (continue the circuit on another list; prefer it to Tell Me); { type: text, into?: caption } keyboard text, into the field named by into (a label resolves to the input beside it) or into whatever has focus; { press: key } a key or chord ("Enter", "Escape", "Tab", "Alt+Q", "Control+End"); { selectRows: [tokens] } multi-row selection by row text (only VISIBLE columns are in the DOM: select a lookup row by its Document No., not by a column off to the right); { wait: ms } a pause. Any step may carry label (the caption shown when captions is true; always written to the timeline). Look: cursor (default true; false hides the drawn cursor), captions (default false; true shows a strip with each step's label), title (default none; a title card over the opened page during intro). Tempo: pace (pause after every step, default 1200 ms), glide (longest cursor move, default 1100 ms, 0 jumps), typingDelay (ms per key, default 70, 0 instant), speed (multiplier over pace, glide, typingDelay AND every { wait }; 2 is twice as fast, 0.5 half), settle (after every step, wait until the page has stopped changing for 250 ms, up to this many ms, default 8000: the take follows BC at its own pace and { wait } steps become unnecessary except where BC works without touching the page; 0 disables), intro (hold before the first step, default 1500 ms), outro (hold at the end, default 1500 ms). The fastest practical take is pace 0, glide 0, typingDelay 0 and waits of only what BC needs to process (about 1.5-2 s after opening a card, 6-7 s after a posting); measured: the whole sales circuit, 46 steps, in 62 s instead of 140 s. Output: out (file path; relative under BC_RECORDING_DIR, default ./recordings; auto-named page-<id>-<timestamp>.mp4), width / height (default 1920x1080), fps (default 30, 10-60), format ("mp4" H.264 default, or "webm" VP9 when ffmpeg lacks libx264).
+
+Result: path, timelinePath (<video>.json with every step, its label and the millisecond it began -- for subtitles, narration or editing), url, pageTitle, durationMs, width, height, fps, format, steps[] and warning. The video is NOT returned inline. Requires Chrome/Edge AND ffmpeg on the machine running the server (ffmpeg on PATH, or BC_FFMPEG to its path; \`winget install Gyan.FFmpeg\` or \`pip install imageio-ffmpeg\` both work).
+
+Examples:
+- Plain recording of a lookup: { "pageId": 22, "steps": [{ "click": "Buscar Customers" }, { "type": "cannon" }, { "wait": 1500 }, { "click": "Alternar cuadro informativo" }] }
+- Whole sales circuit, one take, fastest: { "pageId": 9305, "company": "CRONUS International Ltd.", "pace": 0, "glide": 0, "typingDelay": 0, "steps": [{ "click": "Nuevo" }, { "wait": 2000 }, { "type": "The Cannon Group PLC", "into": "Customer Name" }, { "press": "Tab" }, { "wait": 2000 }, { "selector": "td[controlname=\"No.\"]" }, { "wait": 600 }, { "type": "1000" }, { "press": "Tab" }, { "wait": 1500 }, { "selector": "td[controlname=\"Quantity\"]" }, { "wait": 500 }, { "type": "2" }, { "press": "Tab" }, { "wait": 1500 }, { "click": "Release" }, { "wait": 2000 }, { "click": "Post..." }, { "wait": 1500 }, { "click": "Ship" }, { "wait": 400 }, { "click": "Aceptar" }, { "wait": 6000 }, { "goto": 9301 }, { "wait": 1500 }, { "click": "Nuevo" }, { "wait": 2000 }, { "type": "The Cannon Group PLC", "into": "Customer Name" }, { "press": "Tab" }, { "wait": 2000 }, { "click": "Line" }, { "wait": 800 }, { "click": "Functions" }, { "wait": 800 }, { "click": "Get Shipment Lines..." }, { "wait": 3000 }, { "selectRows": ["102047"] }, { "wait": 400 }, { "click": "Aceptar" }, { "wait": 3000 }, { "click": "Post" }, { "wait": 1500 }, { "click": "Sí" }, { "wait": 7000 }, { "click": "Sí" }, { "wait": 4000 }] }
+- Narrated tutorial look, half tempo: { "pageId": 42, "bookmark": "1D_J...", "title": "Registrar el albarán", "captions": true, "speed": 0.5, "steps": [{ "click": "Post...", "label": "Registrar el pedido" }, { "wait": 1500 }, { "click": "Cancelar", "label": "Cancelar: solo mostramos el diálogo" }] }`,
+      inputSchema: toMcpJsonSchema(RecordSchema),
+      zodSchema: RecordSchema,
+      execute: (ops, input) => ops.record.execute(input as Parameters<typeof ops.record.execute>[0]),
     },
     {
       name: 'bc_build_manual',
