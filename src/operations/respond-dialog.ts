@@ -3,9 +3,15 @@ import { ProtocolError } from '../core/errors.js';
 import type { BCSession } from '../session/bc-session.js';
 import type { PageContextRepository } from '../protocol/page-context-repo.js';
 import type { DataService, FieldWriteResult } from '../services/data-service.js';
+import type { BCEvent } from '../protocol/types.js';
 import { SystemAction } from '../protocol/types.js';
-import { detectChangedSections, detectDialogs } from '../protocol/mutation-result.js';
-import { resyncPageRepeaters } from '../services/repeater-sync.js';
+import { actions as treeActions } from '../protocol/form-views.js';
+import {
+  detectChangedSections, detectDialogs, detectFiles, detectMessages, detectValidationErrors, withDialogSections,
+  type DialogInfo, type FileInfo, type MessageInfo, type ValidationErrorInfo,
+} from '../protocol/mutation-result.js';
+import { resyncPageRepeaters, reportableResyncEvents } from '../services/repeater-sync.js';
+import { stripFieldEvents } from './write-data.js';
 import type { Logger } from '../core/logger.js';
 
 export interface RespondDialogInput {
@@ -17,13 +23,31 @@ export interface RespondDialogInput {
 }
 
 export interface RespondDialogOutput {
+  /** False when BC reported an error after the answer (see `errors`): the dialog WAS answered, the operation behind it failed. */
   success: boolean;
+  /**
+   * Errors BC attached to the page after the answer instead of raising an error
+   * dialog — a failed OnDelete, a posting check ("The date Allow Document Deletion
+   * Before must be set..."). Absent when there were none.
+   */
+  errors?: ValidationErrorInfo[];
   changedSections: string[];
-  dialogsOpened: Array<{ formId: string; message?: string; fields?: import('../protocol/types.js').ControlField[] }>;
+  /**
+   * The dialog(s) BC put up IN RESPONSE to this answer — the next question of a
+   * chain ("Se va a crear..." -> "¿Quieres verlos?"), an error the answer ran into.
+   * Answer them in turn; the chain is over when this is empty.
+   */
+  dialogsOpened: DialogInfo[];
   requiresDialogResponse: boolean;
   openedPages: Array<{ pageContextId: string; caption: string }>;
+  /** What BC told the user once the dialog was answered (an AL `Message()`). Absent when BC said nothing. */
+  messages?: MessageInfo[];
   /** Per-field outcome of the `fields` written before answering. Absent when no fields were sent. */
   fieldResults?: FieldWriteResult[];
+  /** Present when the answer opened pages: read them before trusting `success` (an Error Messages page is a failure). */
+  note?: string;
+  /** Files BC produced (a report printed from a request page). Absent when none. */
+  files?: FileInfo[];
 }
 
 const RESPONSE_MAP: Record<string, number> = {
@@ -46,6 +70,17 @@ export class RespondDialogOperation {
      * `changed`) instead of a second, laxer one living here.
      */
     private readonly dataService?: DataService,
+    /**
+     * Registers the pages an answer makes BC open (ActionService.adoptOpenedPages).
+     * Posting confirmed through a dialog opens the posted document, or — when it
+     * fails with several errors — the "Mensajes de error" page, as a brand-new
+     * ownerless FormCreated. Without this nothing gave it a pageContextId, so it was
+     * never reported and a FAILED posting came back as a clean `success: true`
+     * (bc-saas F-56 2nd case, F-65).
+     */
+    private readonly adoptOpenedPages?: (events: readonly BCEvent[], sourceFormId: string | undefined) => Promise<string[]>,
+    /** Loads the rows of a chained dialog's grids (PageService.loadDialogContent). */
+    private readonly loadDialogContent?: (pageContextId: string, events: readonly BCEvent[]) => Promise<void>,
   ) {}
 
   async execute(input: RespondDialogInput): Promise<Result<RespondDialogOutput, ProtocolError>> {
@@ -77,17 +112,19 @@ export class RespondDialogOperation {
       // pruned and section validity is recomputed. Without this, detectChangedSections
       // runs against pre-close state and the context keeps tracking the dead form.
       this.repo.applyToPage(input.pageContextId, closeResult.value);
-      this.repo.removeDialog(input.pageContextId, input.dialogFormId);
+      const newDialogs = detectDialogs(closeResult.value);
+      this.forgetAnswered(input, newDialogs);
 
       const updatedCtx = this.repo.get(input.pageContextId);
       const changedSections = updatedCtx ? detectChangedSections(updatedCtx, closeResult.value) : [];
-      const newDialogs = detectDialogs(closeResult.value);
+      const messages = detectMessages(closeResult.value);
       return ok({
         success: true,
         changedSections,
         dialogsOpened: newDialogs,
         requiresDialogResponse: newDialogs.length > 0,
         openedPages: [],
+        ...(messages.length > 0 ? { messages } : {}),
         ...(fieldResults ? { fieldResults } : {}),
       });
     }
@@ -97,28 +134,37 @@ export class RespondDialogOperation {
       return err(new ProtocolError(`Invalid dialog response: ${input.response}. Use: ok, cancel, yes, no, abort, close`));
     }
 
+    const button = this.resolveButton(input.pageContextId, input.dialogFormId, input.response, systemAction);
     const result = await this.session.invoke(
       {
         type: 'InvokeAction' as const,
         formId: input.dialogFormId,
-        controlPath: 'server:c[0]',
-        systemAction,
+        controlPath: button.controlPath,
+        systemAction: button.systemAction,
       },
       (event) => event.type === 'InvokeCompleted' || event.type === 'FormCreated' || event.type === 'DialogOpened',
     );
 
     if (!isOk(result)) return result;
 
-    const events = result.value;
+    const events: BCEvent[] = [...result.value];
+    // Forget the answered dialog BEFORE applying the answer's events, so the next
+    // dialog of a chain takes the plain `dialog` section id instead of `dialog#2`
+    // (the answered one still held it) — the name the caller is told to use.
+    this.forgetAnswered(input, detectDialogs(events));
     this.repo.applyToPage(input.pageContextId, events);
+    const adopted = this.adoptOpenedPages
+      ? await this.adoptOpenedPages(events, ctx.rootFormId).catch((e: unknown) => {
+        this.logger?.warn(`Could not register the page(s) the answer opened: ${e instanceof Error ? e.message : String(e)}`);
+        return [] as string[];
+      })
+      : [];
 
-    const newDialogs = detectDialogs(events);
-
-    // The answered dialog is gone even though BC never says so — no FormClosed comes
-    // back for a dismissed dialog (verified live on devel1). Prune it, unless BC just
-    // re-published a dialog with the SAME formId, which would mean it is still there.
-    if (!newDialogs.some(d => d.formId === input.dialogFormId)) {
-      this.repo.removeDialog(input.pageContextId, input.dialogFormId);
+    let newDialogs = detectDialogs(events);
+    if (newDialogs.length > 0 && this.loadDialogContent) {
+      await this.loadDialogContent(input.pageContextId, events).catch((e: unknown) => {
+        this.logger?.warn(`Loading the rows of the next dialog failed: ${e instanceof Error ? e.message : String(e)}`);
+      });
     }
 
     // The answer may have committed a destructive change without BC saying which row
@@ -126,32 +172,140 @@ export class RespondDialogOperation {
     // nothing that identifies it, so the projection keeps listing a row that no
     // longer exists (verified live on SaaS — a freshly opened context did not list
     // it). Re-read the repeaters once the dialog chain is actually finished.
+    //
+    // The re-sync is itself a request to BC and can raise a dialog of its own (a
+    // Refresh on a page with unsaved changes asks whether to discard them). It settles
+    // those it caused; anything it could not settle is OPEN on the server and is part
+    // of this answer's result. Dropping it is what left the caller with
+    // `dialogsOpened: []` while BC held a modal (bc-saas F-45).
     if (newDialogs.length === 0) {
-      await resyncPageRepeaters(this.session, this.repo, input.pageContextId, this.logger);
+      const resync = await resyncPageRepeaters(this.session, this.repo, input.pageContextId, this.logger);
+      const reported = reportableResyncEvents(resync);
+      if (reported.length > 0) {
+        events.push(...reported);
+        newDialogs = detectDialogs(events);
+      }
     }
 
     const updatedCtx = this.repo.get(input.pageContextId);
     const changedSections = updatedCtx ? detectChangedSections(updatedCtx, events) : [];
+    const messages = detectMessages(events);
+    const files = detectFiles(events);
+    // A trigger that failed after the answer (OnDelete, a posting check) reports its
+    // error as ValidationResults, not as a dialog (bc-saas F-56).
+    const errors = detectValidationErrors(events);
 
-    // Check for new pages opened (e.g., posting creates a Posted Invoice)
+    // Pages the answer opened (posting opens the posted document; a posting that fails
+    // with several errors opens "Mensajes de error"). Only ownerless forms count: a
+    // FormCreated with a parentFormId is a subpage/FactBox of an existing page.
     const openedPages: Array<{ pageContextId: string; caption: string }> = [];
+    const seen = new Set<string>();
+    const report = (pcId: string): void => {
+      if (pcId === input.pageContextId || seen.has(pcId)) return;
+      const opened = this.repo.get(pcId);
+      if (!opened) return;
+      seen.add(pcId);
+      openedPages.push({ pageContextId: pcId, caption: opened.caption });
+    };
+    for (const pcId of adopted) report(pcId);
     for (const event of events) {
-      if (event.type === 'FormCreated' && event.formId !== ctx.rootFormId) {
+      if (event.type === 'FormCreated' && !event.parentFormId && event.formId !== ctx.rootFormId) {
         const newCtx = this.repo.getByFormId(event.formId);
-        if (newCtx && newCtx.pageContextId !== input.pageContextId) {
-          openedPages.push({ pageContextId: newCtx.pageContextId, caption: newCtx.caption });
-        }
+        if (newCtx) report(newCtx.pageContextId);
       }
     }
 
     return ok({
-      success: true,
+      success: errors.length === 0,
+      ...(errors.length > 0 ? { errors } : {}),
       changedSections,
-      dialogsOpened: newDialogs,
+      dialogsOpened: withDialogSections(updatedCtx, newDialogs),
       requiresDialogResponse: newDialogs.length > 0,
       openedPages,
+      ...(messages.length > 0 ? { messages } : {}),
+      ...(files.length > 0 ? { files } : {}),
       ...(fieldResults ? { fieldResults } : {}),
+      ...(openedPages.length > 0 ? {
+        note: `The answer opened ${openedPages.length} page(s): ${openedPages.map(p => `"${p.caption}" (${p.pageContextId})`).join(', ')}. `
+          + 'Read them with bc_read_data before assuming the operation went through: when a posting fails with several errors BC opens '
+          + 'the "Error Messages" page ("Mensajes de error") instead of an error dialog, and the errors are its rows.',
+      } : {}),
     });
+  }
+
+  /**
+   * The button that really means `response` on THIS dialog.
+   *
+   * A page run modally in lookup mode does not have an Ok button: it publishes its
+   * own "Aceptar" with SystemAction LookupOk=330 (and "Cancelar" LookupCancel=340).
+   * Measured live on devel1 (BC27, 2026-10-03) on "Posted Sales Shipment - Update"
+   * (page 1350, the sibling of 1351). Those "<posted doc> - Update" pages only save
+   * in `OnQueryClosePage` when `CloseAction = Action::LookupOK` (w1-28 source of
+   * pages 1350/1351/...). Answering with a plain Ok=300 closed the page as OK, the
+   * trigger did nothing, and the edit was thrown away while the field write had
+   * reported `changed: true` (bc-saas F-47 d). So: when the dialog publishes a button
+   * for the answer, press THAT one; otherwise keep the generic system action.
+   *
+   * A report REQUEST PAGE has no Ok either: "Imprimir" = Print 420, "Vista previa y
+   * cerrar" = Preview 400, "Enviar a..." = SendTo 410. Measured live on devel1
+   * (2026-10-04): Ok=300 is accepted and ignored — the page stays open on the
+   * server, the report never runs, nothing after `Report.RunModal` executes (the
+   * DeCA "¿Se ha entregado...?" Confirm), and since the answered dialog was untracked
+   * the NEXT call died with LogicalModalityViolation on an empty modal stack
+   * (bc-saas F-55, F-71). "ok" on a request page therefore presses Print, the
+   * report's own main button; Preview is the fallback when Print is not offered.
+   * Only VISIBLE buttons count: a request page publishes hidden copies of each.
+   */
+  private resolveButton(
+    pageContextId: string,
+    dialogFormId: string,
+    response: RespondDialogInput['response'],
+    fallback: number,
+  ): { systemAction: number; controlPath: string } {
+    const generic = { systemAction: fallback, controlPath: 'server:c[0]' };
+    const candidates: Record<string, number[]> = {
+      ok: [SystemAction.Ok, SystemAction.LookupOk, SystemAction.CloseOk, SystemAction.Print, SystemAction.Preview],
+      cancel: [SystemAction.Cancel, SystemAction.LookupCancel],
+      yes: [SystemAction.Yes],
+      no: [SystemAction.No],
+      abort: [SystemAction.Abort],
+    };
+    const wanted = candidates[response];
+    const form = this.repo.get(pageContextId)?.forms?.get(dialogFormId);
+    if (!wanted || !form) return generic;
+    const enabled = treeActions(form.root).filter(a => a.properties.enabled !== false);
+    const visible = enabled.filter(a => a.properties.visible !== false);
+    // Visible buttons first; an enabled-but-hidden one only when nothing visible fits.
+    for (const pool of [visible, enabled]) {
+      for (const sa of wanted) {
+        const action = pool.find(a => a.systemAction === sa);
+        if (action) {
+          if (sa !== fallback) this.logger?.info(`Dialog ${dialogFormId} answers "${response}" with its own button (systemAction ${sa}, ${action.controlPath})`);
+          return { systemAction: sa, controlPath: action.controlPath };
+        }
+      }
+    }
+    return generic;
+  }
+
+  /**
+   * The answered dialog is gone even though BC never says so — no FormClosed comes
+   * back for a dismissed dialog (verified live on devel1, BC27: the "Archive Order?"
+   * confirm, an error box and a selection menu all closed without one). Untrack it in
+   * the page context AND in the session's modal stack, unless BC just re-published a
+   * dialog with the SAME formId, which would mean it is still there.
+   *
+   * Only the page context used to be pruned. The session kept every answered dialog
+   * on its modal stack forever, so `modalDepth` climbed with each answer (bc-saas
+   * F-45: 1..9) and the next LogicalModalityViolation reconcile spent its attempts on
+   * forms BC had long thrown away (27 "survived No/Cancel/Abort/CloseForm —
+   * force-popping" lines on 2026-10-03, each one a FormNotFoundException) while the
+   * dialog that really blocked the session was never on the stack at all.
+   */
+  private forgetAnswered(input: RespondDialogInput, newDialogs: readonly DialogInfo[]): void {
+    if (newDialogs.some(d => d.formId === input.dialogFormId)) return;
+    this.repo.removeDialog(input.pageContextId, input.dialogFormId);
+    this.session.removeOpenForm(input.dialogFormId);
   }
 
   /**
@@ -167,6 +321,8 @@ export class RespondDialogOperation {
    *    alternative -- answer anyway and report the failures alongside -- is what made
    *    the original bug destructive: BC executes with its defaults, and by the time
    *    anyone reads `fieldResults` the ~50 wrong lines are already in the document.
+   *    "Did not change" excludes `reason: "already set"`: the field ALREADY held the
+   *    requested value, which is exactly the state the caller asked for (bc-saas F-46).
    */
   private async fillDialog(input: RespondDialogInput): Promise<Result<FieldWriteResult[], ProtocolError>> {
     if (input.response === 'cancel' || input.response === 'abort' || input.response === 'close') {
@@ -202,11 +358,14 @@ export class RespondDialogOperation {
     const written = await this.dataService.writeFields(input.pageContextId, values, { sectionId: section.sectionId });
     if (!isOk(written)) return written;
 
-    const results = written.value.results;
+    // The raw BC events of each write are internal evidence, not output: they made
+    // a single answer tens of KB long (bc-saas F-42).
+    const results = stripFieldEvents(written.value.results);
     // `changed === undefined` is UNVERIFIED, not failed: BC echoed nothing and the
     // projection said nothing. Treating it as a failure would block dialogs that work,
-    // so it passes with its reason visible in fieldResults.
-    const rejected = results.filter(r => !r.success || r.changed === false);
+    // so it passes with its reason visible in fieldResults. `already set` is the
+    // requested state already in place — not a failure either.
+    const rejected = results.filter(r => !r.success || (r.changed === false && r.reason !== 'already set'));
     if (rejected.length > 0) {
       const detail = rejected
         .map(r => `"${r.fieldName}": ${r.error ?? r.validationMessage ?? r.reason ?? 'did not change'}`)

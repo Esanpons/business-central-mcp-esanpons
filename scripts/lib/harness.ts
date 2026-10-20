@@ -158,6 +158,9 @@ export async function createHarness(env: EnvName, options: HarnessOptions = {}):
     const objectIndex = new ObjectIndexService(page, cfg.stateDir, cfg.bc.baseUrl, cfg.bc.tenantId, logger);
     // Same wiring as the real server: an action-opened page gets its subpages.
     action.setChildFormDiscovery((pcId, events) => page.discoverAndLoadChildForms(pcId, events));
+    action.setDialogContentLoader((pcId, events) => page.loadDialogContent(pcId, events));
+    // Same as the real server: late FactBox refreshes BC pushes between invokes.
+    s.onUnsolicitedEvents((events) => repo.applyEvents(events));
     return {
       services: { page, data, action, filter, navigation, search, screenshot, reportDownload, manual, objectIndex },
       ops: {
@@ -168,7 +171,11 @@ export async function createHarness(env: EnvName, options: HarnessOptions = {}):
         closePage: new ClosePageOperation(page),
         searchPages: new SearchPagesOperation(search),
         navigate: new NavigateOperation(navigation),
-        respondDialog: new RespondDialogOperation(s, repo, logger),
+        respondDialog: new RespondDialogOperation(
+          s, repo, logger, data,
+          (ev, src) => action.adoptOpenedPages(ev, src, 'dialog'),
+          (pcId, ev) => page.loadDialogContent(pcId, ev),
+        ),
         switchCompany: new SwitchCompanyOperation(switchSessionCompany, logger),
         listCompanies: new ListCompaniesOperation(page, data, () => session.companyName, logger),
         runReport: new RunReportOperation(s),

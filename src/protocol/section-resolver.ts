@@ -15,6 +15,12 @@ export interface SectionDescriptor {
   readonly formId: string;
   readonly repeaterControlPath?: string;
   readonly valid: boolean;
+  /**
+   * Set on a subform HOSTED INSIDE a modal dialog (the lines grid of page 5855
+   * "Posted Purchase Document Lines", a worksheet run modally). The section lives and
+   * dies with that dialog: answering it removes them together.
+   */
+  readonly ownerDialogFormId?: string;
 }
 
 export interface ResolvedSection {
@@ -128,6 +134,40 @@ export class SectionResolver {
     };
   }
 
+  /**
+   * Descriptor for a subform hosted inside an open dialog: `<dialogSectionId>:<caption>`
+   * (e.g. `dialog:Lines`). Its own namespace keeps it from colliding with the page's
+   * `lines`, and the prefix says which dialog it belongs to.
+   *
+   * Measured live on devel1 (2026-10-04): "Get Posted Doc. Lines to Reverse" opens
+   * page 5855 as a DialogToShow whose tree hosts the lines in `fhc` nodes — four of
+   * them, one visible, each a subform with a repeater at server:c[1]. None of that was
+   * reachable: the dialog had a `dialog` section with header fields only, and
+   * `bc_read_data { section: "dialog", filters }` answered "has no rows to filter"
+   * (bc-saas F-65).
+   */
+  deriveDialogChildSection(
+    ctx: PageContext,
+    dialogSectionId: string,
+    dialogFormId: string,
+    childFormId: string,
+    childRoot: FormNode,
+    hostCaption: string,
+  ): SectionDescriptor {
+    const reps = treeRepeaters(childRoot);
+    const repeaterPath = reps.size > 0 ? reps.keys().next().value : undefined;
+    const caption = hostCaption || childRoot.properties.caption || 'Lines';
+    return {
+      sectionId: this.uniqueSectionId(ctx, `${dialogSectionId}:${caption}`),
+      kind: 'subpage',
+      caption,
+      formId: childFormId,
+      ...(repeaterPath ? { repeaterControlPath: repeaterPath } : {}),
+      valid: true,
+      ownerDialogFormId: dialogFormId,
+    };
+  }
+
   private uniqueSectionId(ctx: PageContext, base: string): string {
     if (!ctx.sections.has(base)) return base;
     for (let i = 2; ; i++) {
@@ -135,6 +175,16 @@ export class SectionResolver {
       if (!ctx.sections.has(candidate)) return candidate;
     }
   }
+}
+
+/**
+ * The section ids a caller can actually read: the VALID ones. Errors used to list
+ * every key of the map, invalidated sections included, so "Section 'factbox:Datos
+ * pendientes' not found" came with that same id in availableSections — an answer
+ * that contradicted itself and sent the caller round in circles (bc-saas F-59/F-66).
+ */
+export function readableSectionIds(ctx: PageContext): string[] {
+  return Array.from(ctx.sections.entries()).filter(([, s]) => s.valid !== false).map(([id]) => id);
 }
 
 export function resolveSection(
@@ -145,17 +195,17 @@ export function resolveSection(
   const id = sectionId ?? defaultSection ?? 'header';
   const section = ctx.sections.get(id);
   if (!section) {
-    return { error: `Section '${id}' not found.`, availableSections: Array.from(ctx.sections.keys()) };
+    return { error: `Section '${id}' not found.`, availableSections: readableSectionIds(ctx) };
   }
   if (!section.valid) {
     return {
       error: `Section '${id}' is no longer available. The page may have been modified. Try re-opening the page.`,
-      availableSections: Array.from(ctx.sections.keys()).filter(s => ctx.sections.get(s)?.valid !== false),
+      availableSections: readableSectionIds(ctx),
     };
   }
   const form = ctx.forms.get(section.formId);
   if (!form) {
-    return { error: `Form for section '${id}' not found (formId: ${section.formId}).`, availableSections: Array.from(ctx.sections.keys()) };
+    return { error: `Form for section '${id}' not found (formId: ${section.formId}).`, availableSections: readableSectionIds(ctx) };
   }
   const reps = treeRepeaters(form.root);
   const repeater = section.repeaterControlPath

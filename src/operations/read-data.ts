@@ -6,7 +6,7 @@ import type { PageContextRepository } from '../protocol/page-context-repo.js';
 import type { PageContext } from '../protocol/page-context.js';
 import { buildSection, type Section } from '../protocol/section-dto.js';
 import { filterFieldsByGroup, filterColumns, sliceRows } from '../protocol/section-filters.js';
-import { resolveSection } from '../protocol/section-resolver.js';
+import { resolveSection, readableSectionIds } from '../protocol/section-resolver.js';
 import { buildBinderToCaptionMap, repeaterColumnsToDto } from '../protocol/row-mapping.js';
 import type { OpenFormFilter } from '../protocol/filter-query.js';
 import { filterRows, type RowFilter } from '../protocol/row-filter.js';
@@ -171,7 +171,7 @@ export class ReadDataOperation {
     const section = buildSection(ctx, sectionId);
     if (!section) {
       return err(new ProtocolError(`Section '${sectionId}' not found.`, {
-        availableSections: Array.from(ctx.sections.keys()),
+        availableSections: readableSectionIds(ctx),
       }));
     }
 
@@ -185,7 +185,7 @@ export class ReadDataOperation {
       if (!materialized.rows) {
         return err(new ProtocolError(
           `Section '${sectionId}' has no rows to filter (filters apply to list/lines sections only).`,
-          { availableSections: Array.from(ctx.sections.keys()) },
+          { availableSections: readableSectionIds(ctx) },
         ));
       }
       try {

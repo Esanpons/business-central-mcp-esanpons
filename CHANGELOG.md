@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (2026-10-04) — SaaS battery review (bc-saas F-54 … F-73)
+
+Most of F-55 … F-68 were observed on a server process started BEFORE the F-42 … F-47 build, so
+those fixes had never run. What was still wrong, reproduced on devel1 and fixed:
+
+- `bc_respond_dialog "ok"` on a report request page pressed nothing (it has no Ok button): now it
+  presses Print (Preview as fallback), the report runs, the PDF comes back in `files`, and the session
+  no longer dies on the next call with a modal it cannot see (F-55, F-71).
+- Errors BC attaches as `ValidationResults` (a refused delete, a failed check) come back in `errors`
+  with `success:false` (F-56). Pages an answer opens ("Mensajes de error") get a pageContextId and are
+  reported with a note (F-56, F-65).
+- Dialogs expose their hosted subforms as `dialog:<caption>` sections with their rows loaded, and a
+  dialog's own grid is loaded too (F-57, F-64, F-65).
+- ListPart FactBoxes stay readable (F-59, F-66); header echoes are no longer swallowed by a FactBox
+  sharing the controlPath (F-66).
+- `newLine` appends at the end in order, commits and returns the real `newLineBookmark` plus
+  `newLineCreated`; writing to a `DraftRecord…` bookmark selects it once; re-asserting a reset value
+  never re-writes Type/No. (F-58, F-60, F-64, F-70).
+- `enabled` judged on the targeted row (F-67), caption writes prefer the visible control (F-73),
+  filter errors explain AL field names (F-63, F-68), partial `selectRows` stops the later steps
+  (F-68), hint uses `column` (F-62).
+
+Not fixed: the AAD profile lock between two live clients (F-54), native dropdowns / "Avanzado" in
+capture steps (F-72), the 9-row Locations list (F-63, not reproducible on devel1).
+
 ### Added (2026-09-08) — `steps`: real browser interactions before a capture
 
 `bc_screenshot` (and each `bc_build_manual` step) takes `steps`, an ordered list of interactions

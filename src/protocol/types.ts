@@ -9,7 +9,22 @@ export type BCEvent =
   | PropertyChangedEvent
   | BookmarkChangedEvent
   | InvokeCompletedEvent
-  | SessionInfoEvent;
+  | SessionInfoEvent
+  | UriToShowEvent;
+
+/**
+ * BC asks the client to open a URI — how a rendered report reaches the browser.
+ * Measured live on devel1 (BC27, 2026-10-04) after "Imprimir" on a request page:
+ * `DN.LogicalClientEventRaisingHandler` params ["UriToShow",
+ * "DynamicFileHandler.axd?form=4F&sessionid=...&type=File&fid=...&fname=Sales%20Invoice.pdf"]
+ * — params[1] is the bare (relative) string, not an object. It was dropped, so a
+ * report that DID run left no trace in the result.
+ */
+export interface UriToShowEvent {
+  readonly type: 'UriToShow';
+  readonly formId: '';
+  readonly uri: string;
+}
 
 export interface FormCreatedEvent {
   readonly type: 'FormCreated';
@@ -205,6 +220,14 @@ export const SystemAction = {
   // cancel-shaped wizard nav role.
   CloseOk: 350,
   Yes: 380, No: 390,
+  // A report REQUEST PAGE has no Ok button. Measured live on devel1 (BC27,
+  // 2026-10-04, page 143 "&Print..." -> request page `MappingHint: 'RequestPage'`,
+  // PageType 13): it publishes "Vista previa y cerrar" = 400, "Enviar a..." /
+  // "Descargar" = 410, "Imprimir" = 420 and "Cancelar" = 310. `Ok = 300` sent to it is
+  // accepted and IGNORED: the page stays open server-side, the report never runs and
+  // the next call dies with LogicalModalityViolation (bc-saas F-55 / F-71). 400 and
+  // 420 both run the report, answer with a `UriToShow` for the PDF and close the page.
+  Preview: 400, SendTo: 410, Print: 420,
 } as const;
 
 export const FilterOperation = {

@@ -34,6 +34,7 @@ function makeRepo(ctx: unknown) {
 
 const session = {
   invoke: async () => ok([{ type: 'InvokeCompleted' }]),
+  removeOpenForm: () => {},
 } as never;
 
 describe('bc_respond_dialog applies the fields it is given', () => {
@@ -71,6 +72,7 @@ describe('bc_respond_dialog applies the fields it is given', () => {
     let answered = false;
     const spySession = {
       invoke: async () => { answered = true; return ok([{ type: 'InvokeCompleted' }]); },
+      removeOpenForm: () => {},
     } as never;
     const dataService = {
       writeFields: async () => ok({
@@ -106,6 +108,50 @@ describe('bc_respond_dialog applies the fields it is given', () => {
     const op = new RespondDialogOperation(session, makeRepo(makeCtx()), logger, dataService);
     const r = await op.execute({ pageContextId: 'pc1', dialogFormId: 'dlg1', response: 'ok', fields: { F: '1' } });
     expect(r.ok).toBe(true);
+  });
+
+  it('treats a field that ALREADY held the value as accepted and answers the dialog (F-46)', async () => {
+    // bc-saas F-46: a dialog field that came pre-filled with the requested value
+    // reports changed:false + reason "already set". That is the state the caller
+    // asked for, yet the call failed with "already set" and left the dialog open.
+    let answered = false;
+    const spySession = {
+      invoke: async () => { answered = true; return ok([{ type: 'InvokeCompleted' }]); },
+      removeOpenForm: () => {},
+    } as never;
+    const dataService = {
+      writeFields: async () => ok({
+        results: [
+          { fieldName: 'Nº documento', controlPath: 'p', success: true, changed: true, newValue: '101004' },
+          { fieldName: 'Incluir cabecera', controlPath: 'q', success: true, changed: false, reason: 'already set', newValue: 'Sí' },
+        ],
+        events: [],
+      }),
+    } as never;
+    const op = new RespondDialogOperation(spySession, makeRepo(makeCtx()), logger, dataService);
+    const r = await op.execute({
+      pageContextId: 'pc1', dialogFormId: 'dlg1', response: 'ok',
+      fields: { 'Nº documento': '101004', 'Incluir cabecera': 'Sí' },
+    });
+    expect(r.ok).toBe(true);
+    expect(answered).toBe(true);
+    if (r.ok) expect(r.value.fieldResults?.map(f => f.reason)).toEqual([undefined, 'already set']);
+  });
+
+  it('does not hand back the raw BC events of each field write (F-42)', async () => {
+    const dataService = {
+      writeFields: async () => ok({
+        results: [{
+          fieldName: 'F', controlPath: 'p', success: true, changed: true,
+          events: [{ type: 'PropertyChanged', formId: 'dlg1', controlPath: 'p', changes: { StringValue: '1' } }],
+        }],
+        events: [],
+      }),
+    } as never;
+    const op = new RespondDialogOperation(session, makeRepo(makeCtx()), logger, dataService);
+    const r = await op.execute({ pageContextId: 'pc1', dialogFormId: 'dlg1', response: 'ok', fields: { F: '1' } });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.fieldResults?.[0]).not.toHaveProperty('events');
   });
 
   it('refuses fields on a dialog that is being dismissed', async () => {

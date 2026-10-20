@@ -119,6 +119,49 @@ export interface ScreenshotStep {
   modifiers?: StepModifier[];
 }
 
+/**
+ * The verdict of a selectRows step: undefined when every token selected a row,
+ * otherwise what was selected and what was not ("selected 2 of 3 (108016, 102418);
+ * no row matched: 105013"). It used to say only "no row matched: 105013", read as
+ * "nothing was selected" while two rows were (bc-saas F-68 a).
+ */
+export function selectRowsReason(selected: readonly string[], missed: readonly string[]): string | undefined {
+  if (missed.length === 0) return undefined;
+  const total = selected.length + missed.length;
+  return selected.length > 0
+    ? `selected ${selected.length} of ${total} (${selected.join(', ')}); no row matched: ${missed.join(', ')}`
+    : `no row matched: ${missed.join(', ')}`;
+}
+
+/** The warnings a list of step outcomes deserves (see CaptureResult.warning). */
+export function stepWarnings(steps: readonly StepOutcome[]): string[] {
+  const out: string[] = [];
+  const partial = steps.filter(s => !s.ok && !s.skipped && (s.selected?.length ?? 0) > 0);
+  const skipped = steps.filter(s => s.skipped);
+  const failed = steps.filter(s => !s.ok && !s.skipped && !((s.selected?.length ?? 0) > 0));
+  if (partial.length) {
+    out.push(
+      `PARTIAL SELECTION: ${partial.map(s => `${s.step} (${s.reason})`).join(', ')}. The image shows THOSE rows selected, `
+      + 'not the requested set. Position the list (bookmark/filter) so every token is visible and retry.',
+    );
+  }
+  if (skipped.length) {
+    out.push(
+      `STEPS NOT RUN: ${skipped.map(s => s.step).join(', ')} -- a selectRows before them did not select every requested row, `
+      + 'so nothing was done on a selection other than the one asked for.',
+    );
+  }
+  if (failed.length) {
+    out.push(
+      `STEP DID NOTHING: ${failed.map((s) => `${s.step} (${s.reason ?? 'unknown'})`).join(', ')}. `
+      + 'The image shows the page WITHOUT that interaction. "not found" means no visible control matched the caption '
+      + 'or selector (pass debugCaptions:true to see the exact text BC renders); "disabled" means BC greyed it out for '
+      + 'the current row/state; "no row matched" lists the selectRows tokens that hit no visible row.',
+    );
+  }
+  return out;
+}
+
 /** What happened to one step. `ok:false` means the image shows the page WITHOUT it. */
 export interface StepOutcome {
   /** Human-readable rendering of the step, e.g. `click "Todo"`. */
@@ -126,6 +169,13 @@ export interface StepOutcome {
   ok: boolean;
   /** 'not found' | 'disabled' | 'no row matched: ...' | the browser's own error. */
   reason?: string;
+  /**
+   * selectRows: the tokens whose row WAS selected. A step can be `ok:false` and still
+   * have selected rows — 2 of 3 — which is not "did nothing" (bc-saas F-68 a).
+   */
+  selected?: string[];
+  /** True for a step that was NOT run because an earlier selectRows did not select every row. */
+  skipped?: boolean;
 }
 
 export interface CaptureResult {
@@ -440,15 +490,7 @@ export class ScreenshotService {
         + 'means the caption does not match what the page renders (it is locale-dependent).',
       );
     }
-    const failedSteps = (steps ?? []).filter((s) => !s.ok);
-    if (failedSteps.length) {
-      warnings.push(
-        `STEP DID NOTHING: ${failedSteps.map((s) => `${s.step} (${s.reason ?? 'unknown'})`).join(', ')}. `
-        + 'The image shows the page WITHOUT that interaction. "not found" means no visible control matched the caption '
-        + 'or selector (pass debugCaptions:true to see the exact text BC renders); "disabled" means BC greyed it out for '
-        + 'the current row/state; "no row matched" lists the selectRows tokens that hit no visible row.',
-      );
-    }
+    warnings.push(...stepWarnings(steps ?? []));
     if (unexpectedDialog) {
       warnings.push(
         `A DIALOG NOBODY ASKED FOR is on screen, so the image shows it instead of the page: "${unexpectedDialog}". `
@@ -952,22 +994,37 @@ export class ScreenshotService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async runSteps(p: any, steps: ScreenshotStep[]): Promise<StepOutcome[]> {
     const out: StepOutcome[] = [];
-    for (const s of steps) {
+    for (let i = 0; i < steps.length; i++) {
+      const s = steps[i]!;
       const label = this.describeStep(s);
       let reason: string | undefined;
+      let selected: string[] | undefined;
       try {
         if (s.click !== undefined) reason = await this.clickReal(p, { caption: s.click }, s.modifiers);
         else if (s.selector !== undefined) reason = await this.clickReal(p, { selector: s.selector }, s.modifiers);
         else if (s.type !== undefined) reason = await this.typeInto(p, s.type, s.into);
         else if (s.press !== undefined) reason = await this.pressChord(p, s.press);
-        else if (s.selectRows !== undefined) reason = await this.selectRows(p, s.selectRows);
+        else if (s.selectRows !== undefined) ({ reason, selected } = await this.selectRows(p, s.selectRows));
         else if (s.wait !== undefined) await sleep(Math.max(0, Math.min(s.wait, 30000)));
         else reason = 'empty step';
       } catch (e) {
         reason = e instanceof Error ? e.message : String(e);
       }
       this.logger.info(`[screenshot] step ${label} -> ${reason ?? 'ok'}`);
-      out.push(reason ? { step: label, ok: false, reason } : { step: label, ok: true });
+      out.push({ step: label, ok: !reason, ...(reason ? { reason } : {}), ...(selected ? { selected } : {}) });
+      // A selection that is not the one asked for must not be ACTED on: the next step
+      // is usually the action ("Agrupar", "Publicar", "Anular") and it would run on the
+      // wrong documents. That happened: 2 of 3 rows were selected, the warning said the
+      // step "did nothing", and "Agrupar" grouped the two (bc-saas F-68 a). Stop here.
+      if (s.selectRows !== undefined && reason) {
+        for (const rest of steps.slice(i + 1)) {
+          out.push({
+            step: this.describeStep(rest), ok: false, skipped: true,
+            reason: 'skipped: the selectRows before it did not select every requested row',
+          });
+        }
+        break;
+      }
       if (s.wait === undefined) await sleep(600);
     }
     return out;
@@ -1175,8 +1232,9 @@ export class ScreenshotService {
    * shows exactly that.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async selectRows(p: any, tokens: string[]): Promise<string | undefined> {
+  private async selectRows(p: any, tokens: string[]): Promise<{ reason?: string; selected: string[] }> {
     const misses: string[] = [];
+    const hits: string[] = [];
     let first = true;
     for (const token of tokens) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1227,9 +1285,10 @@ export class ScreenshotService {
         await cell.dispose().catch(() => undefined);
       }
       first = false;
+      hits.push(token);
       await sleep(250);
     }
-    return misses.length ? `no row matched: ${misses.join(', ')}` : undefined;
+    return { reason: selectRowsReason(hits, misses), selected: hits };
   }
 
   /**

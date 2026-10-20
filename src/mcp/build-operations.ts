@@ -92,7 +92,14 @@ export function buildOperations(session: BCSession, deps: OperationsDeps): Opera
   // opened by bc_open_page (bc-saas F-39: the creation context of a document had no
   // `lines` section, so its first line could not be written).
   actionService.setChildFormDiscovery((pcId, events) => pageService.discoverAndLoadChildForms(pcId, events));
-
+  // A dialog that shows a grid (a worksheet or lookup run modally, the lines of page
+  // 5855) arrives without rows: load them (bc-saas F-57 2nd case, F-64 c, F-65).
+  actionService.setDialogContentLoader((pcId, events) => pageService.loadDialogContent(pcId, events));
+  // BC refreshes FactBoxes (and sometimes header fields) in frames it pushes AFTER an
+  // interaction's response, when no invoke is listening any more. Fold them into the
+  // page contexts as they arrive, or every FactBox keeps showing the record it was
+  // opened on (bc-saas F-43). Routed by formId, like any other event.
+  session.onUnsolicitedEvents((events) => pageContextRepo.applyEvents(events));
 
   return {
     openPage: new OpenPageOperation(pageService),
@@ -102,7 +109,11 @@ export function buildOperations(session: BCSession, deps: OperationsDeps): Opera
     closePage: new ClosePageOperation(pageService),
     searchPages: new SearchPagesOperation(searchService),
     navigate: new NavigateOperation(navigationService),
-    respondDialog: new RespondDialogOperation(session, pageContextRepo, logger, dataService),
+    respondDialog: new RespondDialogOperation(
+      session, pageContextRepo, logger, dataService,
+      (events, sourceFormId) => actionService.adoptOpenedPages(events, sourceFormId, 'dialog'),
+      (pcId, events) => pageService.loadDialogContent(pcId, events),
+    ),
     switchCompany: new SwitchCompanyOperation(switchSessionCompany, logger, onCompanySelected),
     listCompanies: new ListCompaniesOperation(pageService, dataService, () => session.companyName, logger),
     runReport: new RunReportOperation(session),

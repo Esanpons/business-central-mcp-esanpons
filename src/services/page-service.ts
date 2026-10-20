@@ -5,7 +5,7 @@ import type { BCSession } from '../session/bc-session.js';
 import type { PageContextRepository } from '../protocol/page-context-repo.js';
 import type { PageContext, PageOpenMode } from '../protocol/page-context.js';
 import type {
-  BCEvent, OpenFormInteraction, LoadFormInteraction, CloseFormInteraction, InvokeActionInteraction, SetCurrentRowInteraction,
+  BCEvent, DialogOpenedEvent, OpenFormInteraction, LoadFormInteraction, CloseFormInteraction, InvokeActionInteraction, SetCurrentRowInteraction,
 } from '../protocol/types.js';
 import { buildFormTree } from '../protocol/form-tree-builder.js';
 import { fields as treeFields, repeaters as treeRepeaters, cues as treeCues } from '../protocol/form-views.js';
@@ -15,6 +15,7 @@ import type { Logger } from '../core/logger.js';
 import type { SectionKind } from '../protocol/section-resolver.js';
 import type { WizardState } from '../protocol/types.js';
 import { buildOpenFormFilter, type OpenFormFilter } from '../protocol/filter-query.js';
+import { classifyDialog } from '../protocol/mutation-result.js';
 
 /**
  * `mode=` values BC's OpenForm query accepts, mirroring the web client URL.
@@ -83,8 +84,10 @@ function buildWizardState(controlTree: unknown): WizardState | null {
 function errorDialogMessage(controlTree: unknown): string | undefined {
   if (!controlTree || typeof controlTree !== 'object') return undefined;
   const raw = controlTree as Record<string, unknown>;
-  if (raw.t !== 'lmd') return undefined;
-  if (raw.ExceptionType === undefined || raw.ExceptionType === null) return undefined;
+  // A CONFIRM is an `lmd` too, and it carries `ExceptionType: 0` (measured live on
+  // devel1, 2026-10-03) — "has an ExceptionType" is not "is an error". The shared
+  // classifier reads MappingHint / DialogType / a non-zero ExceptionType.
+  if (classifyDialog(raw) !== 'error') return undefined;
   const message = typeof raw.Message === 'string' ? raw.Message.trim() : '';
   if (message) return message;
   const caption = typeof raw.Caption === 'string' ? raw.Caption.trim() : '';
@@ -93,6 +96,31 @@ function errorDialogMessage(controlTree: unknown): string | undefined {
 
 export interface ClosePageResult {
   events: BCEvent[];
+  /**
+   * The dialogs that are STILL OPEN after the close, for the caller to answer. Not
+   * every DialogOpened in `events`: with `discardChanges` the save-changes question
+   * is answered here, and reporting it anyway made bc_close_page say `success:false`
+   * and point at a dialog that no longer existed, on a page context it had already
+   * removed (bc-saas F-47 b).
+   */
+  pendingDialogs: DialogOpenedEvent[];
+}
+
+/**
+ * Is this FactBox a dead stub (BC returned a placeholder with nothing in it)?
+ *
+ * A FactBox carries its content in one of three ways: loose fields (a CardPart),
+ * cue tiles (a Role Center CardPart) or a REPEATER (a ListPart). The check used to
+ * look only at the first two, and `fields()` does not count repeater columns, so
+ * every ListPart FactBox was declared dead right after the page opened and stayed
+ * unreadable for the life of the context: "Section 'factbox:Datos pendientes' not
+ * found" while that very name was listed in availableSections (bc-saas F-59, F-66).
+ * A ListPart with zero rows is not a stub either — it is an empty list, and its rows
+ * may arrive later (a part whose visibility depends on the record, a FactBox BC
+ * refreshes after an action).
+ */
+export function isDeadFactbox(root: Parameters<typeof treeFields>[0]): boolean {
+  return treeFields(root).length === 0 && treeCues(root).length === 0 && treeRepeaters(root).size === 0;
 }
 
 /** Default section kinds that are auto-loaded when a page is opened. */
@@ -244,7 +272,24 @@ export class PageService {
       (event) => event.type === 'InvokeCompleted',
     );
 
-    if (!isOk(result)) return result;
+    if (!isOk(result)) {
+      // With filters, the usual cause is a CAPTION where BC wants the AL field name:
+      // `filters: [{ column: "Nº" }]` or "Tipo de documento origen" made BC answer
+      // only "Se produjo un error" (bc-saas F-68 b), which says nothing about why.
+      // Only when the session survived — a dead session's error must reach the
+      // recovery path untouched.
+      if (activeFilters.length > 0 && this.session.isAlive) {
+        return err(new ProtocolError(
+          `${result.error.message} — BC refused to open page ${pageId} with the filters `
+          + `${activeFilters.map(f => `'${f.column}' = '${f.value}'`).join(', ')}. `
+          + 'OpenForm filters take the AL field NAME of the source table ("No.", "Name", "Document Type"), '
+          + 'not the caption the page shows ("Nº", "Nombre", "Tipo de documento origen"). Fix the column names '
+          + 'and retry, or open the page without filters and use bc_read_data on its rows.',
+          { pageId, filters: activeFilters, bcError: result.error.message },
+        ));
+      }
+      return result;
+    }
 
     const events = result.value;
 
@@ -279,7 +324,7 @@ export class PageService {
             query,
             hint: /bookmark=/.test(query)
               ? 'A bookmark only addresses the table the page is bound to. Drop it and open the page filtered '
-                + "(bc_open_page { pageId, filters: [{ field: \"No.\", value: \"<doc no>\" }] }), or open the list "
+                + "(bc_open_page { pageId, filters: [{ column: \"No.\", value: \"<doc no>\" }] }), or open the list "
                 + 'page and drill into the row (bc_execute_action { action: "View" | "Edit", rowIndex }), which '
                 + 'returns a pageContextId for the card BC itself considers correct.'
               : 'Read the message above: BC rejected this open before any page existed.',
@@ -500,9 +545,55 @@ export class PageService {
         if (sec.kind !== 'factbox') continue;
         const f = finalCtx.forms.get(sec.formId);
         if (!f) continue;
-        if (treeFields(f.root).length === 0 && treeCues(f.root).length === 0) {
+        if (isDeadFactbox(f.root)) {
           this.repo.invalidateSection(pageContextId, sectionId);
         }
+      }
+    }
+  }
+
+  /**
+   * Load the ROWS of every list a just-opened dialog shows: its own repeater (a
+   * worksheet or lookup list run modally) and the subforms it hosts (the lines grid of
+   * page 5855). BC sends a modal page's control tree in DialogToShow but no row data,
+   * exactly like a subpage: nothing asked for it, so those grids read as `rows: []`
+   * while the web client showed them full — "Crear pedidos de compra" with no lines
+   * (bc-saas F-57, 2nd case), the "Almacenes" lookup with `scanned: 0` (F-64 c), the
+   * lines to reverse that could not be picked (F-65).
+   *
+   * Same recipe as a subpage, measured live on devel1 (2026-10-04, page 5855): LoadForm
+   * on the form, then InvokeAction(Refresh) on its repeater — the Refresh is what
+   * produced the DataLoaded (49 rows). Message boxes and dialogs without a grid are
+   * left alone. Best effort: a failure leaves the dialog exactly as it was.
+   */
+  async loadDialogContent(pageContextId: string, events: readonly BCEvent[]): Promise<void> {
+    for (const e of events) {
+      if (e.type !== 'DialogOpened') continue;
+      const ctx = this.repo.get(pageContextId);
+      if (!ctx) return;
+      const dialogForm = ctx.forms.get(e.formId);
+      if (!dialogForm || e.formId === ctx.rootFormId) continue;
+      const targets: Array<{ formId: string; repeaterPath: string }> = [];
+      for (const path of treeRepeaters(dialogForm.root).keys()) {
+        if ((dialogForm.rows.get(path) ?? []).length === 0) targets.push({ formId: e.formId, repeaterPath: path });
+      }
+      for (const s of ctx.sections.values()) {
+        if (s.ownerDialogFormId === e.formId && s.valid && s.repeaterControlPath) {
+          targets.push({ formId: s.formId, repeaterPath: s.repeaterControlPath });
+        }
+      }
+      for (const t of targets) {
+        const load = await this.session.invoke(
+          { type: 'LoadForm', formId: t.formId, loadData: true, delayed: false, openForm: false } as LoadFormInteraction,
+          (ev) => ev.type === 'InvokeCompleted' || ev.type === 'DataLoaded',
+        );
+        if (isOk(load)) this.repo.applyToPage(pageContextId, load.value);
+        const refresh = await this.session.invoke(
+          { type: 'InvokeAction', formId: t.formId, controlPath: t.repeaterPath, systemAction: 30 } as InvokeActionInteraction,
+          (ev) => ev.type === 'InvokeCompleted' || ev.type === 'DataLoaded',
+        );
+        if (isOk(refresh)) this.repo.applyToPage(pageContextId, refresh.value);
+        else this.logger.warn(`Could not load the rows of dialog ${e.formId} (form ${t.formId}): ${refresh.error.message}`);
       }
     }
   }
@@ -556,51 +647,76 @@ export class PageService {
     if (!ctx) return err(this.repo.notFoundError(pageContextId));
 
     const allEvents: BCEvent[] = [];
-    let pendingDialog = false;
+    const pendingDialogs: DialogOpenedEvent[] = [];
     for (const formId of ctx.ownedFormIds) {
       const closeInteraction: CloseFormInteraction = { type: 'CloseForm', formId };
       const result = await this.session.invoke(closeInteraction, (event) => event.type === 'InvokeCompleted');
       if (isOk(result)) {
         allEvents.push(...result.value);
 
-        // Handle "save changes?" dialogs triggered by CloseForm.
+        // Handle the unsaved-changes question CloseForm raises.
         for (const event of result.value) {
-          if (event.type === 'DialogOpened' && event.formId) {
-            if (options?.discardChanges) {
-              // Auto-dismiss with "No" to discard and complete the close.
-              this.logger.info(`Close triggered dialog (formId=${event.formId}), dismissing with "no"`);
-              const dismissResult = await this.session.invoke(
-                { type: 'InvokeAction', formId: event.formId, controlPath: 'server:', systemAction: 390 } as InvokeActionInteraction, // No=390
-                (e) => e.type === 'InvokeCompleted',
-              );
-              if (isOk(dismissResult)) {
-                allEvents.push(...dismissResult.value);
-              }
-              this.session.removeOpenForm(event.formId);
-            } else {
-              // Leave the save-changes dialog open for the caller to answer via
-              // bc_respond_dialog. We must NOT remove the page context in this
-              // case: that tool needs a live pageContextId, and removing it here
-              // would strand the dialog server-side -> the next invoke dies with
-              // LogicalModalityViolationException (MODAL_STUCK). The caller either
-              // answers the dialog, or re-calls bc_close_page with discardChanges.
-              pendingDialog = true;
-            }
+          if (event.type !== 'DialogOpened' || !event.formId) continue;
+          if (!options?.discardChanges) {
+            // Leave the dialog open for the caller to answer via bc_respond_dialog.
+            // We must NOT remove the page context in this case: that tool needs a
+            // live pageContextId, and removing it here would strand the dialog
+            // server-side -> the next invoke dies with LogicalModalityViolationException
+            // (MODAL_STUCK). The caller either answers the dialog, or re-calls
+            // bc_close_page with discardChanges.
+            pendingDialogs.push(event);
+            continue;
           }
+          const still = await this.discardOnClose(event);
+          allEvents.push(...still.events);
+          pendingDialogs.push(...still.pending);
         }
       }
-      if (pendingDialog) break;      // stop; wait for the caller to resolve the dialog
+      if (pendingDialogs.length > 0) break;      // stop; wait for the caller to resolve the dialog
       this.session.removeOpenForm(formId);
     }
 
-    if (pendingDialog) {
-      this.logger.info(`Close of ${pageContextId} left a save-changes dialog open; keeping the context so bc_respond_dialog can answer it (or re-call bc_close_page with discardChanges).`);
-      return ok({ events: allEvents });
+    if (pendingDialogs.length > 0) {
+      this.logger.info(`Close of ${pageContextId} left a dialog open; keeping the context so bc_respond_dialog can answer it (or re-call bc_close_page with discardChanges).`);
+      return ok({ events: allEvents, pendingDialogs });
     }
 
     this.repo.remove(pageContextId);
     this.logger.info(`Page closed: ${pageContextId}`);
-    return ok({ events: allEvents });
+    return ok({ events: allEvents, pendingDialogs });
+  }
+
+  /**
+   * Answer the dialog a CloseForm raised so the close completes WITHOUT keeping the
+   * page's unsaved changes. Returns the events and whatever is still open after it.
+   *
+   * The question BC27/BC28 ask is "La página contiene cambios no guardados. ¿Desea
+   * descartar estos cambios?" (an `lmd` ConfirmDialog), and the answer that discards
+   * is YES. This used to send No=390 — written for an older "save changes?" wording —
+   * which KEEPS the page open: measured live on devel1 (2026-10-03), after No the root
+   * form still answered a Refresh; after Yes=380 it was gone (FormNotFoundException).
+   * So "discardChanges" closed the context here while BC kept the page and its dirty
+   * record (bc-saas F-47 b). An error/message box only needs Ok. Anything else is
+   * not a question this method knows how to answer, so it is left to the caller.
+   */
+  private async discardOnClose(dialog: DialogOpenedEvent): Promise<{ events: BCEvent[]; pending: DialogOpenedEvent[] }> {
+    const kind = classifyDialog(dialog.controlTree);
+    const answer = kind === 'confirm' ? 380 /* Yes = discard */ : (kind === 'error' || kind === 'message') ? 300 /* Ok */ : undefined;
+    if (answer === undefined) return { events: [], pending: [dialog] };
+    this.logger.info(`Close raised a ${kind} dialog (formId=${dialog.formId}); answering ${answer === 380 ? 'Yes (discard the changes)' : 'Ok'}`);
+    const dismissed = await this.session.invoke(
+      { type: 'InvokeAction', formId: dialog.formId, controlPath: 'server:c[0]', systemAction: answer } as InvokeActionInteraction,
+      (e) => e.type === 'InvokeCompleted',
+    );
+    if (!isOk(dismissed)) {
+      this.logger.warn(`Could not answer the close dialog ${dialog.formId}: ${dismissed.error.message}`);
+      return { events: [], pending: [dialog] };
+    }
+    // Answered: BC sends no FormClosed for it, so untrack it ourselves. Anything the
+    // answer raised in turn (an error while discarding) is still open.
+    this.session.removeOpenForm(dialog.formId);
+    const chained = dismissed.value.filter((e): e is DialogOpenedEvent => e.type === 'DialogOpened' && e.formId !== dialog.formId);
+    return { events: dismissed.value, pending: chained };
   }
 
   getPageContext(pageContextId: string): PageContext | undefined {

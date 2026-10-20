@@ -38,6 +38,21 @@ export class BCSession {
    */
   private readonly asyncSinks: BCEvent[][] = [];
 
+  /**
+   * Frames BC pushes while NO invoke is collecting. Measured live on devel1
+   * (2026-10-03): after a row change or an action BC refreshes the FactBoxes
+   * ASYNCHRONOUSLY — `PropertyChanged { PendingUpdates, Bookmark }` plus the new
+   * StringValues of every factbox field, 10–300 ms after the invoke's own response.
+   * By then the invoke had returned and unsubscribed, so those frames reached no one
+   * and every FactBox kept showing the record it was opened on (bc-saas F-43). They
+   * are now decoded here, kept in the modal tracking, and handed to whoever
+   * subscribed (the page-context repository); dialogs and messages among them are
+   * also parked in `pendingNotices` so the NEXT invoke can report them.
+   */
+  private readonly unsolicitedListeners = new Set<(events: BCEvent[]) => void>();
+  private pendingNotices: BCEvent[] = [];
+  private backgroundOff: (() => void) | null = null;
+
   private sessionId = '';
   private sessionKey = '';
   private company = '';
@@ -163,7 +178,67 @@ export class BCSession {
       return ok(events);
     } finally {
       unsubscribe();
+      // From here on, frames that arrive between invokes are no longer dropped.
+      this.ensureBackgroundListener();
     }
+  }
+
+  /**
+   * Subscribe to the events BC pushes when no invoke is collecting (late FactBox
+   * refreshes, a dialog or message that lands after its invoke returned). Returns
+   * the unsubscribe function.
+   */
+  onUnsolicitedEvents(listener: (events: BCEvent[]) => void): () => void {
+    this.ensureBackgroundListener();
+    this.unsolicitedListeners.add(listener);
+    return () => { this.unsolicitedListeners.delete(listener); };
+  }
+
+  /** Dialogs / messages that arrived unsolicited and have not been reported yet. Drains the buffer. */
+  takeUnsolicitedNotices(): BCEvent[] {
+    return this.pendingNotices.splice(0, this.pendingNotices.length);
+  }
+
+  private ensureBackgroundListener(): void {
+    if (this.backgroundOff || typeof (this.ws as { onMessage?: unknown }).onMessage !== 'function') return;
+    this.backgroundOff = this.ws.onMessage((raw) => this.handleUnsolicitedFrame(raw));
+  }
+
+  private handleUnsolicitedFrame(raw: unknown): void {
+    // An active invoke owns every frame that arrives while it runs (see
+    // collectAsyncMessages); only the gaps between invokes are ours.
+    if (this.dead || this.asyncSinks.length > 0) return;
+    const events = this.decodeAsyncFrame(raw);
+    if (events.length === 0) return;
+    // A dialog BC opens here is as real as one in a response: the modal stack must
+    // know it, or the next invoke dies with LogicalModalityViolation and the
+    // reconcile walks a stack that does not contain the culprit (bc-saas F-45).
+    this.updateFormTracking(events);
+    const notices = events.filter(e => e.type === 'DialogOpened' || e.type === 'MessageToShow' || e.type === 'UriToShow');
+    if (notices.length > 0) {
+      this.pendingNotices.push(...notices);
+      this.logger.info(`Unsolicited ${notices.map(n => n.type).join(', ')} from BC between invokes; it will be reported with the next result`);
+    }
+    for (const listener of this.unsolicitedListeners) {
+      try {
+        listener(events);
+      } catch (e) {
+        this.logger.warn(`Unsolicited-event listener threw: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
+
+  /** Decode one async `Message` notification frame into events (empty for anything else). */
+  private decodeAsyncFrame(raw: unknown): BCEvent[] {
+    if (!raw || typeof raw !== 'object') return [];
+    const msg = raw as Record<string, unknown>;
+    // Only process async Message notifications (method: "Message", no id)
+    if (msg['method'] !== 'Message' || 'id' in msg || !Array.isArray(msg['params'])) return [];
+    const messageData = (msg['params'] as unknown[])[0] as Record<string, unknown> | undefined;
+    if (!messageData?.['compressedData'] || typeof messageData['compressedData'] !== 'string') return [];
+    const decompResult = decompressPayload(messageData['compressedData'] as string);
+    if (!isOk(decompResult) || !Array.isArray(decompResult.value)) return [];
+    return this.decoder.decode(decompResult.value as unknown[]);
   }
 
   private extractSessionCredentials(data: unknown): void {
@@ -187,10 +262,18 @@ export class BCSession {
     }
   }
 
+  /**
+   * @param options.carryUnsolicited  Prepend the dialogs/messages BC pushed between
+   *   invokes (see `pendingNotices`) to this invoke's events, so the operation that
+   *   runs next reports them instead of nobody. Default true. Housekeeping invokes
+   *   (repeater re-syncs) pass false: they must not adopt a dialog that belongs to
+   *   the caller.
+   */
   async invoke(
     interaction: BCInteraction,
     expect: EventPredicate,
     timeoutMs?: number,
+    options?: { carryUnsolicited?: boolean },
   ): Promise<Result<BCEvent[], ProtocolError>> {
     if (this.dead) return err(new ProtocolError('Session is dead'));
     const effectiveTimeout = timeoutMs ?? this.timeoutMs;
@@ -207,11 +290,16 @@ export class BCSession {
       // full timeout before failing.
       if (this.dead) return err(new ProtocolError('Session is dead'));
       try {
-        return await this.withTimeout(
+        const result = await this.withTimeout(
           (renew) => this.invokeUnqueued(interaction, expect, effectiveTimeout, renew),
           effectiveTimeout + 5000, // Session-level watchdog, 5s longer than one RPC
           `Invoke(${interaction.type})`,
         );
+        if (isOk(result) && options?.carryUnsolicited !== false && this.pendingNotices.length > 0) {
+          // Already folded into the modal tracking when they arrived.
+          return ok([...this.takeUnsolicitedNotices(), ...result.value]);
+        }
+        return result;
       } catch (e) {
         if (e instanceof TimeoutError) {
           return err(new ProtocolError(e.message));
@@ -266,6 +354,8 @@ export class BCSession {
    */
   private kill(): void {
     this.markDead();
+    this.backgroundOff?.();
+    this.backgroundOff = null;
     const ws = this.ws as unknown as { forceClose?: () => void; close: () => void };
     if (typeof ws.forceClose === 'function') ws.forceClose();
     else ws.close();
@@ -294,18 +384,8 @@ export class BCSession {
       // otherwise have its events decoded into both its own sink and the enclosing
       // one, so the caller saw every async event twice.
       if (this.asyncSinks[this.asyncSinks.length - 1] !== sink) return;
-      if (!raw || typeof raw !== 'object') return;
-      const msg = raw as Record<string, unknown>;
-      // Only process async Message notifications (method: "Message", no id)
-      if (msg['method'] === 'Message' && !('id' in msg) && Array.isArray(msg['params'])) {
-        const messageData = (msg['params'] as unknown[])[0] as Record<string, unknown> | undefined;
-        if (messageData?.['compressedData'] && typeof messageData['compressedData'] === 'string') {
-          const decompResult = decompressPayload(messageData['compressedData'] as string);
-          if (isOk(decompResult) && Array.isArray(decompResult.value)) {
-            sink.push(...this.decoder.decode(decompResult.value as unknown[]));
-          }
-        }
-      }
+      const decoded = this.decodeAsyncFrame(raw);
+      if (decoded.length > 0) sink.push(...decoded);
     });
     let released = false;
     return () => {

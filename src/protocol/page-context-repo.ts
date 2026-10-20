@@ -256,7 +256,17 @@ export class PageContextRepository {
       // Route PropertyChanged events to factbox forms when the controlPath matches a factbox field.
       // BC sends factbox data changes on the ROOT formId. The controlPath matches a factbox
       // form's field controlPath. Verified from decompiled WebLogicalFormObserver.cs.
-      if (controlPath && event.type === 'PropertyChanged' && formId === page.rootFormId) {
+      //
+      // ONLY when the root itself has nothing at that path (`updated === form`).
+      // controlPaths are form-relative, so a header field and a FactBox field share
+      // `server:c[1]/c[1]` all the time — and this branch used to hand the ROOT's own
+      // echo to the FactBox and drop it from the header. Measured live on devel1
+      // (2026-10-04, page 42 in Create mode): BC echoed Customer No. "2000001" and
+      // Customer Name on the root form, and the context kept both empty; the page read
+      // back exactly as it was before the write (bc-saas F-66 a). Today every change
+      // carries its real target in ControlReference.formId, and FactBox refreshes
+      // arrive with the FactBox's own formId.
+      if (controlPath && event.type === 'PropertyChanged' && formId === page.rootFormId && updated === form) {
         const factboxForm = this.findFactboxFormByFieldPath(page, controlPath);
         if (factboxForm) {
           const childUpdated = this.formProjection.apply(factboxForm, event);
@@ -405,24 +415,27 @@ export class PageContextRepository {
     if (!page) return;
     const dialogs = page.dialogs.filter(d => d.formId !== dialogFormId);
     const sections = new Map(page.sections);
+    // The dialog's own section AND the subforms it hosted (ownerDialogFormId): they
+    // are gone with it.
+    const gone = new Set<string>([dialogFormId]);
     let sectionRemoved = false;
     for (const [sectionId, section] of sections) {
-      if (section.kind === 'dialog' && section.formId === dialogFormId) {
+      if ((section.kind === 'dialog' && section.formId === dialogFormId) || section.ownerDialogFormId === dialogFormId) {
         sections.delete(sectionId);
+        gone.add(section.formId);
         sectionRemoved = true;
       }
     }
-    const hadForm = page.forms.has(dialogFormId) && dialogFormId !== page.rootFormId;
+    gone.delete(page.rootFormId);
+    const hadForm = [...gone].some(f => page.forms.has(f));
     if (dialogs.length === page.dialogs.length && !sectionRemoved && !hadForm) return;
 
     const forms = hadForm
-      ? new Map([...page.forms].filter(([fId]) => fId !== dialogFormId))
+      ? new Map([...page.forms].filter(([fId]) => !gone.has(fId)))
       : page.forms;
-    const ownedFormIds = dialogFormId === page.rootFormId
-      ? page.ownedFormIds
-      : page.ownedFormIds.filter(f => f !== dialogFormId);
-    if (dialogFormId !== page.rootFormId && this.formIdIndex.get(dialogFormId) === pageContextId) {
-      this.formIdIndex.delete(dialogFormId);
+    const ownedFormIds = page.ownedFormIds.filter(f => !gone.has(f));
+    for (const f of gone) {
+      if (this.formIdIndex.get(f) === pageContextId) this.formIdIndex.delete(f);
     }
     this.pages.set(pageContextId, { ...page, dialogs, sections, forms, ownedFormIds });
   }
@@ -441,6 +454,13 @@ export class PageContextRepository {
   private markFormClosed(pcId: string, formId: string): void {
     const page = this.pages.get(pcId);
     if (!page) return;
+
+    // A closed DIALOG goes with everything it hosted (its subform sections).
+    if (formId !== page.rootFormId
+      && (page.dialogs.some(d => d.formId === formId) || [...page.sections.values()].some(s => s.ownerDialogFormId === formId))) {
+      this.removeDialog(pcId, formId);
+      return;
+    }
 
     // Mark any sections that reference this formId as invalid. A DIALOG section is
     // dropped outright instead: dialogs come and go many times on one page, and
@@ -517,6 +537,7 @@ export class PageContextRepository {
     // (same shape detectDialogs normalises), so give it the `lf` type when absent.
     const forms = new Map(page.forms);
     const sections = new Map(page.sections);
+    const childFormIds: string[] = [];
     if (!forms.has(event.formId)) {
       const raw = event.controlTree as Record<string, unknown> | undefined;
       const lfNode = raw && raw.t !== 'lf' ? { ...raw, t: 'lf' } : raw;
@@ -530,12 +551,36 @@ export class PageContextRepository {
           page, event.formId, isLogicalFormNode(tree) ? tree.properties.caption : undefined,
         );
         sections.set(section.sectionId, section);
+
+        // The subforms the dialog HOSTS (fhc -> lf), e.g. the lines grid of page 5855.
+        // Only the visible ones: BC publishes alternative views of the same grid and
+        // hides all but the one that applies (measured: 4 fhc, 1 visible).
+        for (const node of walkTree(tree)) {
+          if (!isFormHostNode(node) || !node.hostedFormServerId) continue;
+          if (node.properties.visible === false) continue;
+          if (forms.has(node.hostedFormServerId)) continue;
+          const childTree = tryBuildFormTree(node.hostedFormControlTree);
+          if (!childTree) continue;
+          forms.set(node.hostedFormServerId, {
+            ...this.formProjection.createInitial(node.hostedFormServerId, event.formId),
+            root: childTree,
+          });
+          const childSection = this.sectionResolver.deriveDialogChildSection(
+            { ...page, sections }, section.sectionId, event.formId, node.hostedFormServerId, childTree, node.hostedFormCaption,
+          );
+          sections.set(childSection.sectionId, childSection);
+          childFormIds.push(node.hostedFormServerId);
+        }
       }
     }
 
-    this.pages.set(pcId, { ...page, dialogs, ownedFormIds, forms, sections });
+    this.pages.set(pcId, {
+      ...page, dialogs, forms, sections,
+      ownedFormIds: [...ownedFormIds, ...childFormIds.filter(f => !ownedFormIds.includes(f))],
+    });
 
     this.formIdIndex.set(event.formId, pcId);
+    for (const f of childFormIds) this.formIdIndex.set(f, pcId);
   }
 
   /**

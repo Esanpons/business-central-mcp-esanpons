@@ -96,6 +96,66 @@ describe('row-scoped action whose path moves after positioning', () => {
   });
 });
 
+// bc-saas F-67 c: the action's `enabled` was read on the row that happened to be
+// selected, BEFORE moving to the bookmark. "Reprocesar" was refused for a row that
+// had it enabled because the previously selected row did not.
+describe('enabled is judged on the TARGETED row (F-67 c)', () => {
+  const listTree = (enabled: boolean) => ({
+    t: 'lf', ServerId: 'f1', PageType: 1, Caption: 'Documentos DeCA',
+    Children: [
+      { t: 'rc', Columns: [{ t: 'rcc', Caption: 'Nº', ColumnBinder: { Name: 'c1' } }] },
+      { t: 'ac', Caption: 'Reprocesar', SystemAction: 0, Enabled: enabled, Visible: true },
+    ],
+  });
+  const rows = {
+    type: 'DataLoaded', formId: 'f1', controlPath: 'server:c[0]', currentRowOnly: false,
+    rows: [
+      { DataRowInserted: [0, { bookmark: 'b-published', cells: { c1: 'DECA-26-00363' } }] },
+      { DataRowInserted: [1, { bookmark: 'b-exempt', cells: { c1: 'DECA-26-00360' } }] },
+    ],
+  } as BCEvent;
+
+  function repoOnDisabledRow() {
+    const repo = new PageContextRepository();
+    repo.create('pc:1', 'f1');
+    repo.applyToPage('pc:1', [formCreated('f1', listTree(false)), rows]);
+    return repo;
+  }
+
+  it('runs the action when it is disabled on the current row but enabled on the bookmark', async () => {
+    const repo = repoOnDisabledRow();
+    const sent: Sent[] = [];
+    // After SetCurrentRow BC re-publishes the action bar for the new row: enabled.
+    const svc = makeService(repo, sent, (i) =>
+      i.type === 'SetCurrentRow' ? [formCreated('f1', listTree(true))] : []);
+
+    const r = await svc.executeAction('pc:1', 'Reprocesar', undefined, { bookmark: 'b-exempt' });
+    expect(r.ok).toBe(true);
+    expect(sent.map(s => s.type)).toEqual(['SetCurrentRow', 'InvokeAction']);
+  });
+
+  it('refuses, without invoking, when the targeted row has it disabled too', async () => {
+    const repo = repoOnDisabledRow();
+    const sent: Sent[] = [];
+    const svc = makeService(repo, sent);   // the tree keeps Enabled: false
+
+    const r = await svc.executeAction('pc:1', 'Reprocesar', undefined, { bookmark: 'b-exempt' });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.message).toMatch(/disabled.*row you targeted/);
+    expect(sent.map(s => s.type)).toEqual(['SetCurrentRow']);
+  });
+
+  it('still refuses straight away when no row is targeted', async () => {
+    const repo = repoOnDisabledRow();
+    const sent: Sent[] = [];
+    const svc = makeService(repo, sent);
+    const r = await svc.executeAction('pc:1', 'Reprocesar');
+    expect(r.ok).toBe(false);
+    expect(sent).toHaveLength(0);
+  });
+});
+
 describe('wizard step mirroring', () => {
   const wizardTree = {
     t: 'lf', ServerId: 'w1', PageType: 9, Caption: 'Setup Wizard',

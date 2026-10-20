@@ -3,7 +3,7 @@ import { resolveChangeType, SESSION_EVENTS } from './wire-types.js';
 import type {
   BCEvent, FormCreatedEvent, FormClosedEvent, DialogOpenedEvent, MessageToShowEvent,
   DataLoadedEvent, PropertyChangedEvent, BookmarkChangedEvent, InvokeCompletedEvent,
-  SessionInfoEvent,
+  SessionInfoEvent, UriToShowEvent,
 } from './types.js';
 import { createNullLogger, type Logger } from '../core/logger.js';
 
@@ -146,8 +146,20 @@ export class EventDecoder {
         } satisfies MessageToShowEvent);
         break;
       }
+      case SESSION_EVENTS.UriToShow: {
+        // Wire (live devel1, BC27): params[1] is the bare relative URI string. Tolerate
+        // an object carrying Uri/Url too, in case another build wraps it.
+        const raw = params[1];
+        const uri = typeof raw === 'string'
+          ? raw
+          : (typeof (raw as Record<string, unknown> | undefined)?.Uri === 'string'
+            ? (raw as Record<string, string>).Uri
+            : (typeof (raw as Record<string, unknown> | undefined)?.Url === 'string' ? (raw as Record<string, string>).Url : ''));
+        if (uri) events.push({ type: 'UriToShow', formId: '', uri } satisfies UriToShowEvent);
+        break;
+      }
       default:
-        // LookupFormReady / UriToShow / RequestUserToken / CopilotSettingsChanged
+        // LookupFormReady / RequestUserToken / CopilotSettingsChanged
         // (and anything new) are not decoded yet. Log the drop at debug so it is
         // observable instead of silent.
         this.logger.debug('protocol', 'EventDecoder: unhandled session event dropped', { eventName });

@@ -33,6 +33,30 @@ describe('tool descriptions', () => {
     }
   });
 
+  // bc-saas F-62: the PAGE_OPEN_REJECTED hint and the bc_open_page description
+  // proposed filters: [{ field: ... }], which the schema rejects ("filters[0].column:
+  // expected string"). Copying the hint must give a call that validates.
+  it('never proposes a filter keyed by "field" (the schema key is "column")', () => {
+    for (const tool of tools) {
+      expect(tool.description, tool.name).not.toMatch(/filters:\s*\[\s*\{\s*field:/);
+    }
+    expect(tools.find(t => t.name === 'bc_open_page')!.description).toContain('{ column: "No.", value: "<doc no>" }');
+  });
+
+  it('bc_respond_dialog explains request pages, errors and opened pages (F-55, F-56, F-65)', () => {
+    const d = tools.find(t => t.name === 'bc_respond_dialog')!.description;
+    expect(d).toContain('REQUEST PAGE');
+    expect(d).toContain('"files"');
+    expect(d).toContain('"errors"');
+    expect(d).toContain('Error Messages');
+  });
+
+  it('bc_write_data explains newLineBookmark (F-60, F-70)', () => {
+    const d = tools.find(t => t.name === 'bc_write_data')!.description;
+    expect(d).toContain('newLineBookmark');
+    expect(d).toContain('APPENDS');
+  });
+
   it('bc_execute_action describes create/delete workflow', () => {
     const tool = tools.find(t => t.name === 'bc_execute_action')!;
     expect(tool.description).toContain('New');
@@ -42,5 +66,22 @@ describe('tool descriptions', () => {
   it('bc_respond_dialog describes dialog chaining', () => {
     const tool = tools.find(t => t.name === 'bc_respond_dialog')!;
     expect(tool.description).toContain('chain');
+  });
+
+  it('bc_write_data documents that raw events are opt-in (F-42)', () => {
+    const tool = tools.find(t => t.name === 'bc_write_data')!;
+    expect(tool.description).toContain('includeEvents');
+    expect(tool.description).toContain('quiet');
+  });
+
+  it('bc_execute_action documents BC messages and the error text (F-44)', () => {
+    const tool = tools.find(t => t.name === 'bc_execute_action')!;
+    expect(tool.description).toContain('messages');
+    expect(tool.description).toMatch(/kind/);
+  });
+
+  it('bc_close_page says which answer discards (F-47 b: yes, measured live)', () => {
+    const tool = tools.find(t => t.name === 'bc_close_page')!;
+    expect(tool.description).toMatch(/"yes" = discard/);
   });
 });

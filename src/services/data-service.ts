@@ -6,12 +6,14 @@ import type { BCEvent, RepeaterRow, ControlField, TabGroup, SaveValueInteraction
 import { SystemAction } from '../protocol/types.js';
 import type { Logger } from '../core/logger.js';
 import { resolveSection } from '../protocol/section-resolver.js';
-import { fields as treeFields, tabs as treeTabs } from '../protocol/form-views.js';
+import { fields as treeFields, tabs as treeTabs, groupVisibility as treeGroupVisibility } from '../protocol/form-views.js';
+import { isEffectivelyVisible } from '../protocol/visibility.js';
 import { findByControlPath, findFieldByGroupCaption, nearestGroupCaption } from '../protocol/form-tree-walk.js';
 import { isFieldNode, type FieldNode, type FormNode, type RepeaterNode } from '../protocol/form-node.js';
 import { fieldNodeToControlField } from '../protocol/mcp-adapters.js';
 import { mapRowCellKeys, repeaterColumnsToDto } from '../protocol/row-mapping.js';
 import { extractValidationMessage } from '../protocol/mutation-result.js';
+import { resyncRepeater, reportableResyncEvents } from './repeater-sync.js';
 
 /**
  * The last `StringValue` BC echoed for a control in this response, or undefined if
@@ -76,6 +78,26 @@ export interface FieldWriteResult {
 export interface WriteFieldsResult {
   results: FieldWriteResult[];
   events: BCEvent[];
+  /**
+   * newLine only: the REAL bookmark of the line just created, read back from the
+   * server once the line was committed. Absent when it could not be established
+   * (BC refused the re-read, or the line was created with New, whose position is not
+   * known). Use it — not a `DraftRecord…` placeholder — for any later write.
+   */
+  newLineBookmark?: string;
+  /**
+   * newLine only: whether the re-read grid really holds one more stored line than
+   * before. `false` is the case that used to pass for success: every field came back
+   * "unverified" (BC echoed nothing) and nothing was saved — a list not in edit mode
+   * silently ignores line writes (bc-saas F-64 b). Absent when the grid could not be
+   * re-read, so the outcome is unknown.
+   */
+  newLineCreated?: boolean;
+}
+
+/** A row BC pads a repeater with: an empty line not stored yet (`DraftRecord314`). */
+export function isDraftBookmark(bookmark: string | undefined): boolean {
+  return typeof bookmark === 'string' && bookmark.startsWith('DraftRecord');
 }
 
 export class DataService {
@@ -85,6 +107,16 @@ export class DataService {
     private readonly logger: Logger,
     private readonly redactValues: boolean = false,
   ) {}
+
+  /**
+   * Draft rows this service already wrote a line into, per `pageContextId|formId`.
+   * BC sends NO row data back for a line write (measured live on devel1, 2026-10-04:
+   * after SetCurrentRow + SaveValue the projection still lists the same 15
+   * `DraftRecord…` rows), so without this the next newLine would pick the same draft
+   * again — and selecting a consumed draft edits the line just created (devel1) or
+   * throws InvalidBookmarkException (SaaS, bc-saas F-70).
+   */
+  private readonly consumedDrafts = new Map<string, Set<string>>();
 
   /** Mask a business value in logs when LOG_REDACT_VALUES is enabled. */
   private redact(value: unknown): string {
@@ -395,7 +427,7 @@ export class DataService {
   async createLine(
     pageContextId: string,
     sectionId?: string,
-  ): Promise<Result<{ events: BCEvent[]; rowCountBefore: number; rowCountAfter: number }, ProtocolError>> {
+  ): Promise<Result<{ events: BCEvent[]; rowCountBefore: number; rowCountAfter: number; viaDraft?: string }, ProtocolError>> {
     const ctx = this.repo.get(pageContextId);
     if (!ctx) return err(this.repo.notFoundError(pageContextId));
     const resolved = resolveSection(ctx, sectionId);
@@ -409,6 +441,29 @@ export class DataService {
     }
 
     const rowCountBefore = resolved.rows.length;
+
+    // APPEND the way the web client does: put the cursor on the first empty DRAFT row
+    // after the last real line and type into it. BC then stores the line at the END.
+    //
+    // `New` (SystemAction 10) inserts ABOVE the current row, and after the first line
+    // the current row is that line — so every newLine went on top of the previous one
+    // and a document written 1, 2, 3 came out 3, 2, 1 with Line Nos 10000, 5000, 2500…
+    // (bc-saas F-60; reproduced on devel1 2026-10-04: MCP-L1..L3 re-opened as L3, L2,
+    // L1). Selecting a different, unused draft for each line kept them in order
+    // (DRAFT-1, DRAFT-2, DRAFT-3, measured on the same order). New stays the fallback
+    // for a repeater that offers no draft rows.
+    const draft = this.pickDraftRow(pageContextId, resolved.form.formId, resolved.rows);
+    if (draft) {
+      this.logger.info(`createLine: append on draft row ${draft} of ${resolved.repeater.controlPath} (section '${resolved.section.sectionId}', formId=${resolved.form.formId})`);
+      const sel = await this.session.invoke(
+        { type: 'SetCurrentRow', formId: resolved.form.formId, controlPath: resolved.repeater.controlPath, key: draft } as SetCurrentRowInteraction,
+        (event) => event.type === 'InvokeCompleted' || event.type === 'BookmarkChanged',
+      );
+      if (isErr(sel)) return sel;
+      this.repo.applyToPage(pageContextId, sel.value);
+      this.markDraftConsumed(pageContextId, resolved.form.formId, draft);
+      return ok({ events: sel.value, rowCountBefore, rowCountAfter: rowCountBefore, viaDraft: draft });
+    }
     const interaction: InvokeActionInteraction = {
       type: 'InvokeAction',
       formId: resolved.form.formId,
@@ -429,6 +484,82 @@ export class DataService {
     return ok({ events: result.value, rowCountBefore, rowCountAfter });
   }
 
+  /** The first draft row after the last real line that no newLine of this context has used yet. */
+  private pickDraftRow(pageContextId: string, formId: string, rows: readonly RepeaterRow[]): string | undefined {
+    const used = this.consumedDrafts.get(`${pageContextId}|${formId}`);
+    let lastReal = -1;
+    rows.forEach((r, i) => { if (!isDraftBookmark(r.bookmark)) lastReal = i; });
+    for (let i = lastReal + 1; i < rows.length; i++) {
+      const bm = rows[i]!.bookmark;
+      if (isDraftBookmark(bm) && !used?.has(bm)) return bm;
+    }
+    return undefined;
+  }
+
+  private markDraftConsumed(pageContextId: string, formId: string, bookmark: string): void {
+    const key = `${pageContextId}|${formId}`;
+    const set = this.consumedDrafts.get(key) ?? new Set<string>();
+    set.add(bookmark);
+    this.consumedDrafts.set(key, set);
+  }
+
+  /**
+   * Commit the line BC's cursor is on and re-read the repeater from the server, then
+   * return the bookmark of the last REAL row (where an appended line lands).
+   *
+   * BC answers a line write with cell echoes only, never with row data, so after a
+   * newLine the projection still showed the empty draft: a read right after reported
+   * Quantity 0 for a line stored with 2, and re-writing 2 was judged "validation
+   * reverted" against that stale row (bc-saas F-58); the only bookmark the caller ever
+   * saw was the `DraftRecord…` placeholder that BC re-keys on commit, and writing to
+   * it again threw InvalidBookmarkException and then killed the session (F-70).
+   * Moving the cursor to another draft commits the line (the web client's own
+   * behaviour); the re-sync then brings real rows and real bookmarks.
+   */
+  private async commitAndResyncLines(
+    pageContextId: string,
+    sectionId: string | undefined,
+  ): Promise<{ bookmark?: string; events: BCEvent[]; realRows?: number }> {
+    const none = { events: [] as BCEvent[] };
+    const ctx = this.repo.get(pageContextId);
+    if (!ctx) return none;
+    const resolved = resolveSection(ctx, sectionId);
+    if ('error' in resolved || !resolved.repeater) return none;
+    const { form, repeater } = resolved;
+    const parking = this.pickDraftRow(pageContextId, form.formId, resolved.rows);
+    const events: BCEvent[] = [];
+    if (parking) {
+      const sel = await this.session.invoke(
+        { type: 'SetCurrentRow', formId: form.formId, controlPath: repeater.controlPath, key: parking } as SetCurrentRowInteraction,
+        (event) => event.type === 'InvokeCompleted' || event.type === 'BookmarkChanged',
+      );
+      if (isErr(sel)) return none;
+      this.repo.applyToPage(pageContextId, sel.value);
+      // Committing the line runs its triggers: whatever BC said about it is part of the write.
+      events.push(...sel.value.filter(e => e.type === 'DialogOpened' || e.type === 'MessageToShow' || e.type === 'PropertyChanged'));
+      if (sel.value.some(e => e.type === 'DialogOpened')) return { events };
+    }
+    const resync = await resyncRepeater(this.session, this.repo, pageContextId, form.formId, repeater.controlPath, this.logger);
+    events.push(...reportableResyncEvents(resync));
+    if (!resync.refreshed) return { events };
+    const after = this.repo.get(pageContextId);
+    const re = after ? resolveSection(after, sectionId) : undefined;
+    if (!re || 'error' in re) return { events };
+    // Forget only the consumed drafts the re-read no longer lists. One that is still
+    // listed means the projection did NOT really refresh, and picking it again would
+    // overwrite the line just written.
+    const key = `${pageContextId}|${form.formId}`;
+    const consumed = this.consumedDrafts.get(key);
+    if (consumed) {
+      const listed = new Set(re.rows.map(r => r.bookmark));
+      for (const bm of [...consumed]) if (!listed.has(bm)) consumed.delete(bm);
+      if (consumed.size === 0) this.consumedDrafts.delete(key);
+    }
+    const real = re.rows.filter(r => !isDraftBookmark(r.bookmark));
+    const bookmark = real[real.length - 1]?.bookmark;
+    return { ...(bookmark ? { bookmark } : {}), events, realRows: real.length };
+  }
+
   async writeFields(
     pageContextId: string,
     fields: Record<string, string>,
@@ -437,6 +568,8 @@ export class DataService {
     const results: FieldWriteResult[] = [];
     const allEvents: BCEvent[] = [];
     let effectiveOptions = options;
+    // Stored (non-draft) lines before a newLine, to tell afterwards whether one appeared.
+    let realRowsBefore: number | undefined;
 
     // newLine: append a blank row and target it. The row is created ONCE, before any
     // field is written, and every field then goes to that row.
@@ -474,6 +607,32 @@ export class DataService {
       // New, and `{repeater}/cr/c[N]` -- the current-row viewport -- means exactly
       // "whatever row is selected", so the write needs no index at all.
       effectiveOptions = { ...options, newLine: false, targetCurrentRow: true };
+      realRowsBefore = re.rows.filter(r => !isDraftBookmark(r.bookmark)).length;
+    } else if (options?.sectionId !== undefined && (options.bookmark !== undefined || options.rowIndex !== undefined)) {
+      // A write aimed at a DRAFT row (`DraftRecord8740`, as listed by bc_read_data) is a
+      // new line in disguise. Its first field turns the draft into a real record and
+      // BC re-keys it, so re-selecting the same placeholder for the second field threw
+      // InvalidBookmarkException on SaaS, and the next write died with
+      // InvalidSessionException (bc-saas F-70). Select it ONCE and write every field
+      // into the current row, exactly like newLine.
+      const ctx0 = this.repo.get(pageContextId);
+      const re0 = ctx0 ? resolveSection(ctx0, options.sectionId) : undefined;
+      if (re0 && !('error' in re0) && re0.repeater) {
+        const bm = options.bookmark ?? re0.rows[options.rowIndex ?? -1]?.bookmark;
+        if (isDraftBookmark(bm)) {
+          const sel = await this.session.invoke(
+            { type: 'SetCurrentRow', formId: re0.form.formId, controlPath: re0.repeater.controlPath, key: bm! } as SetCurrentRowInteraction,
+            (event) => event.type === 'InvokeCompleted' || event.type === 'BookmarkChanged',
+          );
+          if (isErr(sel)) return sel;
+          this.repo.applyToPage(pageContextId, sel.value);
+          allEvents.push(...sel.value);
+          this.markDraftConsumed(pageContextId, re0.form.formId, bm!);
+          realRowsBefore = re0.rows.filter(r => !isDraftBookmark(r.bookmark)).length;
+          effectiveOptions = { ...options, bookmark: undefined, rowIndex: undefined, targetCurrentRow: true };
+          options = { ...options, newLine: true, bookmark: undefined, rowIndex: undefined };
+        }
+      }
     }
     // On a NEW line, write the identifying columns before the quantitative ones.
     //
@@ -530,20 +689,28 @@ export class DataService {
     // it: the reset happens after the last write, whatever the order. So: re-read the
     // row, and write again only the fields that do not hold what was asked for. One
     // extra pass, and only for fields that actually drifted.
+    //
+    // The cell's current value is the LAST value BC echoed on its path across every
+    // write of this line (the reset arrives as an echo during the No. write). It used
+    // to be read from "the first row that has data", which on a document with lines
+    // already is a DIFFERENT line. Identifying columns (Type, No., Code) are never
+    // re-written: re-validating Type empties No. — a "Cargo (prod.)" line came out with
+    // no No. because "Cargo (Prod.)" vs "Cargo (prod.)" was taken for a drift and Type
+    // was written again AFTER No. (bc-saas F-58, 3.17). The comparison ignores case.
+    const asNumber = (v: string): number => Number(v.replace(/\s/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.'));
+    const sameValue = (x: string, y: string): boolean => {
+      if (x.trim().toLowerCase() === y.trim().toLowerCase()) return true;
+      const a = asNumber(x); const b = asNumber(y);
+      return x.trim() !== '' && y.trim() !== '' && Number.isFinite(a) && Number.isFinite(b) && a === b;
+    };
     if (options?.newLine && results.some(r => r.success)) {
       for (let i = 0; i < results.length; i++) {
         const r = results[i]!;
-        if (!r.success || r.requested === undefined) continue;
-        const current = this.readCurrentRowCell(pageContextId, options.sectionId, r.fieldName);
-        const norm = (v?: string): string => (v ?? '').trim();
-        // Only chase a real drift: undefined means we could not read it back (say
-        // nothing), and an equal value means BC kept it.
-        if (current === undefined || norm(current) === norm(r.requested)) continue;
-        // BC reformats legitimately (a code becomes a name, 2 becomes "2,00"), so a
-        // numeric comparison decides for numbers before we call it a drift.
-        const asNum = (v: string): number => Number(v.replace(/s/g, '').replace(/.(?=d{3})/g, '').replace(',', '.'));
-        const a = asNum(current); const b = asNum(r.requested);
-        if (Number.isFinite(a) && Number.isFinite(b) && a === b) continue;
+        if (!r.success || r.requested === undefined || !r.controlPath) continue;
+        if (rank(r.fieldName) < NEW_LINE_ORDER.length) continue;
+        const current = lastEchoedStringValue(allEvents, r.controlPath);
+        // Only chase a real drift: no echo means we cannot tell (say nothing).
+        if (current === undefined || sameValue(current, r.requested)) continue;
         const retry = await this.writeField(pageContextId, r.fieldName, r.requested, effectiveOptions);
         if (isErr(retry)) continue;
         results[i] = { ...retry.value, hint: 'Re-written after Business Central reset it while resolving the line.' };
@@ -551,31 +718,26 @@ export class DataService {
       }
     }
 
-    return ok({ results, events: allEvents });
-  }
-
-  /**
-   * One cell of the repeater's CURRENT row, by column caption.
-   *
-   * Used to check whether BC kept what was just written into a line it is still
-   * resolving. Reads the row BC has selected -- the only way to address a line that
-   * has no stable bookmark yet.
-   */
-  private readCurrentRowCell(pageContextId: string, sectionId: string | undefined, column: string): string | undefined {
-    const ctx = this.repo.get(pageContextId);
-    if (!ctx) return undefined;
-    const resolved = resolveSection(ctx, sectionId);
-    if ('error' in resolved || !resolved.repeater) return undefined;
-    // The row carrying data is the one just written; a fresh document's repeater is
-    // otherwise all blanks.
-    for (const row of resolved.rows) {
-      const cells = row.cells as Record<string, unknown>;
-      const hasData = Object.values(cells).some(v => v !== null && v !== undefined && v !== '' && v !== 0);
-      if (!hasData) continue;
-      const v = this.cellText(row, column, resolved.repeater);
-      if (v !== undefined) return v;
+    // Commit the new line and re-read the grid, so what bc_read_data shows next is
+    // what BC stored, with the line's REAL bookmark (F-58 / F-70). Only when every
+    // field took: a line that failed half-way is left on the cursor as it was.
+    let newLineBookmark: string | undefined;
+    let newLineCreated: boolean | undefined;
+    const allTook = results.every(r => r.success && (r.changed !== false || r.reason === 'already set'));
+    if (options?.newLine && allTook) {
+      const committed = await this.commitAndResyncLines(pageContextId, options.sectionId);
+      allEvents.push(...committed.events);
+      if (committed.realRows !== undefined && realRowsBefore !== undefined) {
+        newLineCreated = committed.realRows > realRowsBefore;
+        if (newLineCreated) newLineBookmark = committed.bookmark;
+      }
     }
-    return undefined;
+
+    return ok({
+      results, events: allEvents,
+      ...(newLineBookmark ? { newLineBookmark } : {}),
+      ...(newLineCreated !== undefined ? { newLineCreated } : {}),
+    });
   }
 
   private async writeLineCell(
@@ -766,12 +928,19 @@ export class DataService {
       return node && isFieldNode(node) ? node : undefined;
     }
 
-    // 3. caption alone (no group requested; first match wins).
+    // 3. caption alone (no group requested). The VISIBLE control wins over a hidden
+    //    one with the same caption: "Token SAS" resolved to a hidden copy at
+    //    server:c[1]/c[6] (a collapsed warnings group) instead of the field the user
+    //    sees at server:c[5]/c[3], and the write said "already set" on the wrong
+    //    control (bc-saas F-73). Among several visible ones, an editable one wins;
+    //    the first match is the last resort, as before.
     const lower = fieldName.toLowerCase();
-    for (const f of treeFields(root)) {
-      if ((f.properties.caption ?? '').toLowerCase() === lower) return f;
-    }
-    return undefined;
+    const matches = treeFields(root).filter(f => (f.properties.caption ?? '').toLowerCase() === lower);
+    if (matches.length <= 1) return matches[0];
+    const groupVis = treeGroupVisibility(root);
+    const visible = matches.filter(f => isEffectivelyVisible(root, f.controlPath, groupVis));
+    const pool = visible.length > 0 ? visible : matches;
+    return pool.find(f => f.properties.editable !== false) ?? pool[0];
   }
 }
 

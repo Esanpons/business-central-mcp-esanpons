@@ -97,7 +97,7 @@ Card pages (single-record views like Customer Card=21) return one header (card-s
 
 Typical workflow: bc_open_page -> bc_read_data (refresh / filter / paginate a section) -> bc_write_data (edit fields in any section) -> bc_execute_action (post / release / delete) -> bc_close_page. Always call bc_close_page when done. Do NOT call this if the page is already open -- reuse the existing pageContextId.
 
-Optional bookmark parameter opens a Card page to a specific record. Bookmarks come from list rows in any prior section. A bookmark only addresses the TABLE the source list is bound to: passing one from a different list (e.g. a Posted Sales Shipments row into page 132) is refused by BC and comes back as PAGE_OPEN_REJECTED with BC's own message ("cannot use a RecordID from table X with a record from table Y") — not as an empty page. When that happens, either open the page filtered ({ pageId, filters: [{ field: "No.", value: "<doc no>" }] }) or drill into the row from its own list with bc_execute_action { action: "View" | "Edit", rowIndex }.
+Optional bookmark parameter opens a Card page to a specific record. Bookmarks come from list rows in any prior section. A bookmark only addresses the TABLE the source list is bound to: passing one from a different list (e.g. a Posted Sales Shipments row into page 132) is refused by BC and comes back as PAGE_OPEN_REJECTED with BC's own message ("cannot use a RecordID from table X with a record from table Y") — not as an empty page. When that happens, either open the page filtered ({ pageId, filters: [{ column: "No.", value: "<doc no>" }] }) or drill into the row from its own list with bc_execute_action { action: "View" | "Edit", rowIndex }.
 
 Large pages: an un-narrowed open of a document or a long list can serialize hundreds of fields and rows and blow the response budget (the server then refuses it with RESPONSE_TOO_LARGE). Narrow it up front: summary:true returns section identity only (best first call on an unfamiliar big page), then pull what you need with sections:["header"], tab, columns and range -- or with bc_read_data section by section.
 
@@ -145,7 +145,11 @@ Duplicate captions: document headers repeat captions across groups (Sell-to / Bi
 
 A DIALOG WITH FIELDS is written to like any other section: pass section: "dialog". BC opens a modal (PageType StandardDialog) for actions that need input — a reason, a comment, a posting date — and that dialog is a DIFFERENT form from the page, so a write aimed at the page cannot see its controls no matter which key you use. Its fields, with their controlPaths, are listed under the "dialog" section of bc_read_data / bc_open_page as long as it is open. Fill them, then answer with bc_respond_dialog ("ok" to accept). If you address a dialog field without naming the section, the error tells you the section to use.
 
+The result is compact by design: per-field verdicts, allSucceeded, changedSections, dialogsOpened (a dialog the write opened, e.g. a selection menu) and "messages" (anything BC told the user while validating). BC's raw protocol events are NOT included -- pass includeEvents:true only to debug the protocol. quiet:true trims each per-field result further, to fieldName / changed / newValue / reason / validationMessage.
+
 For Document page line items (Sales Order lines, Purchase Order lines), specify section: "lines" to write to the lines repeater. Use rowIndex (0-based row position) or bookmark (stable row identifier from bc_read_data results) to target a specific line. Prefer bookmark over rowIndex when rows may have been reordered or inserted since the last read. A line write is judged on the value BC echoes back for that cell; when BC echoes nothing the verdict falls back to re-reading the row and says so in "hint" (a list that is not in edit mode silently ignores line writes).
+
+newLine APPENDS the line at the end, the way the web client does (it types into the first empty row of the grid), commits it and re-reads the grid: the result carries "newLineBookmark", the line's REAL bookmark -- use it for any later write to that line, never a "DraftRecord..." placeholder from an earlier read -- and "newLineCreated"; when that is false nothing was saved and allSucceeded is false. Writing several new lines in a row keeps their order.
 
 Do NOT use this for triggering actions like Post, Delete, or Release -- use bc_execute_action instead. Do NOT use this for navigating to records -- use bc_navigate instead.
 
@@ -167,7 +171,11 @@ Otherwise behaves identically to the existing action flow: validates the action 
 
 Use exactly one of "action" or "cue" — passing both is an error.
 
-If the action triggers a confirmation dialog or modal page, the response includes a dialogsOpened array with the dialog's formId and details. When requiresDialogResponse is true, you must follow up with bc_respond_dialog to confirm or cancel.
+If the action triggers a confirmation dialog or modal page, the response includes a dialogsOpened array with the dialog's formId and details. When requiresDialogResponse is true, you must follow up with bc_respond_dialog to confirm or cancel. Each entry carries kind ("confirm" / "error" / "message" / "selection" / "page") and message, the text the user would read: for an AL Error() that is BC's error itself (e.g. "There is nothing to release..."), so an action that FAILED is never reported as a bare "Error" -- read it and answer "ok".
+
+What BC tells the user without asking anything -- an AL Message() such as "El DeCA ... queda publicado." or "Document 2001777 has been archived." -- comes back in "messages" ({ text, type }). Absent when BC said nothing; always read it after an action, it is often the only confirmation of what the action did.
+
+An error BC attaches to the page instead of raising a dialog (a trigger that refused the action) comes back in "errors" ({ message }) and makes success false. A file BC produced (a report printed straight away) comes back in "files" ({ fileName, uri }). A dialog that shows a grid lists, in its "sections", the sectionIds to read it with: "dialog" for its own fields/grid and "dialog:<caption>" for each subform it hosts (e.g. the lines to pick in "Get Posted Document Lines to Reverse"); their rows are already loaded.
 
 Row-scoped actions (Delete, Edit on a list row) require targeting a specific row. Use rowIndex (0-based) or bookmark to specify which row the action applies to. For Document pages, use section to disambiguate between header and line actions (e.g., "Delete" on header deletes the whole document, "Delete" on "lines" deletes one line).
 
@@ -189,7 +197,7 @@ Examples:
       name: 'bc_close_page',
       description: `Closes an open Business Central page and frees its server-side resources including the WebSocket form session. Always call this when you are finished working with a page to prevent resource leaks on the BC server. Requires a pageContextId from bc_open_page.
 
-IMPORTANT -- "success" does NOT always mean the page closed. If the page has unsaved changes, BC intercepts the close with a "save changes?" dialog and the page STAYS OPEN; the response is success:true but with requiresDialogResponse:true, a dialogsOpened entry, the still-valid pageContextId and a "hint". In that case the page is not closed yet: either answer the dialog with bc_respond_dialog (yes = save and close, no = discard and close) or re-call bc_close_page with discardChanges:true. Treat the close as done only when requiresDialogResponse is false/absent.
+IMPORTANT -- check "success": it is false when the page did NOT close. If the page has unsaved changes, BC intercepts the close with "The page contains unsaved changes. Do you want to discard these changes?" and the page STAYS OPEN; the response has success:false, requiresDialogResponse:true, a dialogsOpened entry, the still-valid pageContextId and a "hint". Either answer it with bc_respond_dialog ("yes" = discard the changes and close, "no" = keep the page open with its changes) or re-call bc_close_page with discardChanges:true, which answers "yes" for you and reports a clean close. Treat the close as done only when success is true.
 
 After a real close, the pageContextId becomes invalid -- any subsequent bc_read_data, bc_write_data, bc_execute_action, or bc_navigate calls using it will fail. It is safe to call this even if prior operations on the page encountered errors. If you opened a drill-down page via bc_navigate (which returns a new pageContextId), close both the drill-down page and the original list page when done.
 
@@ -245,9 +253,15 @@ The dialogFormId comes from the dialogsOpened array in the triggering tool's res
 
 A dialog CARRYING FIELDS must be filled in BEFORE you answer it: write its values with bc_write_data using section: "dialog" (the dialog's fields and controlPaths are listed there while it is open), then respond "ok" here. Answering a dialog with mandatory fields before filling them just makes BC complain about the empty field.
 
-This tool only answers a dialog; it cannot press an arbitrary named button. Use one of the six responses.
+This tool only answers a dialog; it cannot press an arbitrary named button. Use one of the six responses. When the dialog publishes its own button for the answer, that button is pressed: a page run in lookup mode (e.g. the "Update Document" page of a posted shipment) only saves on its "Aceptar" (LookupOK), which "ok" now sends.
 
-After responding, check the changedSections array in the result to see which page sections were affected. For example, posting a Sales Order may change all sections. If the dialog response triggers another dialog (chained confirmations), the response will include a new dialogsOpened array -- respond to each dialog in sequence.
+After responding, check the changedSections array in the result to see which page sections were affected. For example, posting a Sales Order may change all sections. If the answer makes BC open another dialog (chained confirmations such as "Se va a crear..." then "¿Quieres verlos?", or an error the answer ran into), it comes back in THIS response's dialogsOpened -- respond to each in sequence; the chain is over when dialogsOpened is empty. Each entry says what it is: kind "confirm" / "error" / "message" / "selection" / "page", and message carries the text the user would read (the question, or BC's error itself -- not the "Confirmar"/"Error" title). What BC told the user once the dialog was answered (an AL Message such as "El documento ... se ha registrado") comes back in "messages".
+
+Fields that already hold the requested value come back as reason "already set" and do NOT block the answer.
+
+A REPORT REQUEST PAGE has no Ok button: "ok" presses its "Imprimir"/Print (or "Vista previa"/Preview when Print is not offered), which runs the report; the file BC produced comes back in "files" ({ fileName, uri }) and anything the code asks afterwards (a Confirm after Report.RunModal) in dialogsOpened. To keep a copy of the PDF use bc_download_report.
+
+Check "success": it is false when BC reported an error AFTER the answer without a dialog -- a refused delete ("The date Allow Document Deletion Before must be set...") or a failed check comes back in "errors". When the answer opens pages, they are in openedPages with a "note": a posting that fails with several errors opens the "Error Messages" page ("Mensajes de error") instead of an error dialog -- read it with bc_read_data before assuming the posting went through.
 
 Do NOT call this without a preceding dialog -- there is no dialog to respond to unless dialogsOpened was returned by bc_execute_action or bc_write_data. Do NOT guess the dialogFormId -- always use the exact value from the dialogsOpened response.
 

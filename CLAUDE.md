@@ -428,7 +428,9 @@ Agent rules of thumb:
   attempt the write and confirm via `changed`.
 - **Acotar big pages (P7/N3).** `bc_open_page` accepts `summary:true` (sections identity only),
   `sections:["header"]`, `tab`, `columns`, `range`. `bc_execute_action` accepts `quiet:true` to suppress
-  the 100+ field `updatedFields` dump. Use these to avoid token-limit overflows on documents/lists.
+  the 100+ field `updatedFields` dump. `bc_write_data` never returns BC's raw events unless
+  `includeEvents:true`, and accepts `quiet:true` to trim per-field results (bc-saas F-42). Use these
+  to avoid token-limit overflows on documents/lists.
 - **`bc_open_page` failures are explicit (N1).** When BC can't materialize a usable page it returns a
   `PAGE_NOT_MATERIALIZED` error with a `reason` (Unknown / no sections / opened a dialog) instead of a silent
   empty shell.
@@ -898,7 +900,7 @@ kept; only `lmd` + `ExceptionType` means "refused".
 The case that produced it: **a bookmark only addresses the table its list is bound to.** Feeding page
 132 (Posted Sales Invoice) a bookmark from a Posted Sales Shipments row yields *"No se puede utilizar
 un RecordID de la tabla 'Sales Shipment Header' con un registro de la tabla 'Sales Invoice
-Header'."* Open the card filtered instead (`filters: [{ field: 'No.', value: '<doc no>' }]`, verified
+Header'."* Open the card filtered instead (`filters: [{ column: 'No.', value: '<doc no>' }]`, verified
 working on the same page) or drill in from the row's own list with `bc_execute_action { action:
 'View' }`.
 
@@ -948,9 +950,98 @@ Writing them separately with `bc_write_data { section: "dialog", fields }` and t
 still works; it is the same code underneath.
 
 Note `bc_respond_dialog` still only answers (`ok` / `cancel` / `yes` / `no` / `abort` / `close`) —
-it cannot press an arbitrary named button. The dialogs measured here (request pages) publish no
-action nodes in their control tree, so there is nothing to name; if a build does publish them,
-`bc_execute_action { section: "dialog", action }` is the path.
+it cannot press an arbitrary named button; `bc_execute_action { section: "dialog", action }` is the
+path for that. But when the dialog PUBLISHES the button for the answer, that button is pressed
+(`resolveButton`): a page run modally in lookup mode has "Aceptar" = `LookupOk=330` / "Cancelar" =
+`LookupCancel=340`, not Ok/Cancel. Measured live on devel1 (2026-10-03, "Posted Sales Shipment -
+Update", page 1350). Those `<posted doc> - Update` pages save only in `OnQueryClosePage` when
+`CloseAction = Action::LookupOK` (w1-28 source), so the old generic `Ok=300` closed them WITHOUT
+saving while the field write said `changed:true` (bc-saas F-47 d). Verified fixed live: the value
+persisted, then was restored. Request pages publish no buttons and keep the generic answer.
+
+### What an answer / action reports back (bc-saas F-42 … F-47, measured on devel1 2026-10-03)
+
+- **Message boxes are `DialogToShow` `t: 'lmd'`**, classified by `classifyDialog`
+  (`mutation-result.ts`) from `MappingHint` / `DialogType` / `ExceptionType`, never the caption:
+  `ErrorDialog`/3/1 = `error`, `ConfirmDialog`/5/0 = `confirm`, `SelectionMenuDialog` (an `lf`) =
+  `selection`, any other `lf` = `page`. `dialogsOpened[].message` is BC's `Message` (the question,
+  the error text); it used to be the caption ("Error", "Confirmar"), which hid why an action failed.
+  A confirm also carries `ExceptionType: 0`, so "has an ExceptionType" is NOT "is an error".
+- **An AL `Message()` is a `MessageToShow` event, not a dialog** ("Document 2001777 has been
+  archived." in the response to the confirm before it; nothing to answer). It is now returned as
+  `messages: [{ text, type }]` by `bc_execute_action`, `bc_respond_dialog`, `bc_write_data`,
+  `bc_close_page`. It was decoded and dropped before (F-44).
+- **An answered dialog must be untracked in the SESSION too** (`session.removeOpenForm`), since BC
+  sends no FormClosed for it. Only the page context was pruned, so `modalDepth` grew with every
+  answer and a later LogicalModalityViolation reconcile walked forms BC had long thrown away
+  (F-45: 27 "survived No/Cancel/Abort/CloseForm" lines, each a FormNotFoundException).
+- **A repeater re-sync can raise a dialog.** A Refresh on a page with an unsaved change asks "La
+  página contiene cambios no guardados. ¿Desea descartar estos cambios?". `repeater-sync.ts` now
+  settles the dialogs IT caused with the answer that changes nothing (`No` to a confirm — verified:
+  the page stays open with its changes; `Ok` to an error box) and returns any other one so the
+  operation reports it. Before, it was applied and dropped: `dialogsOpened: []` while BC held a modal.
+- **The close question is answered YES to discard.** After No=390 the root form still answered a
+  Refresh; after Yes=380 it was gone (FormNotFoundException). `discardChanges` used No, so it kept
+  the page open server-side while removing the context, and reported the dialog it had already
+  answered as pending (F-47 b). `ClosePageResult.pendingDialogs` now carries only what is still open.
+- **Raw events are not output.** `bc_write_data` returns them only with `includeEvents: true`;
+  `quiet: true` trims per-field results; `bc_respond_dialog.fieldResults` never carries them (F-42).
+- **`detectChangedSections` reports only VALID sections** — an empty factbox is invalidated at open
+  and `bc_read_data` refuses it, so naming it sent callers after "Section not found" (F-43). But a
+  ListPart FactBox is NOT empty — see the next section.
+
+### SaaS battery review (bc-saas F-54 … F-73, measured on devel1 2026-10-04)
+
+The battery that produced F-55 … F-68 ran on a server process started at 12:16 local on 2026-10-03,
+BEFORE the 16:55 build: `server.log` still shows the old texts ("Close triggered dialog … dismissing
+with "no"", "already set" rejected by `fillDialog`). Several of those fichas were therefore fixed by
+the F-42 … F-47 work and never tested with it. Check which process served a run (the
+`(stdio) starting...` line and the texts it logs) before concluding a fix "does not work on SaaS".
+What the review found and changed:
+
+- **A report REQUEST PAGE has no Ok button.** It publishes "Vista previa y cerrar" = Preview 400,
+  "Enviar a..." / "Descargar" = SendTo 410, "Imprimir" = Print 420, "Cancelar" = 310 (plus hidden
+  copies). `Ok=300` is accepted and IGNORED: the page stays open, nothing after `Report.RunModal`
+  runs, and the next call dies with LogicalModalityViolation on an EMPTY modal stack (F-55, F-71).
+  `resolveButton` maps "ok" to the visible Print (then Preview). BC answers with
+  `UriToShow "DynamicFileHandler.axd?...&fname=Sales%20Invoice.pdf"` (params[1] is a bare string),
+  now decoded and returned as `files`.
+- **A failed trigger reports its error as `ValidationResults`, not as a dialog.** Confirming a delete
+  BC refuses returns `PropertyChanged { controlPath: "server:", ValidationResults: [{ Description,
+  Severity: "Error" }] }` on the record's card form, then "¿Desea descartar estos cambios?".
+  `detectValidationErrors` -> `errors` + `success:false` in bc_execute_action / bc_respond_dialog (F-56).
+- **Pages opened by an ANSWER are registered** (`ActionService.adoptOpenedPages`, wired into
+  RespondDialogOperation): a posting that fails with several errors opens "Mensajes de error" as an
+  ownerless FormCreated, which used to vanish (F-56 2nd case, F-65).
+- **A dialog's hosted subforms are sections** (`dialog:<caption>`, `ownerDialogFormId`), only the
+  VISIBLE fhc (page 5855 hosts four, one visible), and their rows are loaded on open with LoadForm +
+  Refresh (`PageService.loadDialogContent`) — BC sends a modal page's tree without rows (F-57 2nd
+  case, F-64 c, F-65). Results list them in `dialogsOpened[].sections`.
+- **A ListPart FactBox is not a dead stub.** `fields()` does not count repeater columns, so every
+  ListPart FactBox was invalidated at open (`isDeadFactbox` now also checks repeaters), and errors no
+  longer list invalid sections in `availableSections` (F-59, F-66 b).
+- **A root echo is never handed to a FactBox that has a field at the same path.** controlPaths are
+  form-relative; the old routing dropped header echoes (Customer No., Name, No.) whenever a FactBox
+  shared the path, so a document read back as it was before the write (F-66 a).
+- **newLine appends on an unused DRAFT row**, like the web client. `New`=10 inserts ABOVE the current
+  row (lines came back 3, 2, 1 — F-60). BC sends no row data for line writes, so the service tracks
+  consumed drafts, commits the line by parking on another draft, re-syncs the grid and returns
+  `newLineBookmark` (real) and `newLineCreated` (false = nothing saved, `allSucceeded:false`, F-64 b).
+  A write aimed at a `DraftRecord…` bookmark selects it ONCE (F-70). The re-assert of values BC reset
+  reads the LAST echo of each cell, ignores case and never re-writes Type/No./Code (F-58).
+- `enabled` of a row-scoped action is judged AFTER positioning on the bookmark (F-67 c); a caption-only
+  write prefers the visible control (F-73); a filtered open that BC refuses explains that filters take
+  AL field names (F-68 b, F-63); `selectRows` reports partial selections and stops the later steps
+  (F-68 a); the PAGE_OPEN_REJECTED hint uses `column` (F-62).
+- Unrelated finding, not fixed: with `BC_TLS_INSECURE=1` the forms sign-in on devel1 fails ("Failed to
+  extract __RequestVerificationToken") while a plain `fetch` works — the npm `undici` Agent passed as
+  `dispatcher` to Node's global fetch. `NODE_TLS_REJECT_UNAUTHORIZED=0` from `.secrets/devel1.env` works.
+
+Tests: `tests/protocol/request-page-print.test.ts`, `root-echo-not-stolen.test.ts`,
+`tests/unit/delete-error-validation.test.ts`, `respond-dialog-opened-pages.test.ts`,
+`dialog-subforms.test.ts`, `factbox-listpart.test.ts`, `newline-append.test.ts`,
+`caption-prefers-visible.test.ts`, `open-filter-error.test.ts`, plus cases in
+`action-service-safety.test.ts`, `screenshot-steps.test.ts`, `tool-descriptions.test.ts`.
 
 ### `bc_reset_session` — the only way back to a clean session
 
@@ -1007,7 +1098,18 @@ drive a request page interactively, use `bc_run_report`.
 Reference: `ReportResultSetDownloadDecorator.SendReportStreamToClient()`, `NSClientCallback.DownloadFileAction()`, `Connection.DownloadStream` (decompiled, upstream)
 
 ### Async Message Timing
-The invoke quiescence window (150ms) is a best-effort wait for trailing async `Message` notifications. In rare cases, late-arriving messages may be missed.
+The invoke quiescence window (150ms) is a best-effort wait for trailing async `Message` notifications.
+Frames that arrive AFTER it are no longer lost: measured live on devel1 (2026-10-03), BC refreshes
+every FactBox in frames pushed 10–300 ms after the invoke's response (`PendingUpdates`, `Bookmark`
+and the new StringValues), when no invoke is collecting. `BCSession` keeps a background listener
+(installed at `initialize()` / `onUnsolicitedEvents()`) that decodes them, folds them into the modal
+tracking, and hands them to the repository (`buildOperations` wires
+`session.onUnsolicitedEvents(events => repo.applyEvents(events))`) — that is what makes a FactBox
+show the new record after a row change or an action (bc-saas F-43; verified live: Customer
+Statistics went 2000001 -> 2000004 after selecting another customer, and stayed at 2000001 before).
+A dialog or message among them is parked and prepended to the NEXT invoke's events
+(`invoke(..., { carryUnsolicited })`, default true; re-syncs pass false so they never adopt one).
+Tests: `tests/unit/bc-session-unsolicited.test.ts`.
 
 ## Claude Desktop Configuration
 

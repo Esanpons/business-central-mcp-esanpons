@@ -12,7 +12,7 @@ import { isEffectivelyVisible } from '../protocol/visibility.js';
 import { actions as treeActions, groupVisibility as treeGroupVisibility, cues as treeCues } from '../protocol/form-views.js';
 import { classifyWizardNav, pickWizardNavAction } from '../protocol/wizard-classify.js';
 import type { Logger } from '../core/logger.js';
-import { resyncRepeater } from './repeater-sync.js';
+import { resyncRepeater, reportableResyncEvents } from './repeater-sync.js';
 
 /** System actions that target a specific row via the repeater control. */
 const ROW_TARGETING_ACTIONS: Set<number> = new Set([
@@ -71,6 +71,13 @@ export class ActionService {
     this.discoverChildForms = fn;
   }
 
+  /** Loads the rows of a dialog's grids (PageService.loadDialogContent); see there for why. */
+  private loadDialogContent?: (pageContextId: string, events: readonly BCEvent[]) => Promise<void>;
+
+  setDialogContentLoader(fn: (pageContextId: string, events: readonly BCEvent[]) => Promise<void>): void {
+    this.loadDialogContent = fn;
+  }
+
   async executeAction(
     pageContextId: string,
     actionName: string,
@@ -115,14 +122,20 @@ export class ActionService {
           .filter(Boolean),
       }));
     }
-    if (actionNode.properties.enabled === false) {
+    // If the caller named a specific row, the `enabled` that matters is the one BC
+    // computes for THAT row, after the cursor is on it. Judging it here, on the row
+    // that happened to be selected, refused "Reprocesar" / "Eximir manualmente" for a
+    // bookmark whose row had them enabled, because the PREVIOUS row did not
+    // (bc-saas F-67 c). So the check moves after the positioning for that case.
+    const targetsRow = !!row && (row.bookmark !== undefined || row.rowIndex !== undefined) && !!resolved.repeater;
+    if (!targetsRow && actionNode.properties.enabled === false) {
       return err(new ProtocolError(`Action is disabled: ${actionName}`));
     }
 
     // If the caller named a specific row for this (row-scoped) action, position
     // the cursor there first, then re-find the action on the refreshed tree so
     // it operates on THAT row instead of whatever row BC currently has selected.
-    if (row && (row.bookmark !== undefined || row.rowIndex !== undefined) && resolved.repeater) {
+    if (targetsRow && row && resolved.repeater) {
       const bm = this.resolveBookmark(resolved.rows, row.bookmark, row.rowIndex);
       if (isErr(bm)) return bm;
       const pos = await this.positionRow(pageContextId, form.formId, resolved.repeater.controlPath, bm.value);
@@ -149,6 +162,11 @@ export class ActionService {
               .map(a => a.properties.caption ?? '')
               .filter(Boolean),
           },
+        ));
+      }
+      if (refreshed.properties.enabled === false) {
+        return err(new ProtocolError(
+          `Action is disabled: ${actionName} (for the row you targeted — BC greys it out for that record). Nothing was invoked.`,
         ));
       }
       return this.invokeAction(pageContextId, re.form, refreshed.controlPath, refreshed.systemAction);
@@ -324,7 +342,7 @@ export class ActionService {
       controlPath = action.controlPath;
     }
 
-    const result = await this.invokeAction(pageContextId, form, controlPath, systemAction);
+    let result = await this.invokeAction(pageContextId, form, controlPath, systemAction);
 
     // B4: after deleting a repeater row, re-sync the repeater from the server instead
     // of trusting an incremental removal event. BC does NOT reliably announce the
@@ -341,8 +359,22 @@ export class ActionService {
     // dialog is pending the row state is answered by RespondDialogOperation, which
     // re-syncs after the answer.
     if (isOk(result) && repeater && systemAction === SystemAction.Delete && !result.value.dialog) {
-      const refreshed = await resyncRepeater(this.session, this.repo, pageContextId, form.formId, repeater.controlPath, this.logger);
-      if (refreshed) {
+      const resync = await resyncRepeater(this.session, this.repo, pageContextId, form.formId, repeater.controlPath, this.logger);
+      const reported = reportableResyncEvents(resync);
+      if (reported.length > 0) {
+        // Whatever the re-sync said (a message, a dialog it could not settle) is
+        // part of this action's answer: hiding it is how a modal got lost (F-45).
+        // Its data events are already in the projection, and the dialogs it settled
+        // itself are closed — reporting those would ask the caller to answer them.
+        const events = [...result.value.events, ...reported];
+        const first = resync.openDialogs[0];
+        result = ok({
+          ...result.value,
+          events,
+          ...(first ? { dialog: { formId: first.formId, controlTree: first.controlTree } } : {}),
+        });
+      }
+      if (resync.refreshed && isOk(result)) {
         const ctx3 = this.repo.get(pageContextId);
         if (ctx3) {
           // BC can complete a Delete and change nothing — a row it will not delete
@@ -399,6 +431,48 @@ export class ActionService {
     return ok(undefined);
   }
 
+  /**
+   * Register every ownerless new form in `events` (a New card, a drill-down target, a
+   * cue page, the Error Messages page a failed posting opens) as its own page context
+   * and give it its subpages/FactBoxes. Returns the new pageContextIds.
+   *
+   * BC delivers these as top-level FormCreated with no parentFormId; the repo's
+   * applyEvent treats ownerless FormCreated as "update existing form", so without
+   * this the new page never gets a pageContextId — it is unreachable and uncloseable
+   * via MCP, and the source context's form map gets polluted.
+   *
+   * Public because answering a dialog opens pages too: posting confirmed through a
+   * StrMenu ("Enviar") that fails with several errors opens page "Mensajes de error"
+   * (Error Messages) instead of an error dialog. bc_respond_dialog did not register
+   * it, so the answer came back `success: true` with no dialog and no page, and a
+   * posting that had FAILED looked like one that worked (bc-saas F-56 2nd case, F-65).
+   */
+  async adoptOpenedPages(events: readonly BCEvent[], sourceFormId: string | undefined, spawnPrefix = 'action'): Promise<string[]> {
+    const spawned: string[] = [];
+    for (const event of events) {
+      if (event.type !== 'FormCreated') continue;
+      if (event.parentFormId) continue;
+      if (event.formId === sourceFormId) continue;
+      if (this.repo.getByFormId(event.formId)) continue;
+      const newPcId = `session:page:${spawnPrefix}:${uuid().substring(0, 8)}`;
+      this.repo.create(newPcId, event.formId);
+      this.repo.applyToPage(newPcId, [...events]);
+      spawned.push(newPcId);
+    }
+
+    // Give a spawned page its subpages and FactBoxes, exactly as bc_open_page does.
+    // Without this the context is a header and nothing else: a document opened with
+    // `Nuevo` had no `lines` section, so its first line was unwritable.
+    if (this.discoverChildForms) {
+      for (const pcId of spawned) {
+        await this.discoverChildForms(pcId, [...events]).catch((e: unknown) => {
+          this.logger.warn(`Child-form discovery failed for ${pcId}: ${e instanceof Error ? e.message : String(e)}`);
+        });
+      }
+    }
+    return spawned;
+  }
+
   private async invokeAction(
     pageContextId: string,
     form: FormState,
@@ -423,37 +497,15 @@ export class ActionService {
     const events = result.value;
     this.repo.applyToPage(pageContextId, events);
 
-    // Register any ownerless new form (New card, drill-down target, cue page) as
-    // its own page context so callers get a usable pageContextId in openedPages.
-    // BC delivers these as top-level FormCreated with no parentFormId; the repo's
-    // applyEvent treats ownerless FormCreated as "update existing form", so
-    // without this the new page never gets a pageContextId -- it is unreachable
-    // and uncloseable via MCP, and the source context's form map gets polluted.
-    const spawned: string[] = [];
-    for (const event of events) {
-      if (event.type !== 'FormCreated') continue;
-      if (event.parentFormId) continue;
-      if (event.formId === form.formId) continue;
-      if (this.repo.getByFormId(event.formId)) continue;
-      const newPcId = `session:page:${spawnPrefix}:${uuid().substring(0, 8)}`;
-      this.repo.create(newPcId, event.formId);
-      this.repo.applyToPage(newPcId, events);
-      spawned.push(newPcId);
-    }
-
-    // Give a spawned page its subpages and FactBoxes, exactly as bc_open_page does.
-    // Without this the context is a header and nothing else: a document opened with
-    // `Nuevo` had no `lines` section, so its first line was unwritable.
-    if (this.discoverChildForms) {
-      for (const pcId of spawned) {
-        await this.discoverChildForms(pcId, events).catch((e: unknown) => {
-          this.logger.warn(`Child-form discovery failed for ${pcId}: ${e instanceof Error ? e.message : String(e)}`);
-        });
-      }
-    }
+    await this.adoptOpenedPages(events, form.formId, spawnPrefix);
 
     // Check for dialog
     const dialogEvent = events.find(e => e.type === 'DialogOpened');
+    if (dialogEvent && this.loadDialogContent) {
+      await this.loadDialogContent(pageContextId, events).catch((e: unknown) => {
+        this.logger.warn(`Loading the dialog's rows failed: ${e instanceof Error ? e.message : String(e)}`);
+      });
+    }
     const dialog = dialogEvent?.type === 'DialogOpened'
       ? { formId: dialogEvent.formId, controlTree: dialogEvent.controlTree }
       : undefined;

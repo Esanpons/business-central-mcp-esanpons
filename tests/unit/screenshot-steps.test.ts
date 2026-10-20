@@ -127,3 +127,30 @@ describe('ScreenshotOperation: steps go through, outcomes come back', () => {
     expect(r.value.warning).toMatch(/STEP DID NOTHING/);
   });
 });
+
+// bc-saas F-68 a: selectRows marked 2 of 3 rows, the warning said the step "did
+// nothing", and the next step ("Agrupar") grouped the two that WERE selected.
+import { selectRowsReason, stepWarnings } from '../../src/services/screenshot-service.js';
+
+describe('selectRows that selects only part of the rows (F-68 a)', () => {
+  it('says what it selected and what it missed', () => {
+    expect(selectRowsReason(['108016', '102418'], ['105013']))
+      .toBe('selected 2 of 3 (108016, 102418); no row matched: 105013');
+    expect(selectRowsReason([], ['x'])).toBe('no row matched: x');
+    expect(selectRowsReason(['a', 'b'], [])).toBeUndefined();
+  });
+
+  it('warns PARTIAL SELECTION and STEPS NOT RUN, never "did nothing" for a partial one', () => {
+    const w = stepWarnings([
+      { step: 'selectRows [105013, 108016, 102418]', ok: false, reason: 'selected 2 of 3 (108016, 102418); no row matched: 105013', selected: ['108016', '102418'] },
+      { step: 'click "Agrupar"', ok: false, skipped: true, reason: 'skipped: the selectRows before it did not select every requested row' },
+    ]);
+    expect(w.join(' ')).toMatch(/PARTIAL SELECTION/);
+    expect(w.join(' ')).toMatch(/STEPS NOT RUN: click "Agrupar"/);
+    expect(w.join(' ')).not.toMatch(/STEP DID NOTHING/);
+  });
+
+  it('a plain failed click is still "STEP DID NOTHING"', () => {
+    expect(stepWarnings([{ step: 'click "x"', ok: false, reason: 'not found' }]).join(' ')).toMatch(/STEP DID NOTHING: click "x" \(not found\)/);
+  });
+});

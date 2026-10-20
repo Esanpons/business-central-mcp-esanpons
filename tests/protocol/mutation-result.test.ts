@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectChangedSections, detectDialogs } from '../../src/protocol/mutation-result.js';
+import { detectChangedSections, detectDialogs, detectMessages, classifyDialog } from '../../src/protocol/mutation-result.js';
 import type { PageContext } from '../../src/protocol/page-context.js';
 import type { BCEvent } from '../../src/protocol/types.js';
 
@@ -170,5 +170,72 @@ describe('detectDialogs', () => {
     ];
     const dialogs = detectDialogs(events);
     expect(dialogs.map(d => d.message)).toEqual(['Real message', 'Fallback', undefined]);
+  });
+});
+
+// Wire shapes captured live on devel1 (BC27, 2026-10-03).
+describe('message boxes and messages BC raises after an action (bc-saas F-44)', () => {
+  const errorBox: BCEvent = {
+    type: 'DialogOpened', formId: '4A',
+    controlTree: {
+      t: 'lmd', Caption: 'Error', MappingHint: 'ErrorDialog', DialogType: 3, ExceptionType: 1, IsModal: true,
+      Message: "No hay Customer dentro del filtro.\r\n\r\nFilltros: No.: ''",
+      Children: [{ t: 'gc', Children: [{ t: 'ssc', Caption: "No hay Customer dentro del filtro." }] }],
+    },
+  };
+  const confirmBox: BCEvent = {
+    type: 'DialogOpened', formId: '31',
+    controlTree: { t: 'lmd', Caption: 'Confirmar', MappingHint: 'ConfirmDialog', DialogType: 5, ExceptionType: 0, Message: 'Archive Order no.: 2001777?' },
+  };
+  const selection: BCEvent = {
+    type: 'DialogOpened', formId: '4B',
+    controlTree: { t: 'lf', Caption: 'Elegir', MappingHint: 'SelectionMenuDialog', IsModal: true },
+  };
+
+  it('reports an AL Error() with its TEXT, not the caption "Error"', () => {
+    const [d] = detectDialogs([errorBox]);
+    expect(d).toMatchObject({ formId: '4A', kind: 'error', caption: 'Error' });
+    expect(d!.message).toContain('No hay Customer dentro del filtro.');
+    // The static text is the message itself, not a field to fill.
+    expect(d!.fields).toBeUndefined();
+  });
+
+  it('reports a Confirm() with its question', () => {
+    expect(detectDialogs([confirmBox])).toEqual([{ formId: '31', kind: 'confirm', caption: 'Confirmar', message: 'Archive Order no.: 2001777?' }]);
+  });
+
+  it('classifies a selection menu and a modal page', () => {
+    expect(detectDialogs([selection])[0]).toMatchObject({ kind: 'selection', message: 'Elegir' });
+    expect(classifyDialog({ t: 'lf', Caption: 'Edit Dimension Set Entries', PageType: 1, IsModal: true })).toBe('page');
+  });
+
+  it('reports each dialog once even if the batch carries it twice', () => {
+    expect(detectDialogs([confirmBox, confirmBox])).toHaveLength(1);
+  });
+
+  it('returns AL Message() text from MessageToShow events', () => {
+    const events: BCEvent[] = [
+      { type: 'InvokeCompleted', sequenceNumber: 1, completedInteractions: [] },
+      { type: 'MessageToShow', formId: '', text: 'Document 2001777 has been archived.', messageType: 'None', actions: ['Ok'], defaultAction: 'Ok' },
+      { type: 'MessageToShow', formId: '', text: 'Document 2001777 has been archived.', messageType: 'None', actions: ['Ok'], defaultAction: 'Ok' },
+      { type: 'MessageToShow', formId: '', text: '   ', messageType: 'None', actions: ['Ok'], defaultAction: 'Ok' },
+    ];
+    expect(detectMessages(events)).toEqual([{ text: 'Document 2001777 has been archived.', type: 'None' }]);
+  });
+});
+
+describe('detectChangedSections never names a section bc_read_data refuses (bc-saas F-43)', () => {
+  it('skips invalid sections, also in the root cascade', () => {
+    const ctx = makeCtx({
+      sections: new Map([
+        ['header', { sectionId: 'header', kind: 'header' as const, caption: 'Header', formId: 'root', valid: true }],
+        ['factbox:Datos pendientes', { sectionId: 'factbox:Datos pendientes', kind: 'factbox' as const, caption: 'Datos pendientes', formId: 'fb', valid: false }],
+      ]),
+    });
+    const events: BCEvent[] = [
+      { type: 'PropertyChanged', formId: 'root', controlPath: 'c[0]', changes: {} },
+      { type: 'PropertyChanged', formId: 'fb', controlPath: 'c[0]', changes: {} },
+    ];
+    expect(detectChangedSections(ctx, events)).toEqual(['header']);
   });
 });

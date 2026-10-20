@@ -84,6 +84,8 @@ export const WriteDataSchema = z.object({
   rowIndex: z.number().optional().describe('0-based row position in the repeater to write to. Use for line items. Prefer bookmark for stability.'),
   bookmark: z.string().optional().describe('Stable row identifier from bc_read_data results. Preferred over rowIndex when rows may be reordered.'),
   newLine: z.boolean().optional().describe('Create a NEW line in the section and write these fields into it. This is how you add the FIRST line to a freshly created document, whose lines are empty by definition: without it there is no row to target and the write falls through to the header, where line columns like Quantity do not exist. Requires section (e.g. "lines"); cannot be combined with rowIndex or bookmark. For an existing line use rowIndex/bookmark instead.'),
+  quiet: z.boolean().optional().describe('Trim each result to the verdict only: fieldName, controlPath, changed, newValue, reason, validationMessage (plus error/hint on a field that failed). Same intent as bc_execute_action quiet. Raw events are never returned unless includeEvents is set, so this only shortens the per-field entries.'),
+  includeEvents: z.boolean().optional().describe('Also return BC\'s raw protocol events as a top-level "events" array. Default false: they run to tens of KB per write (every PropertyChanged of the form, the whole lines DataLoaded) and say nothing the per-field results do not. Only for protocol debugging.'),
 });
 
 // action/cue are each individually optional; the .refine() enforces "exactly one".
@@ -106,7 +108,7 @@ export const ExecuteActionSchema = z.object({
 
 export const ClosePageSchema = z.object({
   pageContextId: z.string().min(1).describe('Page context ID returned by bc_open_page. Becomes invalid after closing.'),
-  discardChanges: z.boolean().optional().describe('If the page has unsaved changes, BC shows a "save changes?" dialog on close. Set true to auto-discard (answer No) and complete the close. Omit to have the dialog surfaced (requiresDialogResponse:true) so you can answer it with bc_respond_dialog.'),
+  discardChanges: z.boolean().optional().describe('If the page has unsaved changes, BC asks on close "The page contains unsaved changes. Do you want to discard these changes?". Set true to discard them (the question is answered Yes) and complete the close. Omit to have the dialog surfaced (requiresDialogResponse:true) so you can answer it with bc_respond_dialog: "yes" discards and closes, "no" keeps the page open with its changes.'),
 });
 
 export const SearchPagesSchema = z.object({
